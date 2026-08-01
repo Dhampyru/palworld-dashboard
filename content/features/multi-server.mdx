@@ -1,0 +1,102 @@
+---
+title: Multiple Servers
+---
+
+# Multiple Servers
+
+The dashboard can manage **more than one Palworld server** on a single host. After you
+log in you land on the **fleet** — a list of every server it manages. Click one to open
+its full dashboard (Overview, Mods, Saves, World, Engine, PalDefender, Maintenance,
+Guilds, Live Map), all scoped to that server. The **Instances** button in the header
+takes you back to the fleet to switch servers.
+
+The server the dashboard was originally configured for is marked **Primary** — see
+[The Primary server](#the-primary-server) below.
+
+## Creating a server
+
+From the fleet, choose **New server** and fill in:
+
+| Field | Notes |
+| --- | --- |
+| **Server name** | Becomes the in-game name; also slugified into an id used for its folder/container. |
+| **Max players** | 1–128. |
+| **Server password** | The *join* password players type. **Leave blank for a public server.** Letters and numbers only. |
+
+The dashboard then:
+
+1. **Allocates free ports** automatically (game, query, RCON, REST, PalDefender) so
+   servers never collide.
+2. Creates the server's files and a generated **admin/RCON password** (kept on the host,
+   never shown — the dashboard uses it internally).
+3. Brings the container up. **First boot downloads and installs the game** and can take
+   several minutes; the wizard shows progress and reports ready once the server answers.
+
+> Provisioning is a real, resource-heavy action — it installs a full copy of the game
+> (~8–10 GB) and runs another server alongside your existing one. Make sure the host has
+> the headroom (see [Requirements](/getting-started/requirements)).
+
+## After creating — configure it
+
+The wizard only sets name, max players, and join password. Everything else is tuned in
+that server's own tabs after it's up:
+
+- **World** — difficulty, rates, PvP, crossplay, and other gameplay settings. Also where
+  you change the server name / passwords later.
+- **Mods** — add pak / UE4SS / PalSchema mods (or install from Steam Workshop / Nexus). A
+  new server starts with only the base mod-loader setup.
+- **Maintenance** — turn on **auto-backup** and **auto-restart** if you want them (they
+  are **off by default** for new servers).
+
+## Let players connect — open the ports
+
+The dashboard allocates and publishes each server's ports on the host, but **you must
+open the new server's game + Steam-query UDP ports in your cloud/provider firewall** for
+players to reach it (see [Firewall — two layers](/getting-started/requirements#firewall--two-layers)).
+Each server uses a *different* game port; the connect address (shown in the server's
+**Invite** view) is `your-public-IP:<that server's game port>`.
+
+## The Primary server
+
+The server the dashboard was first set up for is special:
+
+- It is labelled **Primary** in the fleet.
+- Its lifecycle (Start/Stop/Restart/Save) is driven from **its dashboard header**, where
+  those actions include confirmations and a broadcast countdown — the safe path for a
+  live server with players. (You can also use the fleet's inline controls; every action
+  is confirmed.)
+- It **cannot be deleted** from the dashboard (it's your main server, managed outside the
+  provisioning system).
+- Crash auto-restart is **armed by default** for it; new servers default it off.
+
+## Deleting a server
+
+Deleting a non-Primary server from the fleet is **delete-keeps-saves**: it stops and
+removes the container and takes it off the dashboard, but **leaves its save files on
+disk**. Nothing in the world is deleted. Fully purging a server's saves is a manual step
+on the host, by design.
+
+## Limits and things to know
+
+- **Single host.** All servers run on the one machine the dashboard is installed on.
+- **Same game version for all.** New servers reuse the same game image as the Primary
+  server; you can't pick a different Palworld build per server in the wizard.
+- **Cloud firewall is manual.** The dashboard can't open your provider's firewall — you
+  do that per new server's public ports.
+- **Resources are real.** Each running server is a full install plus its own RAM/CPU.
+  Running several at once multiplies the cost; many operators keep several configured but
+  run one or a few at a time.
+- **Admin password isn't shown.** It's generated and stored on the host; the dashboard
+  manages RCON/REST with it. It lives in the server's host-side `.env` if you ever need
+  it for an external tool.
+- **First boot is slow.** The initial install takes minutes; later starts are quick.
+
+## Tips for a smooth first server
+
+- Start with a **public** server (blank password) to confirm you can connect, then set a
+  password later from the **World** tab if you want it private.
+- After it's up, open the **Invite** view to copy the exact connect address (with the
+  right port) and any required client mods to share with friends.
+- Confirm you can reach it yourself first; if you can connect on-host but friends can't,
+  it's the **cloud firewall**.
+- Turn on **auto-backup** (Maintenance) before you build anything you'd hate to lose.

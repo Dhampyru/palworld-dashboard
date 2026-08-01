@@ -1,0 +1,107 @@
+---
+title: Host Integration
+---
+
+# Host Integration (Server Control)
+
+Palworld's REST API can't restart the game process, and by design the dashboard
+container has **no Docker socket and no sudo**. So every privileged action —
+start / stop / restart, and (for multiple servers) provisioning and deletion —
+uses a **flag-file pattern**: the dashboard writes a small request file it owns
+under `/run/palworld`, and a **root-owned host process** reacts to it.
+
+```text
+Dashboard (uid 2001)  ──writes──▶  /run/palworld/…request  ──consumed by──▶  host unit/daemon  ──▶  docker compose …
+```
+
+This keeps the security boundary intact: the web tier can only drop a file in a
+directory it owns; it never gains privilege.
+
+> Without host integration installed, the Start/Stop/Restart buttons and the
+> "New server" wizard are **inert** — the dashboard writes a request file that
+> nothing consumes. Everything else (monitoring, saves, mods, settings) still
+> works.
+
+## The request directory
+
+Create `/run/palworld` owned by the dashboard's container user (uid/gid `2001`)
+so the panel can write request files. With systemd, a tmpfiles rule recreates it
+on boot:
+
+```text
+# /etc/tmpfiles.d/palworld.conf
+d /run/palworld 0755 2001 2001 -
+```
+
+## Single server: lifecycle units
+
+For the one server the dashboard is configured for, each lifecycle action is a
+request file consumed by a small root-owned systemd `.path` → oneshot `.service`
+→ handler script:
+
+| Action | Request file | Handler does |
+| --- | --- | --- |
+| Start | `/run/palworld/start.request` | `docker compose up -d` |
+| Stop | `/run/palworld/shutdown.request` (+ `.cancel`) | broadcast countdown, then `docker compose stop` |
+| Restart | `/run/palworld/restart.request` (+ `.cancel`) | broadcast countdown, then `docker compose up -d --force-recreate` |
+
+The request JSON is `{ waittime, message, dryRun }`; stop/restart honor a
+`.cancel` sibling and broadcast an in-game countdown over RCON. The dashboard
+paths are overridable via `PALWORLD_START_REQUEST_PATH`,
+`PALWORLD_SHUTDOWN_REQUEST_PATH`, and `PALWORLD_RESTART_REQUEST_PATH`.
+
+> **`--force-recreate` matters for restart.** Plain `docker compose restart`
+> reuses the container's baked-in environment (stale `.env`), and plain
+> `up -d` is a no-op when nothing changed. `up -d --force-recreate` always
+> recreates against the current `.env`. Verify a real restart by the container's
+> `StartedAt` changing, not by exit status.
+
+Guidance:
+
+- Keep these actions admin-only (the dashboard already enforces this).
+- Never give the dashboard process passwordless sudo.
+- Validate request files in the host worker; log them for accountability.
+
+## Multiple servers: the control daemon
+
+Running [more than one server](/features/multi-server) replaces the per-action
+units with a single long-running, registry-driven worker. Two versioned scripts
+ship in the repo under `scripts/host/`:
+
+| Script | Role |
+| --- | --- |
+| `palworld-control` | Watches `/run/palworld/<id>/{start,stop,restart}.request` for every registered instance, plus `provision`/`delete` requests. Provisions a new server (allocates free ports, writes its dir + `.env` + compose, brings it up, waits for an authenticated REST 200), and runs lifecycle for non-default instances. Delete keeps the save files. |
+| `palworld-metrics-publisher` | Publishes each instance's cheap runtime metrics (memory, CPU, status) to `/run/palworld/<id>/metrics.json` for the dashboard's monitoring + memory auto-restart. |
+
+Both run as `Type=simple`, `Restart=always` systemd services (example units are
+alongside the scripts). Install them like:
+
+```bash
+sudo install -m0755 scripts/host/palworld-control /usr/local/bin/palworld-control
+sudo install -m0644 scripts/host/palworld-control.service.example \
+     /etc/systemd/system/palworld-control.service
+sudo systemctl daemon-reload && sudo systemctl enable --now palworld-control
+```
+
+### The instance registry & shared directory
+
+Multiple instances share one parent directory bind-mounted into the dashboard at
+the **same absolute path** host- and container-side (default `/srv/palworld`):
+
+- `/srv/palworld/registry.json` — the list of servers (id, container, compose
+  dir, ports, paths). Read by both the dashboard and the daemon; the daemon owns
+  writes. **No secrets** live here.
+- `/srv/palworld/<id>/` — each provisioned server's `game/`, `mods/`, `.env`
+  (`0660`, holds that server's generated admin password), and `docker-compose.yml`.
+
+The original ("Primary") server keeps its existing mounts and its own lifecycle
+units; the daemon manages every *other* instance. See
+[Multiple servers](/features/multi-server) for the operator-facing view and
+`docs/specs/multi-instance-spec.md` in the repo for the full design.
+
+## Kubernetes / other orchestrators
+
+The same split works elsewhere: swap the flag-file watcher for a controller that
+reacts to the request (or a small API), and the metrics publisher for your
+metrics source. The dashboard's decision logic is unchanged — it only ever writes
+a request and reads metrics.

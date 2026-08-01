@@ -1,0 +1,35 @@
+---
+title: Server Operations
+---
+
+# Server Operations
+
+Admin users can run common server tasks from the dashboard.
+
+## Announcements
+
+Send messages to connected players. The default prefix is:
+
+```env
+NEXT_PUBLIC_CHAT_SENDER_PREFIX="[Admin] "
+```
+
+Change it before building if you want a different public prefix.
+
+## Save world
+
+Triggers the Palworld REST save endpoint so the server writes world state.
+
+## Shutdown and force stop
+
+The dashboard exposes Palworld REST operations for shutting down or stopping the server where supported by the upstream API.
+
+Use these carefully. They affect every connected player.
+
+## Scheduled restart warning
+
+The dashboard can send restart warnings and coordinate a restart request. Palworld itself does not restart the process through REST; see [Server Restart](/docs/operations/server-restart) for the host-side integration.
+
+## Admin-only controls
+
+Server operations are admin-only. The moderator tier cannot call shutdown, stop, settings, restart, or arbitrary endpoints.

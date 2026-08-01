@@ -1,0 +1,22 @@
+Save-decoding helper (savtools/psp-decode.rs) and the `psp-decode` binary built
+from it are built against third-party code, redistributed here under its terms:
+
+  palworld-save-pal (psp-core)
+    Copyright (c) oMaN-Rod
+    License: MIT — the project README states: "MIT License (do whatever you
+    want with it)." (GitHub's API reports no license only because there is no
+    standalone LICENSE file; the README grant is authoritative.)
+    Source: https://github.com/oMaN-Rod/palworld-save-pal
+    Built here from the fork https://github.com/Dhampyru/palworld-save-pal
+    pinned at commit 0d99b04acba369ec88550d122794b9917bbf820e.
+
+  Transitive save-format dependencies pulled in by psp-core's build:
+    ooz-rs   — https://github.com/palworld-save-pal/ooz-rs   (pure-Rust Kraken/
+               Oodle decompressor; no proprietary oo2core needed)
+    uesave-rs — https://github.com/oMaN-Rod/uesave-rs (branch pluggable-game-support)
+
+Only psp-core's `convert::sav_to_json_string` / `json_to_sav_bytes` are used, to
+decode/encode the operator's OWN save files. No Palworld game assets are
+redistributed. If bundling this in a public release, keep this NOTICE and the
+attribution above; ideally pin the fork to a commit that carries a proper MIT
+LICENSE file.

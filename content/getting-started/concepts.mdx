@@ -1,0 +1,44 @@
+---
+title: Concepts
+---
+
+# Concepts
+
+## Architecture
+
+The browser does **not** connect directly to the Palworld REST API.
+
+Instead, the dashboard uses this flow:
+
+```text
+Browser → Next.js dashboard API → Palworld REST API
+```
+
+The dashboard API is responsible for validating the panel password, selecting the correct access tier, and forwarding allowed requests to the configured Palworld server.
+
+## Two password layers
+
+The project separates panel login credentials from the real Palworld REST admin password.
+
+| Credential | Used by | Purpose |
+| --- | --- | --- |
+| Panel admin password | Browser login | Grants full dashboard access |
+| Panel mod password | Browser login | Grants limited moderation access |
+| Palworld admin password | Server-side proxy only | Authenticates upstream REST calls |
+
+The browser submits a panel password. If it is valid, the server-side proxy injects the real Palworld admin password into upstream REST requests. The real game admin password is never sent to the browser.
+
+## Pinned upstream server
+
+The Palworld REST target is configured with `PALWORLD_REST_URL` on the server. The browser cannot choose arbitrary upstream hosts. This prevents the dashboard from becoming a generic internal-network proxy when exposed behind a reverse proxy.
+
+## Access tiers
+
+- **Admin**: full dashboard, server operations, settings, metrics, map, chat, and moderation.
+- **Mod**: limited roster/moderation widget. Server-side allowlists enforce what mod users can call.
+
+UI hiding is not the security boundary. The proxy re-checks the password tier on every protected request.
+
+## Runtime state
+
+The panel writes its own password hashes to `PANEL_AUTH_FILE`. This file should be on persistent storage in production so password changes survive container recreation or host restarts.

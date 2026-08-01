@@ -1,0 +1,62 @@
+# Instance compose TEMPLATE (roadmap #7 Phase 5). The palworld-control daemon
+# copies this into /srv/palworld/<id>/docker-compose.yml, substituting the
+# __PLACEHOLDERS__ below. Modeled on the live game compose but:
+#   - `build:` is dropped — provisioned instances REUSE the already-built image
+#     (__IMAGE__), so a new server never triggers a rebuild.
+#   - each instance keeps the DEFAULT internal ports (8211/8212/25575/27015/
+#     17993); only the published HOST ports are unique (__*_PORT__), so N
+#     containers never collide. The daemon's RCON broadcast uses the internal
+#     25575, and the dashboard reaches the instance via host.docker.internal:<the
+#     published port> recorded in the registry.
+#   - the environment block still reads the instance's own .env (docker compose
+#     auto-loads /srv/palworld/<id>/.env), so identity/gameplay stay per-instance.
+# Override the template path via PALWORLD_INSTANCE_TEMPLATE.
+services:
+  palworld:
+    image: __IMAGE__
+    container_name: __CONTAINER__
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=unconfined
+    cap_add:
+      - SYS_PTRACE
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "__GAME_PORT__:8211/udp"
+      - "__QUERY_PORT__:27015/udp"
+      - "__RCON_PORT__:25575/tcp"
+      - "__REST_PORT__:8212/tcp"
+      - "__PALDEFENDER_PORT__:17993/tcp"
+    volumes:
+      - ./game:/palworld
+      - ./mods:/mods
+      - /etc/machine-id:/etc/machine-id:ro
+      - ./compatdata-seed:/home/steam/.steam/steam/steamapps/compatdata
+    environment:
+      WINEDLLOVERRIDES: "dwmapi=n,b;d3d9=n,b"
+      SERVER_NAME: "${SERVER_NAME:-My Palworld Server}"
+      SERVER_DESCRIPTION: "${SERVER_DESCRIPTION:-}"
+      SERVER_PASSWORD: "${SERVER_PASSWORD:-}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+      MAX_PLAYERS: "${MAX_PLAYERS:-32}"
+      # Internal ports stay at defaults (unique host ports are in `ports:` above).
+      PORT: "8211"
+      QUERY_PORT: "27015"
+      RCON_ENABLED: "true"
+      RCON_PORT: "25575"
+      REST_API_ENABLED: "true"
+      REST_API_PORT: "8212"
+      COMMUNITY: "${COMMUNITY:-false}"
+      MULTITHREADING: "${MULTITHREADING:-true}"
+      CROSSPLAY_PLATFORMS: "${CROSSPLAY_PLATFORMS:-Steam,Xbox,PS5,Mac}"
+      ENABLE_PVP: "${ENABLE_PVP:-false}"
+      ENABLE_UE4SS: "${ENABLE_UE4SS:-true}"
+      BACKUP_ENABLED: "${BACKUP_ENABLED:-false}"
+      ALWAYS_UPDATE_ON_START: "${ALWAYS_UPDATE_ON_START:-false}"
+      TZ: "${TZ:-UTC}"

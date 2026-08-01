@@ -1,0 +1,62 @@
+---
+title: Environment Variables
+---
+
+# Environment Variables
+
+## Required variables
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `PANEL_INITIAL_ADMIN_PASSWORD` | Yes | Initial panel admin password used to seed `PANEL_AUTH_FILE` on first run. |
+| `PALWORLD_ADMIN_PASSWORD` | Yes | Real Palworld REST admin password. Used only server-side. |
+| `PALWORLD_REST_URL` | Yes | Server-side URL of the Palworld REST API, for example `http://127.0.0.1:8212`. |
+| `PANEL_AUTH_FILE` | Recommended | File path where panel password hashes are stored. |
+
+## Optional variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PANEL_INITIAL_MOD_PASSWORD` | empty | Optional initial moderator password. |
+| `PALWORLD_REAL_ADMIN_PASSWORD` | empty | Alias for `PALWORLD_ADMIN_PASSWORD`. |
+| `PALWORLD_SERVER_DASHBOARD_PORT` | `3000` | Host port used by Docker Compose. |
+| `RATE_LIMIT_TRUST_PROXY` | `false` | Trust `x-real-ip` / `x-forwarded-for` from a controlled reverse proxy. |
+| `PALWORLD_CHAT_LOG_FILE` | empty | Log file (or glob) the chat endpoint reads for player chat. Takes precedence over the Docker/journald sources. No systemd or Docker socket needed — for Kubernetes/containerd, Podman, etc. Globs resolve to the newest match; a Kubernetes/CRI line prefix is auto-stripped. |
+| `PALWORLD_DOCKER_CONTAINER` | empty | If set (and `PALWORLD_CHAT_LOG_FILE` is not), the chat endpoint reads `docker logs <container>` instead of journald. Requires the Docker socket. |
+| `PALWORLD_SYSTEMD_UNIT` | `palworld` | systemd unit read by the chat endpoint when no file/Docker source is set. |
+| `NEXT_PUBLIC_CHAT_SENDER_PREFIX` | `[Admin] ` | Prefix for announcements sent from the dashboard chat console. |
+| `NEXT_PUBLIC_SNAPSHOT_POLL_SECONDS` | `15` | Dashboard snapshot polling interval. Clamped from 5 to 120 seconds. |
+| `DEMO_MODE` | `0` | Set to `1` to enable built-in demo data. |
+| `NEXT_PUBLIC_MOD_WIDGET_HIDDEN_USERIDS` | empty | Comma-separated exact user IDs hidden from the mod widget only. |
+| `PALWORLD_RESTART_REQUEST_PATH` | `/run/palworld/restart.request` | File path used by the optional host restart integration. |
+| `PALWORLD_FPS_HISTORY_FILE` | `/run/palworld-metrics/fps-history.json` | FPS ring file read by the panel. |
+| `FPS_SAMPLE_SECONDS` | `5` | FPS sampler cadence. |
+| `FPS_WINDOW_MINUTES` | `60` | FPS history window. |
+
+## Example `.env`
+
+```env
+PANEL_INITIAL_ADMIN_PASSWORD=use-a-strong-panel-password
+PANEL_INITIAL_MOD_PASSWORD=optional-mod-password
+PANEL_AUTH_FILE=./data/panel-auth.json
+
+PALWORLD_REST_URL=http://127.0.0.1:8212
+PALWORLD_ADMIN_PASSWORD=your-real-palworld-admin-password
+
+RATE_LIMIT_TRUST_PROXY=false
+PALWORLD_SERVER_DASHBOARD_PORT=3000
+```
+
+## Docker example
+
+When using Docker Compose and the game server runs on the Docker host:
+
+```env
+PALWORLD_REST_URL=http://host.docker.internal:8212
+```
+
+When the game server runs on another LAN machine:
+
+```env
+PALWORLD_REST_URL=http://192.168.1.50:8212
+```

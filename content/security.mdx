@@ -1,0 +1,68 @@
+---
+title: Security
+---
+
+# Security
+
+Palworld Server Dashboard controls privileged server actions. Deploy it like an internal admin tool.
+
+## Security boundaries
+
+The dashboard includes several important protections:
+
+- Browser cannot choose the upstream REST host.
+- Real Palworld admin password is injected server-side only.
+- Panel passwords are hashed with scrypt in `PANEL_AUTH_FILE`.
+- Moderator tier is enforced server-side with an endpoint allowlist.
+- Invalid password attempts are rate limited.
+- Passwords are sent in headers, not query strings.
+
+## Your responsibilities
+
+You are responsible for:
+
+- protecting the dashboard URL
+- keeping `.env` private
+- using strong unique passwords
+- securing the host running the panel
+- backing up world saves and important config
+- reviewing updates before production use
+
+## Recommended deployment model
+
+Best:
+
+```text
+Trusted operators → VPN/private network → dashboard → Palworld REST API
+```
+
+Acceptable with care:
+
+```text
+Trusted operators → HTTPS reverse proxy with auth → dashboard → Palworld REST API
+```
+
+Avoid:
+
+```text
+Public internet → dashboard with only panel password → Palworld REST API
+```
+
+## Browser storage
+
+If remember-me is enabled, the browser stores panel login data locally. This is convenient but means anyone with access to that browser profile may be able to use the dashboard.
+
+Do not use remember-me on shared devices.
+
+## Moderator tier caveat
+
+The mod tier limits dashboard API access, but moderators still perform real actions such as kick and ban. Treat mod passwords as privileged credentials.
+
+## Incident response
+
+If a credential leaks:
+
+1. Rotate the panel admin/mod password from settings or reseed `PANEL_AUTH_FILE`.
+2. Rotate the real Palworld admin password.
+3. Restart the dashboard and Palworld server if needed.
+4. Review reverse proxy and dashboard logs.

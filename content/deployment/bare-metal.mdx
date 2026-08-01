@@ -1,0 +1,50 @@
+---
+title: Bare Metal
+---
+
+# Bare Metal
+
+Bare-metal deployment runs the Next.js standalone server directly on a host.
+
+## Build
+
+```bash
+npm ci
+npm run build
+```
+
+## Start
+
+```bash
+npm run start
+```
+
+By default the app listens on port `3000`.
+
+## Environment
+
+Store production environment variables in a file readable by the service manager, for example:
+
+```text
+/etc/palworld-dashboard/dashboard.env
+```
+
+Keep it mode `600` because it contains secrets.
+
+## systemd shape
+
+A minimal service should:
+
+- run as an unprivileged user
+- set `NODE_ENV=production`
+- load the dashboard environment file
+- restart on failure
+- write `PANEL_AUTH_FILE` to a persistent writable path
+
+## FPS sampler
+
+Install `scripts/fps-sampler/palworld-fps-sampler.py` and adapt `scripts/fps-sampler/palworld-fps-sampler.service.example`.
+
+## Journal chat
+
+If using the live chat reader, add the dashboard user to `systemd-journal` or otherwise grant read-only journal access.

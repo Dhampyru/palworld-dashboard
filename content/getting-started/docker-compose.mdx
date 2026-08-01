@@ -1,0 +1,80 @@
+---
+title: Docker Compose
+---
+
+# Docker Compose
+
+Docker Compose is the recommended deployment method. It runs the dashboard and the FPS sampler sidecar with persistent volumes.
+
+## 1. Create `.env`
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set at minimum:
+
+```env
+PANEL_INITIAL_ADMIN_PASSWORD=replace-with-a-panel-password
+PALWORLD_ADMIN_PASSWORD=replace-with-real-game-admin-password
+PALWORLD_REST_URL=http://host.docker.internal:8212
+PALWORLD_SERVER_DASHBOARD_PORT=3000
+```
+
+If your Palworld server is another machine on the LAN, use that address instead:
+
+```env
+PALWORLD_REST_URL=http://192.168.1.50:8212
+```
+
+## 2. Start the stack
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+If you changed `PALWORLD_SERVER_DASHBOARD_PORT`, use that port instead.
+
+## 3. Confirm containers
+
+```bash
+docker compose ps
+```
+
+Expected services:
+
+- `palworld-server-dashboard`
+- `palworld-fps-sampler`
+
+## 4. View logs
+
+```bash
+docker compose logs -f palworld-server-dashboard
+docker compose logs -f palworld-fps-sampler
+```
+
+## Updating
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+The panel credential store is kept in the `palworld-dashboard-data` volume. FPS history is kept in the `palworld-fps-metrics` volume.
+
+## Common Docker networking notes
+
+Inside a container, `127.0.0.1` means the container itself. If the Palworld server runs on the Docker host, use:
+
+```env
+PALWORLD_REST_URL=http://host.docker.internal:8212
+```
+
+On Linux, this compose file includes `host.docker.internal:host-gateway` so that hostname resolves to the host gateway.

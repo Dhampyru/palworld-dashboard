@@ -1,0 +1,48 @@
+---
+title: Dashboard
+---
+
+# Dashboard
+
+The dashboard is the main admin workspace after login.
+
+## Header
+
+The header shows:
+
+- server name
+- server version when available
+- connection state
+- game address
+- active dashboard tab
+- theme selector
+- docs link
+- settings button for admins
+- disconnect action
+
+Connection state is based on recent successful or failed API calls.
+
+## Main panels
+
+The admin dashboard combines operational panels for:
+
+- server status and health
+- player roster
+- control cards
+- live console/chat area
+- world settings
+- FPS and performance metrics
+
+## Data refresh
+
+The dashboard performs a combined server snapshot request instead of separately polling every widget. The default polling interval is 15 seconds and can be tuned at build time with:
+
+```env
+NEXT_PUBLIC_SNAPSHOT_POLL_SECONDS=15
+```
+
+Allowed range is 5 to 120 seconds.
+
+## Local browser state
+
+The dashboard stores recent data in browser local storage to keep the UI stable across reloads. Sensitive operational authorization is still checked server-side on each API request.

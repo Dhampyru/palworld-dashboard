@@ -1,0 +1,34 @@
+---
+title: Palworld Server Dashboard Documentation
+description: Professional documentation for installing, configuring, securing, and operating Palworld Server Dashboard.
+---
+
+# Palworld Server Dashboard
+
+Palworld Server Dashboard is a self-hosted web control panel for Palworld dedicated servers. It provides a browser UI for monitoring server health, managing players, sending announcements, viewing live map positions, and running common server operations through the Palworld REST API.
+
+The app is built with Next.js and is designed for private server operators who want a safer and friendlier workflow than calling the Palworld REST API directly.
+
+## What you can do
+
+- Monitor server status, player count, uptime, world day, frame time, and FPS.
+- View online players and player locations on a live map.
+- Kick, ban, and unban players from the dashboard.
+- Send announcements and use quick server-operation controls.
+- Track rolling FPS history with a server-side sampler.
+- Expose a limited moderator view without giving moderators full admin controls.
+- Run locally, with Docker Compose, behind a reverse proxy, or as a standalone Next.js app.
+
+## Recommended path
+
+If you are setting up the dashboard for the first time:
+
+1. Read [Concepts](/docs/getting-started/concepts) to understand how the panel talks to your server.
+2. Follow [Docker Compose](/docs/getting-started/docker-compose) for the easiest production-style install.
+3. Fill in [Environment Variables](/docs/configuration/environment-variables).
+4. Review [Security](/docs/security) before exposing the panel beyond your LAN.
+5. Use [Troubleshooting](/docs/troubleshooting) if login or server connectivity fails.
+
+## Project status
+
+This is a community self-hosted admin tool. Treat it like operational software: test updates, protect credentials, and keep access restricted to trusted operators.

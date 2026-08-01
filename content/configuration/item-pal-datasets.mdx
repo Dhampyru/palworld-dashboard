@@ -1,0 +1,210 @@
+---
+title: Item & Pal Datasets
+---
+
+# Item & Pal Datasets (names & icons)
+
+The RCON console's `give` / `givepal` / `giveegg` pickers are backed by three
+datasets — `data/items.json`, `data/eggs.json`, `data/pals.json`. **They ship
+empty on purpose**, and every picker works without them: it falls back to
+searchable free-text ID entry, and most Palworld identifiers are readable
+English (`Special_PalSphere_Grade_01`, `Product_Axe_Grade_01`).
+
+Populating the datasets is **optional enrichment**. When filled, the pickers
+show a friendly display name (`Melpaca`) and an icon next to each ID. This guide
+walks through producing that data from **your own copy of the game** — the only
+source whose licensing is unambiguous, since you extract assets you already own.
+
+> **Why not ship the data?** Palworld's names and art are Pocketpair's, and an
+> MIT licence on this project cannot grant redistribution rights for assets it
+> does not own. So the repo ships empty stubs and this guide instead. See
+> [Why empty](#licensing--clean-room) below.
+
+## Overview
+
+The work happens in two places:
+
+1. **On a desktop PC that runs the Palworld _client_** — extract the game's
+   data tables, English names, and icon textures with FModel. This is **not**
+   done on the dashboard/server host: the server's UE4SS is headless (no
+   display) and cannot show the console used to generate the mappings file.
+2. **On the machine that holds this repo** — run `scripts/generate-datasets.py`
+   against that extraction to produce the three JSON files and copy the icons,
+   then rebuild the dashboard.
+
+You only repeat step 1 after a game update; day to day there's nothing to do.
+
+## Prerequisites
+
+- A desktop PC with the **Palworld client** installed.
+- **UE4SS** installed into the client (`Pal/Binaries/Win64/ue4ss/`).
+- **[FModel](https://fmodel.app/)** (a UE asset explorer).
+- **Python 3** on the machine with the repo (standard library only — no `pip`
+  packages needed).
+
+## Step 1 — Generate a build-matched `.usmap`
+
+FModel needs a **mappings file** (`.usmap`) to parse Unreal Engine 5 assets. Get
+one straight from your running build rather than downloading a community file — a
+mismatched `.usmap` silently drops or corrupts rows, which is the usual cause of
+"my dataset is missing half the items."
+
+On the **client** PC, edit `Pal/Binaries/Win64/ue4ss/UE4SS-settings.ini` and turn
+on the debug console in the `[Debug]` section (all three default to `0`):
+
+```ini
+[Debug]
+; Whether to enable the external UE4SS debug console.
+ConsoleEnabled    = 1
+GuiConsoleEnabled = 1
+GuiConsoleVisible = 1
+```
+
+Then:
+
+1. Launch the Palworld client and let it reach the main menu.
+2. In the UE4SS GUI console, open the **Dumpers** tab and generate the `.usmap`
+   (button label varies slightly by UE4SS version). UE4SS writes a
+   `Mappings.usmap` into its own folder.
+3. Copy that `Mappings.usmap` somewhere handy.
+4. **Revert the three keys to `0`.** The console is a debugging tool, not a
+   setting to leave enabled.
+
+## Step 2 — Extract with FModel
+
+Point FModel at the game and load your mappings:
+
+1. **Directory:** the game's `Pal/Content/Paks` folder.
+2. **Mappings:** set FModel's local mappings path to the `Mappings.usmap` from
+   Step 1.
+
+Then export these, keeping FModel's default output layout (it preserves the
+`Pal/Content/...` folder structure, which the generator relies on):
+
+| What | Path in FModel | Export as |
+| --- | --- | --- |
+| Item table | `Pal/Content/Pal/DataTable/Item/DT_ItemDataTable` | JSON (Save Properties) |
+| Pal table | `Pal/Content/Pal/DataTable/Character/DT_PalMonsterParameter` | JSON (Save Properties) |
+| English item names | `Pal/Content/L10N/en/Pal/DataTable/Text/DT_ItemNameText_Common` | JSON |
+| English Pal names | `Pal/Content/L10N/en/Pal/DataTable/Text/DT_PalNameText_Common` | JSON |
+| Pal icons | `Pal/Content/Pal/Texture/PalIcon/Normal/` | PNG |
+| Item icons | `Pal/Content/Others/InventoryItemIcon/Texture/` | PNG |
+| Weapon icons | `Pal/Content/Pal/Texture/Item/` | PNG |
+
+The result is a folder tree rooted at `.../Exports/Pal/Content/...`. That
+`Exports` directory is your **extraction root** for the next step. Many operators
+keep it in a small private repo so re-extracting after a game update is one
+`git pull` away.
+
+## Step 3 — Run the generator
+
+Copy (or clone) the extraction onto the machine with this repo, then run:
+
+```sh
+./scripts/generate-datasets.py \
+  --datatable-dir /path/to/Exports/Pal/Content/Pal/DataTable \
+  --icons
+```
+
+If you preserved FModel's folder layout, that's all you need — the English name
+tables and icon textures are found automatically relative to `--datatable-dir`.
+Override the defaults only if your layout differs:
+
+| Flag | Required | Purpose |
+| --- | --- | --- |
+| `--datatable-dir` | yes | `.../Pal/Content/Pal/DataTable` of the extraction |
+| `--l10n-dir` | no | English name tables (default: `<extract>/Pal/Content/L10N/en/Pal/DataTable/Text`) |
+| `--icons` | no | Copy referenced icon PNGs and set `image` fields |
+| `--texture-dir` | no | Icon source (default: `<extract>/Pal/Content/Pal/Texture`) |
+| `--pak` | no | Optional drift check only — prints a warning, never filters IDs |
+
+Typical output:
+
+```text
+items: 2466 ids
+eggs: 56 ids
+pals: 707 ids
+icons: item 266/2466, egg 0/56, pal 587/707 present; missing list -> data/missing-icons.txt
+wrote data/items.json: 2466 ids (1964 named)
+wrote data/eggs.json: 56 ids (56 named)
+wrote data/pals.json: 707 ids (674 named)
+```
+
+> **The generator overwrites `data/*.json` and `public/palworld-icons/` in
+> place.** That is exactly what you want here. It's only a caveat if you have
+> hand-edited those files — take a copy first if so.
+
+Icon coverage depends on which Texture folders you exported in Step 2. Anything
+referenced but not present is listed in **`data/missing-icons.txt`**, with the
+exact file names and folders to export next; add them and re-run with `--icons`.
+
+## Step 4 — Rebuild
+
+The dashboard imports the datasets at build time, so rebuild the image to pick up
+the populated files:
+
+```sh
+docker compose build palworld-server-dashboard
+docker compose up -d palworld-server-dashboard
+```
+
+Open the RCON console's `give` / `givepal` / `giveegg` pickers — entries now show
+names and icons, and searching matches either the name or the ID.
+
+## What the generator does
+
+Briefly, so the output is predictable:
+
+- **Lists IDs** from the game's own data tables — the authoritative, correct-for-
+  your-build set — rather than any hand-written list.
+- **Drops junk** — `None`, `Test*` items, and event/quest-only Pals (`RAID_`,
+  `GYM_`, `SUMMON_`, `_Quest_*`, …) that aren't ordinary `give` targets.
+- **Splits out eggs** — `PalEgg_*` items become `eggs.json`.
+- **Joins English names** from the `L10N/en` tables; drops Pocketpair's dev
+  placeholders (`en text`) so no fake name shows; follows a BOSS/variant Pal's
+  `OverrideNameTextID` back to its base name. Unnamed entries ship as their ID.
+- **Matches & copies icons** into `public/palworld-icons/`, sets each `image`
+  field, and reports anything unmatched to `data/missing-icons.txt`.
+
+## Keeping the data out of git
+
+The three JSON files are committed as empty `[]` and carry git's **skip-worktree**
+bit, so your populated copies stay local and are never committed:
+
+```sh
+git ls-files -v data/items.json      # a leading "S" = skip-worktree is set
+```
+
+To intentionally change the committed placeholder (rarely needed), clear the flag
+first: `git update-index --no-skip-worktree data/items.json`. The icon directory
+`public/palworld-icons/` is gitignored for the same reason.
+
+## Licensing & clean-room
+
+Two separate reasons the data ships empty, only the second a licensing one:
+
+- **Accuracy.** Palworld's identifiers are structured and unguessable. A wrong ID
+  in a picker looks authoritative and fails silently at the server, which is
+  worse than free text. Nothing is shipped that hasn't been verified against a
+  real build — and your own extraction always is.
+- **Provenance.** Whether Palworld's data and art may be redistributed is
+  unresolved, and a third-party dataset's licence can't grant rights its author
+  never held over extracted game assets. Generating from your own install
+  sidesteps the question entirely.
+
+The same extraction also provides the friendly Pal names for the save inspector
+(`psp-data`); on a clean-room build that is operator-supplied the same way.
+
+## Troubleshooting
+
+- **Half the items/Pals missing** — almost always a mismatched `.usmap`.
+  Regenerate it from your exact build (Step 1); don't use a downloaded one.
+- **`error: datatable dir not found`** — `--datatable-dir` must point at the
+  `DataTable` folder that contains `Item/` and `Character/`, not the extraction
+  root.
+- **`note: no English names found`** — the `L10N/en` tables weren't exported or
+  aren't where the generator expects; pass `--l10n-dir` explicitly.
+- **Icons blank** — you didn't run with `--icons`, or the Texture folders weren't
+  exported. Check `data/missing-icons.txt` for exactly what to export.
+- **Names/icons don't appear after running** — rebuild the image (Step 4); the
+  datasets are baked in at build time.

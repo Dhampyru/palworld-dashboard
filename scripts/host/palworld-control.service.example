@@ -1,0 +1,25 @@
+# palworld-control.service — registry-driven lifecycle daemon for NON-default
+# instances (roadmap #7, Phase 3). Install:
+#   sudo cp scripts/host/palworld-control /usr/local/bin/palworld-control
+#   sudo chmod 0755 /usr/local/bin/palworld-control
+#   sudo cp scripts/host/palworld-control.service.example \
+#           /etc/systemd/system/palworld-control.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now palworld-control
+#
+# The live "default" server keeps its own palworld-{restart,shutdown,start}
+# units; this daemon handles every OTHER registered instance.
+[Unit]
+Description=Palworld multi-instance control daemon (non-default lifecycle)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/palworld-control
+Restart=always
+RestartSec=5
+# Runs as root: needs docker + to write /run/palworld/<id>/ owned by the
+# dashboard uid/gid so the panel can drop request files there.
+
+[Install]
+WantedBy=multi-user.target

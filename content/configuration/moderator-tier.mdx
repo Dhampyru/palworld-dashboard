@@ -1,0 +1,48 @@
+---
+title: Moderator Tier
+---
+
+# Moderator Tier
+
+The moderator tier is a limited-access mode for trusted helpers who should manage players but not operate the whole server.
+
+## Enable moderator login
+
+Set a moderator password before the credential store is first seeded:
+
+```env
+PANEL_INITIAL_MOD_PASSWORD=use-a-separate-mod-password
+```
+
+If the store already exists, set or rotate the moderator password from the admin settings dialog.
+
+## What moderators can do
+
+Moderators can access the compact roster widget and perform player moderation actions.
+
+Allowed upstream operations:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `players` | View online players. |
+| `GET` | `info` | Show server name and validate login. |
+| `GET` | `metrics` | Read player count. |
+| `POST` | `kick` | Kick a player. |
+| `POST` | `ban` | Ban a player. |
+| `POST` | `unban` | Unban a player. |
+
+Everything else is rejected server-side.
+
+## Hide specific users from mod view
+
+You can hide exact user IDs from the mod widget only:
+
+```env
+NEXT_PUBLIC_MOD_WIDGET_HIDDEN_USERIDS=steam_00000000000000000,steam_11111111111111111
+```
+
+This is a UI privacy feature, not a security feature. The full admin dashboard still shows everyone.
+
+## Security model
+
+The mod tier is enforced in the proxy, not only in React components. A moderator attempting to call a forbidden endpoint manually receives `403 Forbidden`.

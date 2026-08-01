@@ -1,0 +1,87 @@
+---
+title: Requirements
+---
+
+# Requirements
+
+## Dashboard host
+
+You need one of these runtime options:
+
+- Docker and Docker Compose, recommended for most installs.
+- Node.js `20.9.0` or newer with npm.
+- A platform capable of running a Next.js standalone server.
+
+The dashboard itself is lightweight (a few hundred MB of RAM). The heavy resource
+user is the **Palworld dedicated server(s)** it manages — size the host for those.
+
+## Resources
+
+Size the host for the **game server**, not the dashboard.
+
+| Resource | Guidance |
+| --- | --- |
+| RAM | Palworld 1.0 needs roughly **16 GB for a small server**, **32 GB for a community-size** one. Each *additional* server running at the same time needs its own share on top. |
+| CPU | Multiple cores; Palworld is CPU-heavy under load. |
+| Disk | Budget **~8–10 GB per server** for the game install, plus room for saves and backups (backups accumulate until pruned). |
+
+> **Running several servers at once multiplies RAM, CPU, and disk.** A common pattern
+> is to keep several configured but run only one or a few at a time — start and stop
+> each from the dashboard. See [Multiple servers](/features/multi-server).
+
+## Palworld server
+
+Your Palworld dedicated server must have the **REST API enabled** and reachable from
+the dashboard host. RCON is also recommended (the console, guild export, and some
+automation use it).
+
+Typical ports for one server:
+
+| Port | Protocol | Purpose | Exposure |
+| --- | --- | --- | --- |
+| `8211` | UDP | Game traffic (players connect here) | **Public** |
+| `27015` | UDP | Steam query (community server browser) | **Public** |
+| `8212` | TCP | REST API | Internal only |
+| `25575` | TCP | RCON | Internal only |
+| `17993` | TCP | PalDefender REST (optional) | Internal only |
+| `3000` | TCP | The dashboard web UI | Your choice (put behind auth / a reverse proxy) |
+
+The dashboard needs the REST API port, not only the gameplay port.
+
+> **Only the game (UDP 8211) and Steam query (UDP 27015) ports should be public.**
+> Keep REST, RCON, and PalDefender ports internal — they grant administrative
+> control. The dashboard reaches them locally.
+
+### Firewall — two layers
+
+Opening a port often takes **two** steps, and both matter:
+
+1. **Host firewall** (`ufw`, `firewalld`, …). Note: Docker's port publishing usually
+   bypasses the host firewall, so a container-published port may be reachable even if
+   `ufw` looks closed.
+2. **Cloud / provider firewall** — a *separate* layer in your provider's panel (AWS
+   security groups, Vultr, Hetzner Cloud Firewall, GCP, …). It sits upstream of the host
+   and must be opened by hand. If players can't connect but the server is up, this is
+   almost always why.
+
+## Information to collect
+
+Before installing, collect:
+
+- Palworld REST API URL, for example `http://192.168.1.50:8212`.
+- Real Palworld REST admin password.
+- Desired panel admin password.
+- Optional panel moderator password.
+- Host port where the dashboard should be exposed, default `3000`.
+
+## Network checklist
+
+From the dashboard host, the Palworld REST API must be reachable:
+
+```bash
+curl http://YOUR_SERVER:8212/v1/api/info
+```
+
+A `401 Unauthorized` response is fine at this stage; it means the REST endpoint is
+reachable but needs authentication. Connection refused, timeout, or DNS errors mean the
+dashboard will not be able to connect either.

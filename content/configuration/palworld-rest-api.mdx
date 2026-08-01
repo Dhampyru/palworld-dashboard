@@ -1,0 +1,56 @@
+---
+title: Palworld REST API
+---
+
+# Palworld REST API
+
+The dashboard depends on the official Palworld REST API. Enable it in your Palworld server configuration before starting the panel.
+
+## Required Palworld settings
+
+Your Palworld server must have:
+
+- REST API enabled.
+- A configured admin password.
+- A REST API port reachable from the dashboard host.
+
+Common defaults:
+
+```text
+REST API port: 8212
+Game port:     8211
+```
+
+The exact configuration file and setting names depend on your Palworld server distribution. In most dedicated-server setups, this is configured in `PalWorldSettings.ini`.
+
+## Test reachability
+
+From the dashboard host:
+
+```bash
+curl http://YOUR_SERVER:8212/v1/api/info
+```
+
+Possible results:
+
+| Result | Meaning |
+| --- | --- |
+| `401 Unauthorized` | Good: the REST API is reachable and requires auth. |
+| JSON server info | Good: the endpoint is reachable and auth may be disabled or already supplied. |
+| Connection refused | REST API is disabled, wrong host, wrong port, or firewall blocked. |
+| Timeout | Network route or firewall problem. |
+| DNS error | Hostname is wrong or not resolvable from the dashboard host. |
+
+## Dashboard upstream URL
+
+Set `PALWORLD_REST_URL` to the base REST API URL:
+
+```env
+PALWORLD_REST_URL=http://192.168.1.50:8212
+```
+
+Do not include `/v1/api` in this variable. The dashboard adds the API path internally.
+
+## Why the URL is server-side only
+
+Older dashboard patterns often let the browser choose an upstream host. This dashboard intentionally does not. `PALWORLD_REST_URL` is pinned on the server to reduce SSRF risk and make internet-facing reverse-proxy deployments safer.

@@ -1,0 +1,63 @@
+---
+title: FPS History
+---
+
+# FPS History
+
+The dashboard's FPS chart is fed by a server-side sampler, not by the browser tab.
+
+## Why server-side sampling
+
+Server-side sampling keeps the chart useful even when nobody has the panel open.
+
+Benefits:
+
+- Full history is already available when you open the dashboard.
+- Browser timer throttling does not create fake gaps.
+- Downtime is shown honestly as missing samples.
+- The data file is small and cheap to maintain.
+
+## Docker Compose
+
+Docker Compose starts `palworld-fps-sampler` automatically. The sampler writes to a shared volume and the dashboard reads that same file.
+
+No extra setup is required unless you want to change the cadence or window.
+
+## Bare metal
+
+Use the example systemd unit:
+
+```text
+scripts/fps-sampler/palworld-fps-sampler.service.example
+```
+
+Minimum sampler environment:
+
+```env
+PALWORLD_REST_URL=http://127.0.0.1:8212
+PALWORLD_ADMIN_PASSWORD=your-real-palworld-admin-password
+FPS_HISTORY_FILE=/run/palworld-metrics/fps-history.json
+```
+
+Panel environment must point to the same ring file:
+
+```env
+PALWORLD_FPS_HISTORY_FILE=/run/palworld-metrics/fps-history.json
+```
+
+## Tuning
+
+| Variable | Default | Range | Description |
+| --- | --- | --- | --- |
+| `FPS_SAMPLE_SECONDS` | `5` | `1-60` | How often the sampler polls metrics. |
+| `FPS_WINDOW_MINUTES` | `60` | `5-1440` | How much history to retain. |
+
+## Empty graph
+
+An empty graph usually means one of these:
+
+- the sampler is not running
+- the sampler cannot reach the REST API
+- `PALWORLD_ADMIN_PASSWORD` is wrong for the sampler
+- `PALWORLD_FPS_HISTORY_FILE` does not match `FPS_HISTORY_FILE`
+- file permissions prevent the dashboard from reading the ring file

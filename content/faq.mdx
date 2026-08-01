@@ -1,0 +1,37 @@
+---
+title: FAQ
+---
+
+# FAQ
+
+## Does the browser receive the real Palworld admin password?
+
+No. The browser submits a panel password. The server-side proxy injects the real Palworld REST admin password when forwarding valid requests.
+
+## Can moderators shut down the server?
+
+No. The moderator tier is restricted by a server-side allowlist and cannot call shutdown, restart, settings, or arbitrary endpoints.
+
+## Can I expose this publicly?
+
+You can, but you should not expose it with only the panel password as protection. Put it behind VPN, reverse proxy authentication, SSO, or another trusted access layer.
+
+## Why does Docker not reach `127.0.0.1:8212`?
+
+Inside a container, `127.0.0.1` is the container. Use `host.docker.internal` for a game server on the Docker host, or use the LAN IP of the game server.
+
+## Why is FPS history empty after opening the dashboard?
+
+The graph depends on the server-side sampler. Start the sampler and make sure the dashboard reads the same history file the sampler writes.
+
+## Does the dashboard store world saves?
+
+No. Back up Palworld world saves separately.
+
+## What should I back up?
+
+Back up Palworld saves/config, dashboard `.env`, and `PANEL_AUTH_FILE` or its Docker volume.
+
+## Can I use demo mode without a Palworld server?
+
+Yes. Set `DEMO_MODE=1` and restart.

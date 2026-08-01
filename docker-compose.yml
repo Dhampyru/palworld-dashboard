@@ -1,0 +1,113 @@
+name: palworld-server-dashboard
+
+# Copy .env.example to .env and fill it in — Docker Compose auto-loads .env from
+# this directory, so the ${...} values below come from there.
+
+services:
+  palworld-server-dashboard:
+    image: ${PALWORLD_SERVER_DASHBOARD_IMAGE:-ghcr.io/rnz01/palworld-server-dashboard:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_GAME_SERVER_IP: ${NEXT_PUBLIC_GAME_SERVER_IP:?set NEXT_PUBLIC_GAME_SERVER_IP in .env to your server's real public IP}
+    container_name: palworld-server-dashboard
+    restart: unless-stopped
+    ports:
+      - "${PALWORLD_SERVER_DASHBOARD_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      # Fail loudly at `up` time if these are unset, instead of silently booting
+      # an unloginable panel.
+      PANEL_INITIAL_ADMIN_PASSWORD: ${PANEL_INITIAL_ADMIN_PASSWORD:?copy .env.example to .env and set the panel + game passwords}
+      PALWORLD_ADMIN_PASSWORD: ${PALWORLD_ADMIN_PASSWORD:?set PALWORLD_ADMIN_PASSWORD (the real Palworld REST admin password) in .env}
+      PANEL_INITIAL_MOD_PASSWORD: ${PANEL_INITIAL_MOD_PASSWORD:-}
+      # 127.0.0.1 is the container itself — point this at the game host.
+      PALWORLD_REST_URL: ${PALWORLD_REST_URL:-http://host.docker.internal:8212}
+      # PalDefender's own, separate REST API (optional -- only used if PalDefender
+      # is installed and its REST API is enabled).
+      PALDEFENDER_REST_URL: ${PALDEFENDER_REST_URL:-http://host.docker.internal:17993}
+      PALDEFENDER_REST_TOKEN: ${PALDEFENDER_REST_TOKEN:-}
+      PANEL_AUTH_FILE: /app/data/panel-auth.json
+      RATE_LIMIT_TRUST_PROXY: ${RATE_LIMIT_TRUST_PROXY:-false}
+      DEMO_MODE: ${DEMO_MODE:-0}
+      # FPS history ring written by the palworld-fps-sampler sidecar below.
+      PALWORLD_FPS_HISTORY_FILE: /metrics/fps-history.json
+      PALWORLD_GAME_DIR: /palworld-game
+      # REQUIRED for live chat on this deployment. Upstream's chat route tries
+      # this file source first, then `docker logs`, then journalctl -- and the
+      # game server here runs as a container, not a host systemd unit, so the
+      # journalctl fallback returns nothing. Unset this and the chat panel goes
+      # silently empty. The game container tees stdout to this file on the
+      # volume mounted below.
+      PALWORLD_CHAT_LOG_FILE: /palworld-game/console.log
+      # Read only the tail per poll. Upstream's 4MB default would re-read this
+      # 2.4MB unrotated log in full on every poll; 512KB is ~3000 lines, well
+      # past the ~120 events the route keeps.
+      PALWORLD_CHAT_LOG_MAX_BYTES: "524288"
+      # Multi-instance (#7): the registry the resolver reads. A missing/unreadable
+      # file cleanly yields the single env-derived `default` instance.
+      PALWORLD_REGISTRY_PATH: ${PALWORLD_REGISTRY_PATH:-/srv/palworld/registry.json}
+    volumes:
+      # Persist the panel credential store across container recreation.
+      - palworld-dashboard-data:/app/data
+      # Read-only view of the FPS ring maintained by the sampler sidecar.
+      - palworld-fps-metrics:/metrics:ro
+      # HOST path to the game server's data dir → the container's game dir. Set
+      # PALWORLD_GAME_DIR_HOST in .env to your game dir; the default (./game) is
+      # an empty placeholder so a fresh clone still starts.
+      - ${PALWORLD_GAME_DIR_HOST:-./game}:/palworld-game
+      # Read-write access to the game server's own .env, so saving certain
+      # World Settings fields (ServerName, AdminPassword, ServerPassword,
+      # ServerPlayerMaxNum) can also sync the .env value that entrypoint.sh
+      # re-applies on every boot -- otherwise those specific fields silently
+      # revert on restart even though the ini itself was saved correctly. Set
+      # PALWORLD_SERVER_ENV_HOST in .env; the default (/dev/null) safely disables
+      # the sync for setups that don't have a game-server .env to write.
+      - ${PALWORLD_SERVER_ENV_HOST:-/dev/null}:/palworld-server-env/.env
+      # Restart/shutdown request flag files -- watched by host-side systemd
+      # units (this container has no privilege to restart/stop itself; see
+      # app/api/server-restart/route.ts for why).
+      - /run/palworld:/run/palworld
+      # Multi-instance (#7): shared parent dir holding registry.json and each
+      # UI-provisioned instance's game dir + .env + docker-compose.yml. Mounted
+      # at the SAME absolute path host- and container-side so an instance's paths
+      # resolve identically for the host control daemon and the dashboard. The
+      # live "Palkatraz" server stays on its own mounts above (special-cased).
+      - /srv/palworld:/srv/palworld
+    extra_hosts:
+      # Lets PALWORLD_REST_URL=host.docker.internal reach the host on Linux.
+      - "host.docker.internal:host-gateway"
+
+  # Server-side FPS history sampler: keeps the dashboard's FPS histogram
+  # populated for the full window even while nobody has the panel open.
+  # Stdlib-only Python — no image build, no pip installs.
+  palworld-fps-sampler:
+    image: python:3.12-alpine
+    container_name: palworld-fps-sampler
+    restart: unless-stopped
+    command: ["python", "/sampler/palworld-fps-sampler.py"]
+    environment:
+      PALWORLD_REST_URL: ${PALWORLD_REST_URL:-http://host.docker.internal:8212}
+      PALWORLD_ADMIN_PASSWORD: ${PALWORLD_ADMIN_PASSWORD:?set PALWORLD_ADMIN_PASSWORD (the real Palworld REST admin password) in .env}
+      PALWORLD_RCON_HOST: ${PALWORLD_RCON_HOST:-host.docker.internal}
+      PALWORLD_RCON_PORT: ${PALWORLD_RCON_PORT:-25575}
+      FPS_HISTORY_FILE: /metrics/fps-history.json
+      FPS_SAMPLE_SECONDS: ${FPS_SAMPLE_SECONDS:-5}
+      FPS_WINDOW_MINUTES: ${FPS_WINDOW_MINUTES:-60}
+      # Multi-instance (#7): sample every registered instance (reads the registry
+      # + each instance's .env for its REST password), writing per-instance rings.
+      PALWORLD_REGISTRY: ${PALWORLD_REGISTRY:-/srv/palworld/registry.json}
+    volumes:
+      - ./scripts/fps-sampler:/sampler:ro
+      - palworld-fps-metrics:/metrics
+      # Registry + provisioned instances' .env files (read-only).
+      - /srv/palworld:/srv/palworld:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  palworld-dashboard-data:
+  palworld-fps-metrics:

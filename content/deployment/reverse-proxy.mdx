@@ -1,0 +1,46 @@
+---
+title: Reverse Proxy
+---
+
+# Reverse Proxy
+
+Use a reverse proxy when exposing the dashboard outside localhost or your private LAN.
+
+## Recommended protections
+
+- HTTPS termination.
+- External authentication such as VPN, SSO, basic auth, or identity-aware proxy.
+- IP allowlists where practical.
+- Rate limiting at the edge.
+- WebSocket and streaming support compatible with Next.js.
+
+## Headers and rate limiting
+
+By default, the dashboard does not trust proxy IP headers.
+
+If your reverse proxy overwrites `x-real-ip` or `x-forwarded-for`, enable:
+
+```env
+RATE_LIMIT_TRUST_PROXY=true
+```
+
+Only enable this behind a proxy you control. Do not enable it for direct internet exposure.
+
+## Example Nginx shape
+
+```nginx
+location / {
+  proxy_pass http://127.0.0.1:3000;
+  proxy_http_version 1.1;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Add authentication and TLS according to your environment.
+
+## Public exposure warning
+
+This is an admin panel for game-server operations. Prefer VPN-only or private-network access. If you expose it publicly, treat it like a sensitive internal tool.

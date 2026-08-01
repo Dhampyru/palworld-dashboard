@@ -1,0 +1,43 @@
+# Dependencies / build output
+node_modules/
+.next/
+out/
+dist/
+tsconfig.tsbuildinfo
+
+# Test output
+coverage/
+.nyc_output/
+
+# Secrets — never commit. Ship .env.example instead.
+.env
+.env.local
+.env.*.local
+
+# Logs & runtime junk
+*.log
+npm-debug.log*
+
+# Editor / OS noise
+.DS_Store
+.vscode/
+.idea/
+
+# Local scratch (safe place for notes/experiments that shouldn't ship)
+scratch/
+
+# Operator context file — documents THIS deployment's live server (host paths,
+# container topology, uid coupling, server name). Stays local and untracked;
+# it is deployment-specific and not for publication.
+CLAUDE.md
+
+# Generated game icons (copied from the operator extraction; see scripts/generate-datasets.py)
+public/palworld-icons/
+data/missing-icons.txt
+
+# Nexus API key (secret — server-side only)
+data/nexus.json
+
+# Steam Workshop account: username marker + cached SteamCMD session (server-side only)
+data/steam-account.json
+data/steam/

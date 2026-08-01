@@ -1,0 +1,94 @@
+---
+title: Troubleshooting
+---
+
+# Troubleshooting
+
+## Login fails with authentication error
+
+Check:
+
+- you are using the panel password, not necessarily the real Palworld admin password
+- `PANEL_AUTH_FILE` was seeded with the password you expect
+- the app was restarted after environment changes
+- you are not currently rate limited after repeated failures
+
+If you intentionally want to reseed passwords, stop the app, remove the credential store, verify `PANEL_INITIAL_ADMIN_PASSWORD`, then start again.
+
+## Dashboard cannot reach server
+
+Check `PALWORLD_REST_URL` from the dashboard host:
+
+```bash
+curl http://YOUR_SERVER:8212/v1/api/info
+```
+
+If Docker is involved, remember that `127.0.0.1` inside the container is not the host.
+
+Use one of:
+
+```env
+PALWORLD_REST_URL=http://host.docker.internal:8212
+PALWORLD_REST_URL=http://192.168.1.50:8212
+```
+
+## Game works but dashboard does not
+
+The gameplay port and REST API port are different. The game can be playable while the REST API is disabled or blocked.
+
+Confirm:
+
+- REST API is enabled in Palworld config
+- REST API port is open
+- REST admin password matches `PALWORLD_ADMIN_PASSWORD`
+- `PALWORLD_REST_URL` does not include `/v1/api`
+
+## FPS graph is empty
+
+Check:
+
+- sampler container or service is running
+- sampler logs show successful polling
+- `PALWORLD_ADMIN_PASSWORD` is correct for the sampler
+- dashboard `PALWORLD_FPS_HISTORY_FILE` matches sampler `FPS_HISTORY_FILE`
+- file permissions allow dashboard reads
+
+Docker:
+
+```bash
+docker compose logs -f palworld-fps-sampler
+```
+
+## Search says failed to load index
+
+Run a production build so Pagefind generates `public/_pagefind`:
+
+```bash
+npm run build
+```
+
+For dev mode after a clean checkout:
+
+```bash
+npm run build
+npm run dev
+```
+
+## Docs layout or search looks stale
+
+Clear `.next` and rebuild:
+
+```bash
+rm -rf .next public/_pagefind .pagefind-site
+npm run build
+```
+
+## TypeScript route errors
+
+Run:
+
+```bash
+npm run typecheck
+```
+
+The script regenerates Next.js route types before checking TypeScript.

@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# palworld-metrics-publisher — per-instance runtime metrics (roadmap #7 Phase 4;
+# supersedes the single-container palworld-metrics-publisher.sh from #6).
+#
+# Iterates the instance registry and writes cheap runtime metrics (memory, cpu%,
+# restart count, status) for EACH instance's container:
+#   - default          -> /run/palworld/metrics.json   (FLAT — unchanged; the
+#                          in-process armed auto-restart monitor reads this)
+#   - every other <id> -> /run/palworld/<id>/metrics.json
+#
+# Host-side on purpose (dashboard has no docker/cgroup access). Observes only;
+# the dashboard owns all decisions. cgroup v2, atomic writes, 0644 so uid 2001
+# can read. If the registry is missing it falls back to the single default
+# container, preserving exact pre-#7 behavior.
+set -u
+
+REGISTRY="${PALWORLD_REGISTRY:-/srv/palworld/registry.json}"
+RUN_ROOT="${PALWORLD_RUN_DIR:-/run/palworld}"
+INTERVAL="${METRICS_INTERVAL:-10}"
+DASH_UID="${PALWORLD_DASH_UID:-2001}"
+DASH_GID="${PALWORLD_DASH_GID:-2001}"
+FALLBACK_CONTAINER="${PALWORLD_CONTAINER:-palworld-server}"
+
+declare -A prev_usage
+declare -A prev_time
+
+sample_one() { # id container outfile
+  local id="$1" container="$2" out="$3" ts present status pid restarts startedAt
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  if info=$(docker inspect -f '{{.State.Status}}|{{.State.Pid}}|{{.RestartCount}}|{{.State.StartedAt}}' "$container" 2>/dev/null); then
+    present=true
+    IFS='|' read -r status pid restarts startedAt <<<"$info"
+  else
+    present=false; status="absent"; pid=0; restarts=0; startedAt=""
+  fi
+
+  local memBytes=null memLimit=null memPercent=null cpuPercent=null
+  if [ "$present" = true ] && [ "${pid:-0}" != 0 ] && [ -r "/proc/$pid/cgroup" ]; then
+    local rel cg usage now_us
+    rel=$(awk -F: '/^0::/{print $3}' "/proc/$pid/cgroup" 2>/dev/null)
+    cg="/sys/fs/cgroup${rel}"
+    if [ -r "$cg/memory.current" ]; then
+      memBytes=$(cat "$cg/memory.current" 2>/dev/null)
+      local lim; lim=$(cat "$cg/memory.max" 2>/dev/null)
+      if [ -n "$lim" ] && [ "$lim" != "max" ]; then
+        memLimit=$lim
+        memPercent=$(awk -v u="$memBytes" -v l="$lim" 'BEGIN{ if (l>0) printf "%.1f", u*100/l; else print "null" }')
+      fi
+    fi
+    usage=$(awk '/^usage_usec/{print $2}' "$cg/cpu.stat" 2>/dev/null)
+    now_us=$(date +%s%6N)
+    if [ -n "$usage" ] && [ -n "${prev_usage[$container]:-}" ] && [ -n "${prev_time[$container]:-}" ]; then
+      cpuPercent=$(awk -v du="$((usage - prev_usage[$container]))" -v dt="$((now_us - prev_time[$container]))" \
+        'BEGIN{ if (dt>0) printf "%.1f", du*100/dt; else print "null" }')
+    fi
+    prev_usage[$container]=$usage; prev_time[$container]=$now_us
+  else
+    unset 'prev_usage[$container]' 'prev_time[$container]' 2>/dev/null || true
+  fi
+
+  local dir; dir=$(dirname "$out")
+  [ -d "$dir" ] || { mkdir -p "$dir" 2>/dev/null && chown "${DASH_UID}:${DASH_GID}" "$dir" 2>/dev/null && chmod 0775 "$dir" 2>/dev/null; }
+
+  local tmp="${out}.tmp"
+  cat > "$tmp" <<JSON
+{
+  "schemaVersion": 1,
+  "ts": "$ts",
+  "instance": "$id",
+  "container": "$container",
+  "present": $present,
+  "status": "$status",
+  "startedAt": "$startedAt",
+  "restartCount": ${restarts:-0},
+  "memBytes": ${memBytes:-null},
+  "memLimitBytes": ${memLimit:-null},
+  "memPercent": ${memPercent:-null},
+  "cpuPercent": ${cpuPercent:-null},
+  "intervalSeconds": $INTERVAL,
+  "publisher": "palworld-metrics-publisher/2"
+}
+JSON
+  chmod 0644 "$tmp" 2>/dev/null
+  mv -f "$tmp" "$out"
+}
+
+while true; do
+  if [ -f "$REGISTRY" ] && command -v jq >/dev/null 2>&1; then
+    while IFS=$'\t' read -r id container; do
+      [ -z "$id" ] && continue
+      if [ "$id" = "default" ]; then
+        sample_one "$id" "$container" "${RUN_ROOT}/metrics.json"
+      else
+        sample_one "$id" "$container" "${RUN_ROOT}/${id}/metrics.json"
+      fi
+    done < <(jq -r '.instances[]? | [.id, .container] | @tsv' "$REGISTRY" 2>/dev/null)
+  else
+    # No registry -> exact pre-#7 behavior: one container, flat file.
+    sample_one "default" "$FALLBACK_CONTAINER" "${RUN_ROOT}/metrics.json"
+  fi
+  sleep "$INTERVAL"
+done

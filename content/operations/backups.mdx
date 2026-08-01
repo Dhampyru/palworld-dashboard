@@ -1,0 +1,41 @@
+---
+title: Backups
+---
+
+# Backups
+
+The dashboard does not store Palworld world saves. Back up your Palworld server separately according to your host setup.
+
+## Dashboard state to preserve
+
+If you use runtime panel password changes, preserve `PANEL_AUTH_FILE`.
+
+Docker Compose stores it in:
+
+```text
+palworld-dashboard-data
+```
+
+Source installs commonly use:
+
+```env
+PANEL_AUTH_FILE=./data/panel-auth.json
+```
+
+## FPS history
+
+FPS history is operational telemetry, not critical state. Docker Compose stores it in:
+
+```text
+palworld-fps-metrics
+```
+
+You can back it up, but it is safe to recreate.
+
+## Recommended backups
+
+- Palworld world saves.
+- Palworld server config.
+- dashboard `.env`.
+- dashboard credential store.
+- reverse proxy config if used.

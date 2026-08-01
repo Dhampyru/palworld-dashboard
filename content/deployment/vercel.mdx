@@ -1,0 +1,30 @@
+---
+title: Vercel
+---
+
+# Vercel
+
+Vercel is useful for the public demo and documentation, but it is usually not the best place to run a private operational dashboard for a LAN game server.
+
+## When Vercel works
+
+- public demo mode
+- documentation site
+- experiments with a publicly reachable Palworld REST API
+
+## Limitations
+
+- Your Palworld REST API must be reachable from Vercel.
+- Runtime file storage such as `PANEL_AUTH_FILE` is not persistent in the same way as a server or Docker volume.
+- Optional host integrations like restart request files and journald chat do not apply.
+- Secrets must be configured in Vercel environment variables.
+
+## Demo deployment
+
+For a safe public demo:
+
+```env
+DEMO_MODE=1
+```
+
+Do not expose a real game admin password to a public deployment unless you have designed the surrounding network and authentication model carefully.

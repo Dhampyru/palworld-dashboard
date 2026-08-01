@@ -1,0 +1,65 @@
+---
+title: Development
+---
+
+# Development
+
+## Local workflow
+
+```bash
+npm install
+cp .env.example .env
+npm run dev
+```
+
+Open `http://localhost:3000`.
+
+## Quality checks
+
+```bash
+npm run typecheck
+npm run build
+```
+
+Or run both:
+
+```bash
+npm run check
+```
+
+## Documentation workflow
+
+Docs live in `content/` and are served under `/docs` through Nextra.
+
+After changing docs, run:
+
+```bash
+npm run build
+```
+
+This validates the app and rebuilds the Pagefind search index.
+
+## Nextra theme patch
+
+The project includes `scripts/patch-nextra-theme-docs.mjs`, applied by `postinstall`, to work around a current `nextra-theme-docs` layout validation issue. Keep it until the upstream package no longer needs it.
+
+## Adding dependencies
+
+Prefer using the existing stack before adding new packages:
+
+- Next.js and React
+- TypeScript
+- Tailwind CSS
+- Radix primitives already installed
+- standard library scripts where possible
+
+## Contributing
+
+Good contributions include:
+
+- bug fixes
+- compatibility fixes for Palworld REST changes
+- deployment docs
+- security hardening
+- accessibility improvements
+- small tests/checks for non-trivial logic

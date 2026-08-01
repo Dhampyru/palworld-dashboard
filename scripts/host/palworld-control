@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+# =============================================================================
+# palworld-control — registry-driven lifecycle daemon (roadmap #7, Phase 3)
+# =============================================================================
+# One persistent privileged worker (modeled on palworld-metrics-publisher.sh)
+# that performs per-instance start/stop/restart for NON-default instances.
+#
+# The live "Palkatraz" (`default`) server deliberately stays on its own proven
+# systemd units (palworld-{restart,shutdown,start}.{path,service}) watching the
+# FLAT /run/palworld/*.request paths — this daemon skips `default` entirely, so
+# there is no risky cutover of the live lifecycle path.
+#
+# Security model is unchanged: the dashboard (uid 2001) only ever WRITES a flag
+# file it owns under /run/palworld/<id>/; this root daemon reads the registry,
+# maps <id> → compose dir/container, and runs the compose command. The dashboard
+# never gets docker or sudo.
+#
+# Flag files (per instance, temp-then-rename by the dashboard):
+#   /run/palworld/<id>/{start,shutdown,restart}.request   JSON {waittime,message,dryRun,requestedAt}
+#   /run/palworld/<id>/{shutdown,restart}.cancel          JSON {cancelledAt}
+# A claimed request is renamed to <action>.processing so it is handled once.
+#
+# Install: copy to /usr/local/bin/palworld-control (0755 root) + enable
+# palworld-control.service. Provisioning/delete request types are added in Phase 5.
+set -uo pipefail
+
+REGISTRY="${PALWORLD_REGISTRY:-/srv/palworld/registry.json}"
+RUN_ROOT="${PALWORLD_RUN_DIR:-/run/palworld}"
+INTERVAL="${PALWORLD_CONTROL_INTERVAL:-2}"
+DASH_UID="${PALWORLD_DASH_UID:-2001}"
+DASH_GID="${PALWORLD_DASH_GID:-2001}"
+# Provisioning (Phase 5). All instances share the DEFAULT internal ports, so RCON
+# broadcast always targets 25575 inside the container (published ports differ).
+INTERNAL_RCON_PORT="${PALWORLD_INTERNAL_RCON_PORT:-25575}"
+SRV_ROOT="${PALWORLD_SRV_ROOT:-/srv/palworld}"
+TEMPLATE="${PALWORLD_INSTANCE_TEMPLATE:-/usr/local/share/palworld/instance-template.docker-compose.yml}"
+IMAGE="${PALWORLD_INSTANCE_IMAGE:-palworld-proton-server:latest}"
+SEED_COMPATDATA="${PALWORLD_SEED_COMPATDATA:-/root/palworld-server/compatdata-seed}"
+PROVISION_DIR="${RUN_ROOT}/provision"
+PROVISION_TIMEOUT="${PALWORLD_PROVISION_TIMEOUT:-900}"
+
+log() { echo "[palworld-control] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
+
+# RCON Broadcast cuts at the first space; non-ASCII has hung calls — strip to
+# printable ASCII and turn spaces into underscores (same as the stock handlers).
+sanitize() { echo "$1" | LC_ALL=C tr -cd '[:print:]\n' | tr ' ' '_'; }
+
+# Best-effort broadcast to an instance's container (no-op if it has no rcon-cli
+# or no password — e.g. a non-Palworld test container).
+broadcast() { # container password rconport(ignored) message
+  local container="$1" pw="$2" msg
+  [ -z "$pw" ] && return 0
+  msg=$(sanitize "$4")
+  # Always the INTERNAL rcon port (25575) — every instance's container binds the
+  # default internally; only the published host port differs.
+  docker exec "$container" rcon-cli -a "127.0.0.1:${INTERNAL_RCON_PORT}" -p "$pw" "Broadcast $msg" >/dev/null 2>&1 || true
+}
+
+# Read one KEY=VALUE from an instance's .env (per-instance secret store).
+env_value() { # file key
+  [ -f "$1" ] || { echo ""; return; }
+  local v
+  v=$(grep -E "^$2=" "$1" | head -1 | cut -d= -f2-)
+  v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+  echo "$v"
+}
+
+handle() { # id action composeDir container envFile rconPort procFile
+  local id="$1" action="$2" dir="$3" container="$4" envFile="$5" rconPort="$6" proc="$7"
+  local cancel="${RUN_ROOT}/${id}/${action}.cancel"
+  local pw wait msg dry
+  pw=$(env_value "$envFile" ADMIN_PASSWORD)
+  wait=$(jq -r '.waittime // 0' "$proc" 2>/dev/null)
+  [[ "$wait" =~ ^[0-9]+$ ]] || wait=0
+  msg=$(jq -r '.message // "Server update"' "$proc" 2>/dev/null)
+  dry=$(jq -r '.dryRun // false' "$proc" 2>/dev/null)
+
+  _cleanup() { rm -f "$proc" "$cancel"; }
+
+  if [ "$action" = "start" ]; then
+    log "[$id] start"
+    ( cd "$dir" && docker compose up -d ) >/dev/null 2>&1 || log "[$id] start: compose failed"
+    _cleanup; log "[$id] start complete"; return
+  fi
+
+  if [ "$dry" = "true" ]; then
+    log "[$id] $action DRY-RUN (wait=${wait}s msg=\"$msg\") — no compose action"
+    _cleanup; return
+  fi
+
+  log "[$id] $action requested (wait=${wait}s)"
+  broadcast "$container" "$pw" "$rconPort" "$msg (${action} in ${wait}s)"
+  local remaining="$wait" step
+  while [ "$remaining" -gt 0 ]; do
+    if [ -f "$cancel" ]; then
+      log "[$id] $action cancelled"
+      broadcast "$container" "$pw" "$rconPort" "${action}_cancelled"
+      _cleanup; return
+    fi
+    step=$(( remaining < 10 ? remaining : 10 ))
+    sleep "$step"; remaining=$(( remaining - step ))
+  done
+  if [ -f "$cancel" ]; then
+    log "[$id] $action cancelled at the last moment"; _cleanup; return
+  fi
+
+  if [ "$action" = "shutdown" ]; then
+    log "[$id] stopping now (docker compose stop)"
+    broadcast "$container" "$pw" "$rconPort" "Server_stopping_now"
+    ( cd "$dir" && docker compose stop ) >/dev/null 2>&1 || log "[$id] stop: compose failed"
+  else
+    log "[$id] restarting now (docker compose up -d --force-recreate)"
+    broadcast "$container" "$pw" "$rconPort" "Restarting_now"
+    ( cd "$dir" && docker compose up -d --force-recreate ) >/dev/null 2>&1 || log "[$id] restart: compose failed"
+    local started
+    started=$(docker inspect -f '{{.State.StartedAt}}' "$container" 2>/dev/null || echo '?')
+    log "[$id] restart done; container StartedAt=$started"
+  fi
+  _cleanup
+  log "[$id] $action complete"
+}
+
+# ── provisioning + delete (Phase 5) ─────────────────────────────────────────
+# The daemon owns registry writes; the dashboard only writes request flag files.
+
+registry_upsert() { # complete instance object on stdin
+  local newobj; newobj=$(cat)
+  local tmp="${REGISTRY}.tmp"
+  jq --argjson o "$newobj" '.instances = ([.instances[]? | select(.id != $o.id)] + [$o])' "$REGISTRY" > "$tmp" 2>/dev/null || return 1
+  chown root:"$DASH_GID" "$tmp" 2>/dev/null; chmod 0664 "$tmp" 2>/dev/null; mv -f "$tmp" "$REGISTRY"
+}
+registry_remove() { # id
+  local tmp="${REGISTRY}.tmp"
+  jq --arg id "$1" '.instances = [.instances[]? | select(.id != $id)]' "$REGISTRY" > "$tmp" 2>/dev/null || return 1
+  chown root:"$DASH_GID" "$tmp" 2>/dev/null; chmod 0664 "$tmp" 2>/dev/null; mv -f "$tmp" "$REGISTRY"
+}
+
+port_in_use() { # port proto(tcp|udp) -> 0 if in use
+  local port="$1" proto="$2"
+  jq -e --argjson p "$port" 'any(.instances[]?; (.ports.game==$p or .ports.query==$p or .ports.rcon==$p or .ports.rest==$p or .ports.paldefender==$p))' "$REGISTRY" >/dev/null 2>&1 && return 0
+  if [ "$proto" = udp ]; then ss -H -lun 2>/dev/null | awk '{print $5}' | grep -qE "[:.]${port}\$" && return 0
+  else ss -H -ltn 2>/dev/null | awk '{print $5}' | grep -qE "[:.]${port}\$" && return 0; fi
+  return 1
+}
+alloc_ports() { # echoes "game query rcon rest pd" or empty
+  local base g q rc re pd
+  for slot in $(seq 1 60); do
+    base=$(( 8300 + slot*10 )); g=$base; q=$((base+1)); rc=$((base+2)); re=$((base+3)); pd=$((base+4))
+    if ! port_in_use "$g" udp && ! port_in_use "$q" udp && ! port_in_use "$rc" tcp && ! port_in_use "$re" tcp && ! port_in_use "$pd" tcp; then
+      echo "$g $q $rc $re $pd"; return 0
+    fi
+  done
+  return 1
+}
+gen_password() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 32; }
+
+pstatus() { # id phase pct message
+  local id="$1" phase="$2" pct="$3" msg="$4" ts; ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mkdir -p "$PROVISION_DIR" 2>/dev/null; chown "${DASH_UID}:${DASH_GID}" "$PROVISION_DIR" 2>/dev/null; chmod 0775 "$PROVISION_DIR" 2>/dev/null
+  local out="${PROVISION_DIR}/${id}.status" tmp="${PROVISION_DIR}/${id}.status.tmp"
+  printf '{"id":"%s","phase":"%s","pct":%s,"message":"%s","updatedAt":"%s"}\n' "$id" "$phase" "$pct" "$msg" "$ts" > "$tmp"
+  chmod 0644 "$tmp" 2>/dev/null; mv -f "$tmp" "$out"
+  log "[$id] provision: $phase (${pct}%) $msg"
+}
+
+provision() { # processingFile
+  local req="$1" id displayName maxPlayers serverPassword
+  id=$(jq -r '.id // empty' "$req" 2>/dev/null)
+  displayName=$(jq -r '.displayName // .id' "$req" 2>/dev/null)
+  maxPlayers=$(jq -r '.maxPlayers // 32' "$req" 2>/dev/null)
+  # Operator-chosen JOIN password (shared with players). Empty => public server.
+  # The ADMIN password is always generated (never client-supplied).
+  serverPassword=$(jq -r '.serverPassword // ""' "$req" 2>/dev/null)
+  [ "$serverPassword" = null ] && serverPassword=""
+  rm -f "$req"
+  [ -z "$id" ] && { log "provision: missing id"; return; }
+
+  pstatus "$id" allocating 10 "Allocating ports"
+  local ports; ports=$(alloc_ports) || { pstatus "$id" failed 100 "No free port block"; return; }
+  local P_GAME P_QUERY P_RCON P_REST P_PD; read -r P_GAME P_QUERY P_RCON P_REST P_PD <<<"$ports"
+
+  pstatus "$id" creating 30 "Creating files (ports ${P_GAME}/${P_QUERY}/${P_RCON}/${P_REST}/${P_PD})"
+  local dir="${SRV_ROOT}/${id}"
+  mkdir -p "$dir/game" "$dir/mods" "$dir/compatdata-seed" 2>/dev/null
+  [ -d "$SEED_COMPATDATA" ] && cp -a "$SEED_COMPATDATA/." "$dir/compatdata-seed/" 2>/dev/null || true
+
+  local admin; admin=$(gen_password)
+  cat > "$dir/.env" <<ENV
+SERVER_NAME=${displayName}
+ADMIN_PASSWORD=${admin}
+SERVER_PASSWORD=${serverPassword}
+MAX_PLAYERS=${maxPlayers}
+REST_API_ENABLED=true
+RCON_ENABLED=true
+ENABLE_UE4SS=true
+TZ=${TZ:-UTC}
+ENV
+  chown root:"$DASH_GID" "$dir/.env" 2>/dev/null; chmod 0660 "$dir/.env"
+
+  [ -f "$TEMPLATE" ] || { pstatus "$id" failed 100 "Instance template missing ($TEMPLATE)"; return; }
+  sed -e "s|__IMAGE__|${IMAGE}|g" -e "s|__CONTAINER__|palworld-${id}|g" \
+      -e "s|__GAME_PORT__|${P_GAME}|g" -e "s|__QUERY_PORT__|${P_QUERY}|g" \
+      -e "s|__RCON_PORT__|${P_RCON}|g" -e "s|__REST_PORT__|${P_REST}|g" \
+      -e "s|__PALDEFENDER_PORT__|${P_PD}|g" "$TEMPLATE" > "$dir/docker-compose.yml"
+
+  # Register now (enabled) so it's listable/manageable/deletable even if the
+  # first boot is slow or fails. Secrets stay in the .env only, never here.
+  jq -n --arg id "$id" --arg dn "$displayName" --arg c "palworld-${id}" --arg cd "$dir" \
+     --arg gd "$dir/game" --arg ef "$dir/.env" \
+     --argjson g "$P_GAME" --argjson q "$P_QUERY" --argjson rc "$P_RCON" --argjson re "$P_REST" --argjson pd "$P_PD" \
+     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     '{id:$id,displayName:$dn,seed:false,enabled:true,container:$c,composeDir:$cd,gameDir:$gd,envFilePath:$ef,ports:{game:$g,query:$q,rcon:$rc,rest:$re,paldefender:$pd},rconHost:"host.docker.internal",restUrl:("http://host.docker.internal:"+($re|tostring)),paldefenderUrl:("http://host.docker.internal:"+($pd|tostring)),createdAt:$ts}' \
+     | registry_upsert
+
+  pstatus "$id" starting 60 "Starting container (first boot installs the game)"
+  ( cd "$dir" && docker compose up -d ) >/dev/null 2>&1 || { pstatus "$id" failed 100 "docker compose up failed"; return; }
+
+  # Readiness = authenticated REST 200 (401 answers even when stopped, so a bare
+  # response is NOT enough — require a genuine 200).
+  local deadline code; deadline=$(( $(date +%s) + PROVISION_TIMEOUT ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    code=$(curl -s -o /dev/null -m 4 -w '%{http_code}' -u "admin:${admin}" "http://127.0.0.1:${P_REST}/v1/api/info" 2>/dev/null || echo 000)
+    [ "$code" = 200 ] && { pstatus "$id" ready 100 "Server is up"; return; }
+    sleep 10
+  done
+  pstatus "$id" timeout 100 "Container started but REST not confirmed yet (may still be installing)"
+}
+
+delete_instance() { # processingFile
+  local req="$1" id dir
+  id=$(basename "$req"); id="${id%.delete.request.processing}"; id="${id%.delete.request}"
+  rm -f "$req"
+  { [ -z "$id" ] || [ "$id" = default ]; } && { log "delete: refusing '$id'"; return; }
+  log "[$id] delete-keeps-saves"
+  dir=$(jq -r --arg id "$id" '.instances[]?|select(.id==$id)|.composeDir' "$REGISTRY" 2>/dev/null)
+  if [ -n "$dir" ] && [ "$dir" != null ] && [ -d "$dir" ]; then
+    ( cd "$dir" && docker compose down ) >/dev/null 2>&1 || true   # NO -v: keep volumes/game dir
+  fi
+  registry_remove "$id"
+  rm -rf "${RUN_ROOT}/${id}" 2>/dev/null
+  rm -f "${PROVISION_DIR}/${id}.status" 2>/dev/null
+  log "[$id] deleted from registry; saves kept at ${dir}/game"
+}
+
+log "started (registry=$REGISTRY interval=${INTERVAL}s)"
+while true; do
+  if [ -f "$REGISTRY" ]; then
+    while IFS=$'\t' read -r id dir container envFile rconPort; do
+      [ -z "$id" ] && continue
+      instdir="${RUN_ROOT}/${id}"
+      if [ ! -d "$instdir" ]; then
+        mkdir -p "$instdir" 2>/dev/null && chown "${DASH_UID}:${DASH_GID}" "$instdir" 2>/dev/null && chmod 0775 "$instdir" 2>/dev/null
+      fi
+      for action in restart shutdown start; do
+        req="${instdir}/${action}.request"
+        proc="${instdir}/${action}.processing"
+        [ -e "$proc" ] && continue          # already in flight
+        [ -f "$req" ] || continue
+        mv "$req" "$proc" 2>/dev/null || continue   # atomic claim
+        handle "$id" "$action" "$dir" "$container" "$envFile" "$rconPort" "$proc" &
+      done
+    done < <(jq -r '.instances[]? | select(.id != "default") | [.id, .composeDir, .container, .envFilePath, ((.ports.rcon // 25575)|tostring)] | @tsv' "$REGISTRY" 2>/dev/null)
+  fi
+
+  # provisioning requests (backgrounded — first boot can take minutes)
+  if [ -d "$PROVISION_DIR" ]; then
+    for req in "$PROVISION_DIR"/*.request; do
+      [ -e "$req" ] || continue
+      proc="${req%.request}.processing"
+      [ -e "$proc" ] && continue
+      mv "$req" "$proc" 2>/dev/null || continue
+      ( provision "$proc" ) &
+    done
+  fi
+
+  # delete requests (delete-keeps-saves)
+  for req in "$RUN_ROOT"/*.delete.request; do
+    [ -e "$req" ] || continue
+    proc="${req}.processing"
+    [ -e "$proc" ] && continue
+    mv "$req" "$proc" 2>/dev/null || continue
+    ( delete_instance "$proc" ) &
+  done
+
+  sleep "$INTERVAL"
+done

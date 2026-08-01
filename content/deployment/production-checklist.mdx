@@ -1,0 +1,49 @@
+---
+title: Production Checklist
+---
+
+# Production Checklist
+
+Before relying on the dashboard for a live server, verify the following.
+
+## Access
+
+- Dashboard is not exposed directly to the public internet without extra protection.
+- HTTPS is enabled when accessed outside localhost.
+- Reverse proxy authentication or VPN is configured where appropriate.
+- `RATE_LIMIT_TRUST_PROXY=true` is only set behind a trusted proxy.
+
+## Secrets
+
+- `PANEL_INITIAL_ADMIN_PASSWORD` is strong.
+- `PALWORLD_ADMIN_PASSWORD` is strong and not reused elsewhere.
+- `.env` is not committed.
+- `PANEL_AUTH_FILE` is persistent and protected.
+
+## Palworld connectivity
+
+- `PALWORLD_REST_URL` is reachable from the dashboard host.
+- The REST API port is correct.
+- Firewall rules allow only the needed traffic.
+
+## Operations
+
+- FPS sampler is running if you want historical metrics.
+- Restart integration is tested if enabled.
+- Backups exist for Palworld world saves and config.
+- You know how to roll back dashboard updates.
+
+## Validation
+
+Run:
+
+```bash
+npm run check
+```
+
+For Docker:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 palworld-server-dashboard
+```

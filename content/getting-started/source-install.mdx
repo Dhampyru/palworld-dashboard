@@ -1,0 +1,69 @@
+---
+title: Source Install
+---
+
+# Source Install
+
+Use a source install when you are developing the dashboard or deploying it without Docker.
+
+## 1. Clone and install
+
+```bash
+git clone https://github.com/RNZ01/palworld-server-dashboard.git
+cd palworld-server-dashboard
+npm install
+```
+
+## 2. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Set at minimum:
+
+```env
+PANEL_INITIAL_ADMIN_PASSWORD=replace-with-a-panel-password
+PALWORLD_ADMIN_PASSWORD=replace-with-real-game-admin-password
+PALWORLD_REST_URL=http://127.0.0.1:8212
+```
+
+Use the address that is reachable from the machine running the dashboard.
+
+## 3. Run for development
+
+```bash
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+## 4. Run for production
+
+```bash
+npm run build
+npm run start
+```
+
+The build also creates the Pagefind search index used by the documentation.
+
+## Bare-metal FPS sampler
+
+Docker Compose starts the FPS sampler automatically. In a source install, run it separately if you want rolling FPS history while nobody has the dashboard open.
+
+Use the example unit:
+
+```text
+scripts/fps-sampler/palworld-fps-sampler.service.example
+```
+
+The panel and sampler must point at the same history file:
+
+```env
+PALWORLD_FPS_HISTORY_FILE=/run/palworld-metrics/fps-history.json
+FPS_HISTORY_FILE=/run/palworld-metrics/fps-history.json
+```

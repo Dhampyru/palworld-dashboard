@@ -1,0 +1,45 @@
+---
+title: Server Restart
+---
+
+# Server Restart
+
+Palworld REST can stop or shut down the server, but it does not restart the host process by itself. The dashboard therefore uses a safe file-request pattern for optional host-driven restarts.
+
+## How it works
+
+```text
+Dashboard → writes restart request file → host systemd unit consumes file → systemctl restart palworld
+```
+
+The web app does not need sudo access. It only writes a request file to `PALWORLD_RESTART_REQUEST_PATH`.
+
+## Dashboard variable
+
+```env
+PALWORLD_RESTART_REQUEST_PATH=/run/palworld/restart.request
+```
+
+Cancel requests are written next to it as:
+
+```text
+/run/palworld/restart.cancel
+```
+
+## Host integration required
+
+This feature is inert until you install host-side automation that watches the request file and restarts the Palworld service.
+
+A typical implementation uses:
+
+- a root-owned systemd `.path` unit watching `restart.request`
+- a root-owned oneshot service that validates the request and runs `systemctl restart palworld`
+- permissions that let the dashboard write only the request directory
+
+## Security guidance
+
+- Keep restart admin-only.
+- Do not give the dashboard process passwordless sudo.
+- Validate request files in the host-side worker.
+- Put request files in a dedicated directory with narrow permissions.
+- Log restart requests for operator accountability.

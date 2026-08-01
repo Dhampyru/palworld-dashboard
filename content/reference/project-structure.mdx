@@ -1,0 +1,32 @@
+---
+title: Project Structure
+---
+
+# Project Structure
+
+```text
+app/                 Next.js app routes, layouts, and API routes
+components/          dashboard UI components
+components/ui/       reusable UI primitives
+content/             Nextra documentation content
+lib/                 shared helpers, state, auth, and types
+public/              static assets
+scripts/             build helpers and FPS sampler
+```
+
+## Important files
+
+| File | Purpose |
+| --- | --- |
+| `app/page.tsx` | Main dashboard route. |
+| `app/docs/[[...mdxPath]]/page.tsx` | Nextra MDX docs route. |
+| `app/api/palworld/[...path]/route.ts` | Palworld REST proxy. |
+| `lib/server-context.tsx` | Client-side dashboard state and polling. |
+| `lib/panel-auth-store.ts` | File-backed panel credential store. |
+| `lib/access-tier.ts` | Admin/mod password classification. |
+| `lib/rate-limit.ts` | In-memory failed-login limiter. |
+| `lib/demo.ts` | Demo-mode data. |
+| `docker-compose.yml` | Recommended deployment stack. |
+| `Dockerfile` | Production image build. |
+| `scripts/fps-sampler/palworld-fps-sampler.py` | FPS history sampler. |
+| `scripts/build-search-index.mjs` | Documentation search index builder. |

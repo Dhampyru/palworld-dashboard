@@ -1,0 +1,51 @@
+---
+title: Authentication
+---
+
+# Authentication
+
+## Credential store
+
+Panel passwords are stored as scrypt hashes in `PANEL_AUTH_FILE`.
+
+On first run:
+
+1. The app reads `PANEL_INITIAL_ADMIN_PASSWORD`.
+2. It optionally reads `PANEL_INITIAL_MOD_PASSWORD`.
+3. It writes hashes to `PANEL_AUTH_FILE`.
+4. Future password checks use the file-backed store.
+
+After the store exists, changing the initial environment variables does not automatically change the active panel passwords. Use the settings dialog or remove/reseed the store intentionally.
+
+## Admin password vs game password
+
+The panel admin password is not the Palworld game REST admin password.
+
+- Panel password: used by people logging in to the dashboard.
+- Game password: used by the server-side proxy to authenticate to Palworld.
+
+This lets you rotate or limit panel access without revealing the real game admin password to browsers.
+
+## Rate limiting
+
+Invalid panel password attempts are rate limited in memory:
+
+- 4 failed attempts
+- 4 minute window
+- failures are tracked by client IP when trusted proxy mode is enabled
+
+By default, the app does **not** trust `x-forwarded-for` because directly exposed apps can receive spoofed headers.
+
+If the dashboard is behind a reverse proxy that you control and that overwrites client IP headers, enable:
+
+```env
+RATE_LIMIT_TRUST_PROXY=true
+```
+
+Do not enable it for a directly exposed dashboard.
+
+## Remembered sessions
+
+The browser can remember login details in local storage. This is convenient for personal devices but inappropriate for shared machines.
+
+Clear browser site data or use the dashboard disconnect action to remove active local session state.

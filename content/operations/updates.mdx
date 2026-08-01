@@ -1,0 +1,40 @@
+---
+title: Updates
+---
+
+# Updates
+
+## Docker Compose
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Check logs after updating:
+
+```bash
+docker compose logs -f palworld-server-dashboard
+```
+
+## Source install
+
+```bash
+git pull
+npm install
+npm run build
+npm run start
+```
+
+## Before updating
+
+Recommended checklist:
+
+- read release notes or recent commits
+- back up `.env`
+- back up the panel auth file or persistent Docker volume
+- schedule downtime if you are updating during active play
+
+## Rollback
+
+For Docker, pin `PALWORLD_SERVER_DASHBOARD_IMAGE` to a known-good tag or digest. For source installs, roll back the git commit and rebuild.

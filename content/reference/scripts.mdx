@@ -1,0 +1,25 @@
+---
+title: Scripts
+---
+
+# Scripts
+
+| Script | Description |
+| --- | --- |
+| `npm run dev` | Starts the Next.js development server. |
+| `npm run build` | Creates a production build and then generates the docs search index. |
+| `npm run postbuild` | Builds the Pagefind search index. Usually run automatically after build. |
+| `npm run start` | Starts the production server from the built app. |
+| `npm run typegen` | Clears `.next` and regenerates Next.js route types. |
+| `npm run typecheck` | Runs route type generation and TypeScript checks. |
+| `npm run lint` | Alias for `npm run typecheck`. |
+| `npm run check` | Runs typecheck and production build. |
+| `npm run postinstall` | Applies the local Nextra theme patch after dependency installation. |
+
+## Verification
+
+Before committing operational changes, run:
+
+```bash
+npm run check
+```

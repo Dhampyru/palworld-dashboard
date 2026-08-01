@@ -1,0 +1,47 @@
+---
+title: Monitoring
+---
+
+# Monitoring
+
+The monitoring panels help operators understand server health at a glance.
+
+## Live metrics
+
+The dashboard displays Palworld metrics such as:
+
+- server FPS
+- frame time
+- current players
+- maximum players
+- uptime
+- world day
+- base count
+
+## FPS health summary
+
+The FPS panel summarizes performance using several signals instead of a single point-in-time value:
+
+- current FPS
+- minimum FPS in the window
+- average FPS
+- maximum FPS
+- median FPS
+- longest continuous dip below 45 FPS
+- percentage of the window below 30 FPS
+
+The health verdict avoids pretending there is certainty when the sampler has no data, stale data, or too little data.
+
+## Snapshot polling
+
+Metrics and players are refreshed through `/api/server-snapshot`. This reduces request count and keeps panels in sync.
+
+## Missing data
+
+A blank or stale metric usually means:
+
+- the Palworld REST API is unavailable
+- the server is restarting
+- credentials are wrong
+- the FPS sampler is not running
+- the history file is unreadable

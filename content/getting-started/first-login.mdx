@@ -1,0 +1,40 @@
+---
+title: First Login
+---
+
+# First Login
+
+## Admin login
+
+Open the dashboard URL and enter the panel admin password from `PANEL_INITIAL_ADMIN_PASSWORD`.
+
+On first startup, the dashboard seeds `PANEL_AUTH_FILE` with a scrypt hash of the initial password. After that, the initial environment variable is only a bootstrap fallback. Use the panel settings dialog to change the stored panel passwords.
+
+## Moderator login
+
+If `PANEL_INITIAL_MOD_PASSWORD` is set before the first credential-store seed, users can log in with that password and receive the mod tier.
+
+The mod tier shows a compact roster-focused view and only allows these upstream operations:
+
+- view players
+- view basic server info
+- view metrics needed for player count
+- kick players
+- ban players
+- unban players
+
+## Remember me
+
+The login screen can remember the panel password on the current browser. Use it only on trusted private devices.
+
+Avoid using remember-me on:
+
+- shared computers
+- public kiosks
+- browser profiles synced to machines you do not control
+
+## Changing panel passwords
+
+Admin users can open panel settings from the dashboard header. Password changes update the file configured by `PANEL_AUTH_FILE`.
+
+Keep that file on persistent storage in Docker and backed up if you rely on runtime password changes.
