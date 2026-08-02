@@ -1,0 +1,49 @@
+# Palworld dedicated server (Windows binary under Wine, UE4SS-capable).
+# Build locally (default) or swap in the published image once CI publishes it.
+# All tunables live in .env (copy .env.example -> .env). The game binary is
+# installed by SteamCMD on first boot; UE4SS (MIT) is fetched on first boot.
+
+services:
+  palworld:
+    build: .
+    # image: ghcr.io/dhampyru/palworld-game-server:latest   # published alternative
+    image: palworld-game-server:local
+    container_name: palworld-server
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+    # Wine needs seccomp=unconfined for ptrace; no-new-privileges is safe.
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=unconfined
+    cap_add:
+      - SYS_PTRACE
+
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    ports:
+      - "${PORT:-8211}:8211/udp"                          # Game
+      - "${QUERY_PORT:-27015}:27015/udp"                  # Steam query
+      - "127.0.0.1:${RCON_PORT:-25575}:25575/tcp"         # RCON  (localhost only)
+      - "127.0.0.1:${REST_API_PORT:-8212}:8212/tcp"       # REST  (localhost only)
+      - "127.0.0.1:${PALDEFENDER_REST_PORT:-17993}:17993/tcp"  # PalDefender REST (localhost only)
+
+    volumes:
+      - ./game:/palworld                    # Server data, mods, saves, backups
+      - ./mods:/mods                        # Mod staging (Win64/ and pak/)
+      - /etc/machine-id:/etc/machine-id:ro  # Stable machine-id for Steam
+
+    # UE4SS's DLL-proxy injection needs Wine to prefer the game's own dwmapi.dll
+    # (and d3d9.dll for PalDefender) over Wine's builtins -- without this UE4SS
+    # never loads. Keep this here; the rest of the config comes from .env.
+    environment:
+      WINEDLLOVERRIDES: "dwmapi=n,b;d3d9=n,b"
+    env_file:
+      - .env
+
+    # Palworld 1.0: ~16GB RAM min, 32GB for community servers.
+    # mem_limit: 16g

@@ -41,3 +41,7 @@ data/nexus.json
 # Steam Workshop account: username marker + cached SteamCMD session (server-side only)
 data/steam-account.json
 data/steam/
+
+# game-server runtime data (created on first run)
+game-server/game/
+game-server/mods/
