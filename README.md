@@ -22,9 +22,21 @@ No server yet? One command brings up **game server + dashboard** together (creat
 docker compose -f docker-compose.full.yml up -d
 ```
 
-**You get:** live status / FPS / metrics, live map, roster (kick/ban), saves & backups, save inspector & editor, mods, world / engine / PalDefender settings, RCON console.
+**Quick Install Dashboard Functions Provided:** 
+- **live status 
+- **FPS
+- **metrics
+- **live map
+- **roster (kick/ban)
+- **saves & backups
+- **save inspector & editor
+- **mods
+- **world settings
+- **engine settings
+- **PalDefender settings
+- **RCON console
 
-**Beyond the quick install** — additional dashboard features and polish that aren't in the quick install and are added by a full [self-hosted setup](content/getting-started/full-setup.mdx). The quick install runs fine without them; each bullet notes how to enable it:
+**Missing Details that Requires a full setup** — additional dashboard features and polish that aren't in the quick install and are added by a full [self-hosted setup](content/getting-started/full-setup.mdx).
 - **Friendly item/Pal names + icons** — the quick install shows raw game IDs; add real names by extracting from your own game → [Item & Pal Datasets](content/configuration/item-pal-datasets.mdx).
 - **Start / Stop / Restart + multi-server** — inert until you install the host integration → `sudo scripts/host/install.sh` ([Host Integration](content/deployment/host-integration.mdx)).
 - **Your real connect address in the header** — a placeholder until you build from source with it set (`docker compose build`).
