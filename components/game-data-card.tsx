@@ -145,7 +145,10 @@ export function GameDataCard() {
         Populate the RCON command pickers with your game&apos;s real item/Pal names. Upload a{' '}
         <code className="font-mono">mappings.usmap</code> made on a PC with UE4SS; the host extracts from your own
         pak — nothing is redistributed, and no rebuild is needed. One usmap per game version.{' '}
-        <span className="opacity-80">(Pal icons aren&apos;t extracted yet — names only for now.)</span>
+        <span className="opacity-80">
+          (Names only: a dedicated-server pak has no texture pixel data, so Pal icons can&apos;t be
+          extracted here.)
+        </span>
       </p>
 
       {/* Coverage */}

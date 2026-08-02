@@ -49,10 +49,13 @@ already mounts `./extracted/{data,icons}`), and the names + icons appear on the
 next dashboard start — no rebuild. Re-run the extractor after a game update
 (with a fresh usmap) to refresh.
 
-Item icons aren't produced (PDE is Pal-focused). **Pal icons currently come out
-empty too** and are omitted: on the pinned CUE4Parse, Palworld's cooked icon
-textures decode to zero mips, so no PNG is produced (a texture-compat gap, not a
-wiring bug — names are unaffected). So this tool populates **names only** for now.
+Item icons aren't produced (PDE is Pal-focused). **Pal icons cannot be extracted
+from a dedicated-SERVER pak** (`Pal-WindowsServer.pak`): a server never renders, so
+UE strips texture pixel data at cook time — the texture's `ImportedSize` survives
+but its platform data is empty (`Mips=0`), so no PNG is produced. This is inherent
+to the server build, not a parser bug. So against a server pak this tool populates
+**names only**. Icons require a CLIENT pak (a gaming PC), which keeps full texture
+data — run this tool there to get `pal/*.png`.
 
 ## Notes
 

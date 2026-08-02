@@ -90,19 +90,30 @@ tables, it doesn't decompress the whole pak) → `/api/datasets` flips to
 `source: extracted` with real names (Alpaca→Melpaca, Kitsun; 603 named pals /
 1894 named items). Game container untouched (`StartedAt` unchanged).
 
-## Known limitation — Pal icons not extracted (names only)
+## Known limitation — Pal icons cannot come from the SERVER pak (names only)
 
-Icon PNGs come out **empty** and are omitted (the picker shows name/ID, no
-broken images). Root cause: on the pinned CUE4Parse (1.2.2.202608), Palworld's
-cooked Pal-icon textures deserialize with `FTexturePlatformData.Mips == 0` /
-`SizeX == 0`, so `Decode()` returns null — a CUE4Parse-vs-Palworld texture
-compatibility gap, **not** a Skia or wiring bug (data tables are schema-driven so
-names are unaffected; this was pre-existing — the earlier "293 icons" were always
-0-byte files). Two fixes are already in place for when the decode is solved: the
-Dockerfile publishes `libSkiaSharp.so` (`SkiaSharp.NativeAssets.Linux.NoDependencies`
+Icon PNGs come out **empty** and are omitted (the picker shows name/ID, no broken
+images). **Definitive root cause (diagnosed 2026-08-02): the dedicated-server cook
+strips texture pixel data.** The pak here is `Pal-WindowsServer.pak` — a dedicated
+server never renders, so UE cooks its textures WITHOUT mip/pixel data. Proof: for
+`T_Anubis_icon_normal` the texture's `ImportedSize` is still `128x128` (metadata
+survives so references resolve) but its `FTexturePlatformData` is empty —
+`PixelFormat=""`, `SizeX=0`, `Mips=0`, `FirstMipToSerialize=-1`. This is **not** a
+CUE4Parse/Skia/wiring bug (we're on the newest CUE4Parse 1.2.2.202608; data tables
+are schema-driven so names are unaffected) and not fixable parser-side — **the
+pixels are not in the server pak.** The earlier "293 icons" were always 0-byte.
+
+**Where icons WOULD come from:** a CLIENT install's pak (a gaming PC), which keeps
+full texture data. The operator is already on that PC to generate the usmap (UE4SS
+is client-side), so the practical path is client-side icon extraction + upload:
+run the extractor against the client pak to get `pal/*.png`, then upload that icon
+set to the dashboard (it already serves `<srv>/gamedata/<id>/icons`). A multi-GB
+client-pak upload to the server is not practical; an icon zip (~a few MB) is.
+
+Two fixes already landed so icons work the moment real texture data is present:
+the Dockerfile publishes `libSkiaSharp.so` (`SkiaSharp.NativeAssets.Linux.NoDependencies`
 2.88.9 — it was missing, so even a successful decode would have encoded nothing),
-and `convert.py` skips 0-byte icons. Revisit with a newer CUE4Parse or a
-Palworld-specific texture path.
+and `convert.py` skips 0-byte icons.
 
 ## Effort / risk
 
