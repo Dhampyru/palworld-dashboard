@@ -1,0 +1,73 @@
+# One-command full stack: Palworld game server + dashboard, from the published
+# images. Create a .env next to this file with at least:
+#
+#   PANEL_INITIAL_ADMIN_PASSWORD=your-dashboard-login-password
+#   PALWORLD_ADMIN_PASSWORD=your-game-admin-and-rcon-password
+#
+# then:  docker compose -f docker-compose.full.yml up -d
+#
+# First boot downloads the game via SteamCMD (several GB) — give it time. You get
+# monitoring, live map, roster, saves, mods, world/engine settings and RCON out
+# of the box. Start/Stop/Restart + provisioning need the host integration
+# (scripts/host/install.sh). Clean-image notes: the save inspector shows raw IDs
+# and the header connect address is a placeholder (both customizable via a source
+# build — see the docs).
+name: palworld-stack
+
+services:
+  palworld:
+    image: ghcr.io/dhampyru/palworld-game-server:latest
+    container_name: palworld-server
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=unconfined
+    cap_add:
+      - SYS_PTRACE
+    ports:
+      - "${PORT:-8211}:8211/udp"          # Game (players connect here)
+      - "${QUERY_PORT:-27015}:27015/udp"  # Steam query
+    environment:
+      # Required for UE4SS/PalDefender DLL-proxy injection under Wine.
+      WINEDLLOVERRIDES: "dwmapi=n,b;d3d9=n,b"
+      SERVER_NAME: "${SERVER_NAME:-My Palworld Server}"
+      SERVER_PASSWORD: "${SERVER_PASSWORD:-}"
+      ADMIN_PASSWORD: "${PALWORLD_ADMIN_PASSWORD:?set PALWORLD_ADMIN_PASSWORD in .env}"
+      MAX_PLAYERS: "${MAX_PLAYERS:-32}"
+      # The dashboard needs both of these:
+      RCON_ENABLED: "true"
+      REST_API_ENABLED: "true"
+      ENABLE_UE4SS: "${ENABLE_UE4SS:-true}"
+      COMMUNITY: "${COMMUNITY:-false}"
+      # Pin a Steam manifest if you rely on UE4SS (a game update can break it).
+      TARGET_MANIFEST_ID: "${TARGET_MANIFEST_ID:-}"
+    volumes:
+      - ./game:/palworld                    # Server data, mods, saves, backups
+      - ./mods:/mods                        # Mod staging (Win64/ and pak/)
+      - /etc/machine-id:/etc/machine-id:ro
+
+  dashboard:
+    image: ghcr.io/dhampyru/palworld-dashboard:latest
+    container_name: palworld-server-dashboard
+    restart: unless-stopped
+    depends_on:
+      - palworld
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    environment:
+      PANEL_INITIAL_ADMIN_PASSWORD: "${PANEL_INITIAL_ADMIN_PASSWORD:?set PANEL_INITIAL_ADMIN_PASSWORD in .env}"
+      PANEL_INITIAL_MOD_PASSWORD: "${PANEL_INITIAL_MOD_PASSWORD:-}"
+      PALWORLD_ADMIN_PASSWORD: "${PALWORLD_ADMIN_PASSWORD:?set PALWORLD_ADMIN_PASSWORD in .env}"
+      # Reach the game container over the compose network (service name):
+      PALWORLD_REST_URL: "http://palworld:8212"
+      PALWORLD_RCON_HOST: "palworld"
+      PALWORLD_RCON_PORT: "25575"
+      # Read saves/mods/settings from the shared game volume:
+      PALWORLD_GAME_DIR: "/palworld-game"
+    volumes:
+      - ./game:/palworld-game
+      - dashboard-data:/app/data
+
+volumes:
+  dashboard-data:

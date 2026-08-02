@@ -25,6 +25,30 @@ step links to the detailed page; follow them in order. Everything past Step 2 is
 | **Managed** | Start / stop / restart, multi-server provisioning | **+ [host integration](/docs/deployment/host-integration)** |
 | **Named data** | Friendly item/Pal names + icons, save-inspector names | **+ data population** (build from source) |
 
+## Fastest path: the whole stack in one command
+
+If you just want the game server + dashboard running together, use the published
+images with the bundled compose. Create a `.env` with two passwords:
+
+```env
+PANEL_INITIAL_ADMIN_PASSWORD=your-dashboard-login
+PALWORLD_ADMIN_PASSWORD=your-game-admin-and-rcon-password
+```
+
+Then:
+
+```bash
+docker compose -f docker-compose.full.yml up -d
+```
+
+First boot downloads the game via SteamCMD (several GB), so give it time. Once
+up, open the dashboard on port 3000 and log in. This gets you the **Minimum**
+tier plus the game server, wired together automatically — the dashboard reaches
+the game over the compose network. For Start/Stop/Restart and multi-server, add
+[host integration](/docs/deployment/host-integration) (`sudo scripts/host/install.sh`).
+
+The steps below are for customizing each layer, or running the pieces separately.
+
 ## Step 1 — A Palworld dedicated server
 
 You need a running dedicated server with the **REST API** and **RCON** enabled

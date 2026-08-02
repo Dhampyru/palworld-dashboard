@@ -45,3 +45,7 @@ data/steam/
 # game-server runtime data (created on first run)
 game-server/game/
 game-server/mods/
+
+# full-stack (docker-compose.full.yml) runtime data at repo root
+/game/
+/mods/
