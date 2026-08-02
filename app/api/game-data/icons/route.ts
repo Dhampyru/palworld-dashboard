@@ -26,6 +26,14 @@ function baseName(entryName: string): string {
   return entryName.split(/[/\\]/).pop() ?? ''
 }
 
+// Icons are categorised into pal/ or item/ by a folder segment in the zip path
+// (…/pal/X.png, …/item/X.png). Bare PNGs default to pal (back-compat with the
+// original pal-only zips). /api/datasets links pal icons to Pal ids and item
+// icons to item ids; /api/game-icon serves either by path.
+function categoryOf(entryName: string): 'pal' | 'item' {
+  return entryName.toLowerCase().split(/[/\\]/).includes('item') ? 'item' : 'pal'
+}
+
 export async function POST(request: NextRequest) {
   const denied = adminGate(request, 'Forbidden: uploading game data is admin-only')
   if (denied) return denied
@@ -54,9 +62,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Not a valid zip file' }, { status: 400 })
   }
 
-  // Pass 1: collect .png entries by basename, validate names + total size before
-  // writing anything (fail closed).
-  const pngs: { name: string; data: Buffer }[] = []
+  // Pass 1: collect .png entries by (category, basename), validate names + total
+  // size before writing anything (fail closed).
+  const pngs: { cat: 'pal' | 'item'; name: string; data: Buffer }[] = []
   let total = 0
   const seen = new Set<string>()
   for (const entry of zip.getEntries()) {
@@ -70,24 +78,28 @@ export async function POST(request: NextRequest) {
     if (total > MAX_UNCOMPRESSED_BYTES) {
       return NextResponse.json({ error: 'Icons too large uncompressed (max 256MB)' }, { status: 413 })
     }
-    if (seen.has(name.toLowerCase())) continue
-    seen.add(name.toLowerCase())
-    pngs.push({ name, data: entry.getData() })
+    const cat = categoryOf(entry.entryName)
+    const key = `${cat}/${name.toLowerCase()}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    pngs.push({ cat, name, data: entry.getData() })
   }
 
   if (pngs.length === 0) {
     return NextResponse.json({ error: 'No .png icons found in the zip' }, { status: 400 })
   }
 
-  // Pass 2: write them all into the instance's icons/pal dir.
+  // Pass 2: write them into the instance's icons/<pal|item> dirs.
   try {
     const { iconsDir } = resolveGameDataPaths(request.headers.get(PALWORLD_PROXY_HEADERS.instance))
-    const palDir = join(iconsDir, 'pal')
-    await mkdir(palDir, { recursive: true })
+    await mkdir(join(iconsDir, 'pal'), { recursive: true })
+    await mkdir(join(iconsDir, 'item'), { recursive: true })
+    const counts = { pal: 0, item: 0 }
     for (const png of pngs) {
-      await writeFile(join(palDir, png.name), png.data, { mode: 0o664 })
+      await writeFile(join(iconsDir, png.cat, png.name), png.data, { mode: 0o664 })
+      counts[png.cat]++
     }
-    return NextResponse.json({ success: true, count: pngs.length })
+    return NextResponse.json({ success: true, count: pngs.length, counts })
   } catch (error) {
     return NextResponse.json(
       { error: `Failed to store icons: ${error instanceof Error ? error.message : 'unknown error'}` },

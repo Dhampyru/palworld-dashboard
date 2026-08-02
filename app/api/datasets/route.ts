@@ -37,6 +37,26 @@ async function load(dir: string, key: 'items' | 'pals' | 'eggs', instId: string)
   }
 }
 
+// Set each entry's `image` from an uploaded icon of the same id, when it has none.
+// Server extraction can't produce icons (the server pak strips texture data), so
+// entries arrive without an `image`; an <id>.png in the instance's icons/<cat> dir
+// (uploaded via /api/game-data/icons) becomes the image here. Entries that already
+// carry an image (e.g. a full client bundle) are left as load() set them.
+async function linkIcons(dir: string, cat: 'pal' | 'item', entries: Entry[], q: string): Promise<void> {
+  try {
+    const files = await readdir(dir)
+    const ids = new Set(
+      files.filter((f) => f.toLowerCase().endsWith('.png')).map((f) => f.slice(0, -4)),
+    )
+    if (ids.size === 0) return
+    for (const e of entries) {
+      if (!e.image && ids.has(e.id)) e.image = `${ICON_ROUTE}${cat}/${e.id}.png${q}`
+    }
+  } catch {
+    /* no uploaded icons for this category */
+  }
+}
+
 export async function GET(request: NextRequest) {
   const instId = (request.headers.get(PALWORLD_PROXY_HEADERS.instance) ?? 'default').trim() || 'default'
   const { dataDir, iconsDir } = resolveGameDataPaths(instId)
@@ -59,22 +79,9 @@ export async function GET(request: NextRequest) {
   // operator has uploaded an icon set (/api/game-data/icons), an <id>.png in the
   // instance's icons/pal dir becomes the pal's image here. Entries that already
   // carry an image (e.g. a full client bundle) are left as the load() rewrite set them.
-  try {
-    const files = await readdir(join(iconsDir, 'pal'))
-    const iconIds = new Set(
-      files.filter((f) => f.toLowerCase().endsWith('.png')).map((f) => f.slice(0, -4)),
-    )
-    if (iconIds.size > 0) {
-      const q = `?inst=${encodeURIComponent(instId)}`
-      for (const p of pals) {
-        if (!p.image && iconIds.has(p.id)) {
-          p.image = `${ICON_ROUTE}pal/${p.id}.png${q}`
-        }
-      }
-    }
-  } catch {
-    /* no uploaded icons — pals stay name-only */
-  }
+  const q = `?inst=${encodeURIComponent(instId)}`
+  await linkIcons(join(iconsDir, 'pal'), 'pal', pals, q)
+  await linkIcons(join(iconsDir, 'item'), 'item', items, q)
 
   return NextResponse.json({ items, pals, eggs })
 }

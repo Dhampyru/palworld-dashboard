@@ -22,9 +22,9 @@ async function countJson(dir: string, key: string): Promise<number> {
   }
 }
 
-async function countIcons(iconsDir: string): Promise<number> {
+async function countPngs(dir: string): Promise<number> {
   try {
-    const files = await readdir(join(iconsDir, 'pal'))
+    const files = await readdir(dir)
     return files.filter((f) => f.toLowerCase().endsWith('.png')).length
   } catch {
     return 0
@@ -62,12 +62,13 @@ export async function GET(request: NextRequest) {
   } catch {
     /* fall back to baked */
   }
-  const [pals, items, eggs, icons] = await Promise.all([
+  const [pals, items, eggs, icons, itemIcons] = await Promise.all([
     countJson(sourceDir, 'pals'),
     countJson(sourceDir, 'items'),
     countJson(sourceDir, 'eggs'),
-    countIcons(iconsDir),
+    countPngs(join(iconsDir, 'pal')),
+    countPngs(join(iconsDir, 'item')),
   ])
 
-  return NextResponse.json({ status, hasUsmap, source, coverage: { pals, items, eggs, icons } })
+  return NextResponse.json({ status, hasUsmap, source, coverage: { pals, items, eggs, icons, itemIcons } })
 }

@@ -39,7 +39,7 @@ type Payload = {
   status: GDStatus
   hasUsmap: boolean
   source: 'extracted' | 'baked'
-  coverage: { pals: number; items: number; eggs: number; icons: number }
+  coverage: { pals: number; items: number; eggs: number; icons: number; itemIcons: number }
 }
 
 export function GameDataCard() {
@@ -179,7 +179,9 @@ export function GameDataCard() {
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
         Coverage:{' '}
         <span className="text-foreground">
-          {cov ? `${cov.pals} pals · ${cov.items} items · ${cov.eggs} eggs · ${cov.icons} icons` : '—'}
+          {cov
+            ? `${cov.pals} pals · ${cov.items} items · ${cov.eggs} eggs · ${cov.icons} pal + ${cov.itemIcons} item icons`
+            : '—'}
         </span>
         {p && (
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
@@ -259,10 +261,11 @@ export function GameDataCard() {
           extracted from a CLIENT pak on a PC and uploaded here as a zip. */}
       <div className="flex flex-col gap-2 border-t pt-2">
         <p className="text-[11px] text-muted-foreground">
-          <span className="font-medium text-foreground">Pal icons (optional).</span> A dedicated-server pak has no
-          texture data, so icons can&apos;t be extracted here. On the PC where you made the usmap, run the extractor
-          against your <em>client</em> pak, then upload the resulting <code className="font-mono">pal/*.png</code> as a
-          zip — they&apos;re matched to Pals by id.
+          <span className="font-medium text-foreground">Icons (optional).</span> A dedicated-server pak has no texture
+          data, so icons can&apos;t be extracted here. On the PC where you made the usmap, run the extractor against
+          your <em>client</em> pak, then upload a zip with a <code className="font-mono">pal/</code> and/or{' '}
+          <code className="font-mono">item/</code> folder of <code className="font-mono">&lt;id&gt;.png</code> files —
+          they&apos;re matched to Pals and items by id.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -282,7 +285,11 @@ export function GameDataCard() {
             <FileUpIcon className="size-3.5" /> Choose icons .zip…
           </Button>
           <span className="max-w-[14rem] truncate text-[11px] text-muted-foreground">
-            {iconFile ? iconFile.name : cov && cov.icons > 0 ? `${cov.icons} icons uploaded ✓` : 'No icons uploaded'}
+            {iconFile
+              ? iconFile.name
+              : cov && (cov.icons > 0 || cov.itemIcons > 0)
+                ? `${cov.icons + cov.itemIcons} icons uploaded ✓`
+                : 'No icons uploaded'}
           </span>
           <Button
             size="sm"
