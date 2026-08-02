@@ -1,0 +1,59 @@
+name: Publish clean image (GHCR)
+
+# Builds the CLEAN, redistributable image and pushes it to GitHub Container
+# Registry (ghcr.io/<owner>/<repo>). "Clean" = BUNDLE_PSP_DATA=0, so it ships NO
+# Palworld game data (the save inspector falls back to raw ids); datasets are the
+# empty stubs and icons aren't in the repo. Only our MIT code + upstream map art
+# ship — nothing operator-extracted. See docs/clean-room notes.
+#
+# Runs on version tags (v*) and manual dispatch only — never on every push.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata (tags/labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Build and push (clean image)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUNDLE_PSP_DATA=0
+            NEXT_PUBLIC_GAME_SERVER_IP=your.server.ip.or.domain

@@ -86,6 +86,36 @@ Open:
 http://localhost:3000
 ```
 
+### Prebuilt image (GHCR)
+
+Prefer not to build? Pull the published **clean** image (built by CI with no
+bundled game data — see the caveats below):
+
+```bash
+docker pull ghcr.io/dhampyru/palworld-dashboard:latest
+```
+
+Minimal run, pointed at your Palworld REST API:
+
+```bash
+docker run -d -p 3000:3000 \
+  -e PANEL_INITIAL_ADMIN_PASSWORD=change-me \
+  -e PALWORLD_ADMIN_PASSWORD=your-real-palworld-admin-password \
+  -e PALWORLD_REST_URL=http://host.docker.internal:8212 \
+  ghcr.io/dhampyru/palworld-dashboard:latest
+```
+
+Caveats for the prebuilt image:
+
+- **Save inspector shows raw IDs** (not names) — the image ships no Palworld game
+  data. Add names/icons per [Item & Pal Datasets](content/configuration/item-pal-datasets.mdx),
+  which requires building from source.
+- **Connect address is a placeholder** in the header/Invite — `NEXT_PUBLIC_GAME_SERVER_IP`
+  is baked at build time, so showing your real address means building from source
+  (players can still connect via your real IP regardless).
+- **Lifecycle buttons + provisioning need [host integration](content/deployment/host-integration.mdx)**;
+  monitoring, saves, mods, and settings work without it.
+
 ### Local Development
 
 ```bash
