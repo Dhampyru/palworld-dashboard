@@ -173,6 +173,12 @@ you can support ongoing maintenance and new features via
 work — it never gates features or paywalls the software; every feature stays
 available to everyone, self-hosted.
 
+## Acknowledgments
+
+- **[palworld-save-pal](https://github.com/oMaN-Rod/palworld-save-pal)** by oMaN-Rod (MIT) — powers the native save inspection & editing. Its `psp-core` — with the pure-Rust [ooz-rs](https://github.com/palworld-save-pal/ooz-rs) Kraken/Oodle decoder and [uesave-rs](https://github.com/oMaN-Rod/uesave-rs) — is what lets the dashboard read and edit Palworld's `PlM1`/Oodle saves with no proprietary dependencies. Full attribution in [`savtools/NOTICE`](savtools/NOTICE).
+- **[RNZ01/palworld-server-dashboard](https://github.com/RNZ01/palworld-server-dashboard)** (MIT) — the upstream project this is forked from.
+- Works alongside **[UE4SS](https://github.com/UE4SS-RE/RE-UE4SS)** and **PalDefender**; picker datasets are generated with **[FModel](https://fmodel.app/)** (see the [Item & Pal Datasets](content/configuration/item-pal-datasets.mdx) guide).
+
 ## License
 
 MIT. See [LICENSE](./LICENSE). This project is a fork of
