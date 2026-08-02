@@ -10,6 +10,14 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - main
+    paths:
+      # Rebuild only when the extractor tool or this workflow changes — not on
+      # every unrelated main push. Version tags always build (see above).
+      - 'tools/game-data-extractor/**'
+      - 'scripts/pde/**'
+      - '.github/workflows/publish-extractor.yml'
   workflow_dispatch:
 
 permissions:
@@ -22,6 +30,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Free disk space
+        # The net10 self-contained publish + CUE4Parse deps are large; the stock
+        # runner's ~14 GB free on / isn't enough. Reclaim the preinstalled
+        # toolchains we don't use (~25 GB) so the build has headroom.
+        run: |
+          echo "before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune -af || true
+          echo "after:"; df -h /
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
