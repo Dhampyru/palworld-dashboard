@@ -96,6 +96,27 @@ fn container_json(kind: &str, container: &Option<ItemContainerDto>, items: Optio
     json!({ "kind": kind, "slots": slots })
 }
 
+// Load GameData from the given dir, or fall back to an EMPTY GameData (loaded
+// from a temp empty dir) when the game-data dir is absent or unreadable. Lets a
+// clean, bundle-free build run: friendly names degrade to raw ids, never a hard
+// fail. (Clean-room: psp-data is operator-supplied, not shipped.)
+fn load_game_data_or_empty(data_dir: &std::path::Path) -> GameData {
+    if data_dir.is_dir() {
+        match GameData::load(data_dir) {
+            Ok(g) => return g,
+            Err(e) => eprintln!("warning: game data load failed ({e:?}); using ids only"),
+        }
+    } else {
+        eprintln!("warning: game data dir not found ({}); using ids only", data_dir.display());
+    }
+    let empty = std::env::temp_dir().join(format!("psp-empty-gamedata-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&empty);
+    GameData::load(&empty).unwrap_or_else(|e| {
+        eprintln!("failed to init empty game data: {e:?}");
+        std::process::exit(1);
+    })
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let save_dir = args
@@ -158,7 +179,7 @@ fn main() {
     )
     .unwrap_or_else(|e| die(1, &format!("load error: {e:?}")));
 
-    let game_data = GameData::load(&data_dir).unwrap_or_else(|e| die(1, &format!("game data error: {e:?}")));
+    let game_data = load_game_data_or_empty(&data_dir);
 
     session
         .ensure_player_loaded(target)

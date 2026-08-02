@@ -40,6 +40,14 @@ RUN cargo build --release --manifest-path /build/psp/Cargo.toml -p psp-core \
       --example psp-decode --example psp-inspect --example psp-delete-player \
       --example psp-player --example psp-edit-player
 
+# Clean-room toggle. Default (1) bundles Palworld game data (friendly Pal/item
+# names) -- fine for a private deploy. Build with --build-arg BUNDLE_PSP_DATA=0
+# for a PUBLIC image: it ships NO game data, and the save tools fall back to raw
+# ids (see savtools/*.rs load_game_data_or_empty). Placed after the cargo build
+# so toggling it never busts the compile cache.
+ARG BUNDLE_PSP_DATA=1
+RUN if [ "$BUNDLE_PSP_DATA" != "1" ]; then rm -rf /build/psp/data/json && mkdir -p /build/psp/data/json; fi
+
 FROM node:24.18.0-bookworm-slim AS runner
 
 ENV NODE_ENV=production
@@ -97,8 +105,9 @@ RUN dpkg --add-architecture i386 \
 
 # Save decoder/inspector binaries + game data + attribution (savtools/NOTICE).
 # The bundled data/json is Palworld game data (Pal names etc.) -- fine for a
-# private deploy; for a PUBLIC release it carries the same redistribution
-# question as data/*.json (§6), so revisit before shipping.
+# private deploy. For a PUBLIC/clean image build with BUNDLE_PSP_DATA=0 (above):
+# this dir is then empty and the save tools degrade to raw ids. Do NOT publish an
+# image built with BUNDLE_PSP_DATA=1 -- that redistributes Pocketpair game data.
 COPY --from=savtools /build/psp/target/release/examples/psp-decode /usr/local/bin/psp-decode
 COPY --from=savtools /build/psp/target/release/examples/psp-inspect /usr/local/bin/psp-inspect
 COPY --from=savtools /build/psp/target/release/examples/psp-delete-player /usr/local/bin/psp-delete-player
