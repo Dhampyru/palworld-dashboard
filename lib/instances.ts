@@ -329,6 +329,38 @@ export function resolveLifecyclePaths(id?: string | null): LifecyclePaths {
   }
 }
 
+// ─── game-data extraction paths (usmap upload → datasets/icons) ──────────────
+// The dashboard uploads a usmap and reads extracted datasets/icons under the
+// shared /srv/palworld mount (same path host + container); the control daemon
+// runs the extractor and writes the output there. Request/status ride the same
+// per-instance runDir as lifecycle (flat for `default`).
+const SRV_ROOT = process.env.PALWORLD_SRV_ROOT ?? '/srv/palworld'
+
+export interface GameDataPaths {
+  dir: string
+  usmapPath: string
+  dataDir: string
+  iconsDir: string
+  request: string
+  status: string
+  runDir: string
+}
+
+export function resolveGameDataPaths(id?: string | null): GameDataPaths {
+  const wanted = normalizeId(id)
+  const { runDir } = resolveLifecyclePaths(wanted)
+  const dir = `${SRV_ROOT}/gamedata/${wanted}`
+  return {
+    dir,
+    usmapPath: `${dir}/mappings.usmap`,
+    dataDir: `${dir}/data`,
+    iconsDir: `${dir}/icons`,
+    request: `${runDir}/gamedata.request`,
+    status: `${runDir}/gamedata.status`,
+    runDir,
+  }
+}
+
 // ─── request-scoped active instance (AsyncLocalStorage) ─────────────────────
 // Filesystem-backed libs (saves, game-mods, palworld-settings, engine-tuning,
 // paldefender-config, chat) resolve their game dir / env file / REST target from
