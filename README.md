@@ -4,6 +4,38 @@ A self-hosted web dashboard for operating **one or more** Palworld dedicated ser
 
 > A fork of [RNZ01/palworld-server-dashboard](https://github.com/RNZ01/palworld-server-dashboard) (MIT) with expanded operations: full server lifecycle, world/engine/PalDefender settings, mod management, native save inspection & editing, backups & scheduling, restart automation, and multi-server management.
 
+## TL;DR — pick your install
+
+**Fastest — prebuilt image (~2 min).** Already have a Palworld server? Point the dashboard at it:
+
+```bash
+docker run -d -p 3000:3000 \
+  -e PANEL_INITIAL_ADMIN_PASSWORD=change-me \
+  -e PALWORLD_ADMIN_PASSWORD=your-palworld-admin-password \
+  -e PALWORLD_REST_URL=http://host.docker.internal:8212 \
+  ghcr.io/dhampyru/palworld-dashboard:latest
+```
+
+No server yet? One command brings up **game server + dashboard** together (create a `.env` with `PANEL_INITIAL_ADMIN_PASSWORD` + `PALWORLD_ADMIN_PASSWORD` first):
+
+```bash
+docker compose -f docker-compose.full.yml up -d
+```
+
+**You get:** live status / FPS / metrics, live map, roster (kick/ban), saves & backups, save inspector & editor, mods, world / engine / PalDefender settings, RCON console.
+
+**Not until you go advanced:**
+- Item/Pal names show as **raw IDs** (no bundled game data)
+- The header connect address is a **placeholder**
+- **Start / Stop / Restart + multi-server** buttons are inert (no host integration)
+
+**Advanced — fill the gaps:**
+- Friendly **names + icons** → [Item & Pal Datasets](content/configuration/item-pal-datasets.mdx) (extract from your own game, rebuild)
+- **Lifecycle + multi-server** → `sudo scripts/host/install.sh` ([Host Integration](content/deployment/host-integration.mdx))
+- **Your real connect address / names baked in** → build from source (`docker compose build`)
+
+Full walkthrough → [Full Self-Hosted Setup](content/getting-started/full-setup.mdx).
+
 ## Preview
 
 Screenshots are from the built-in demo mode (`DEMO_MODE=1`), so all data shown is
