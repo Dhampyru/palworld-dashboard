@@ -119,6 +119,13 @@ COPY savtools/NOTICE /app/savtools/NOTICE
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Picker datasets are read at RUNTIME (/api/datasets) since Phase C. They must
+# NOT live in ./data — that path is a persistent volume mount at runtime and
+# would shadow them. Bake them to a separate dir and point the default there.
+# Empty stubs on a clean build; populated on an operator build; override
+# PALWORLD_DATASETS_DIR at runtime to use extractor output.
+COPY --from=builder --chown=nextjs:nodejs /app/data /app/game-datasets
+ENV PALWORLD_DATASETS_DIR=/app/game-datasets
 
 USER nextjs
 
