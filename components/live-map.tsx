@@ -891,10 +891,13 @@ export function LiveMap() {
 
         {mapImageError && (
           <div className="absolute inset-0 z-40 flex items-center justify-center bg-background/75 p-6">
-            <div className="max-w-md rounded-2xl border border-destructive/35 bg-card/90 p-5 text-center text-foreground shadow-2xl">
-              <div className="text-lg font-semibold">Map image failed to load</div>
+            <div className="max-w-md rounded-2xl border border-border/60 bg-card/90 p-5 text-center text-foreground shadow-2xl">
+              <div className="text-lg font-semibold">Map art not installed</div>
               <p className="mt-2 text-sm text-muted-foreground">
-                The app could not load <code className="font-mono text-destructive">{mapImageSrc}</code>.
+                The world-map background is a Palworld game asset, so it isn&apos;t
+                bundled. Add it by following the Live Map art guide and dropping the
+                images into <code className="font-mono">public/palworld-map/</code>.
+                Player markers appear on the map once it&apos;s installed.
               </p>
             </div>
           </div>

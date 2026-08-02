@@ -35,6 +35,11 @@ CLAUDE.md
 public/palworld-icons/
 data/missing-icons.txt
 
+# Full world-map art extracted from the game's map texture (Pocketpair asset).
+# Operator-supplied per the Live Map art guide; not redistributed. The small UI
+# markers (player/fast_travel/boss_tower.webp) are MIT upstream chrome and stay.
+public/palworld-map/full-map-*
+
 # Nexus API key (secret — server-side only)
 data/nexus.json
 

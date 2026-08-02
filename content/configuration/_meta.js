@@ -4,5 +4,6 @@ export default {
   authentication: 'Authentication',
   'fps-history': 'FPS History',
   'moderator-tier': 'Moderator Tier',
-  'item-pal-datasets': 'Item & Pal Datasets'
+  'item-pal-datasets': 'Item & Pal Datasets',
+  'live-map-art': 'Live Map Art'
 }
