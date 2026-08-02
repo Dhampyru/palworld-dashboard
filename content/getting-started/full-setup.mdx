@@ -1,0 +1,106 @@
+---
+title: Full Self-Hosted Setup
+---
+
+# Full Self-Hosted Setup (end to end)
+
+This is the master walkthrough for standing up the whole stack yourself. Each
+step links to the detailed page; follow them in order. Everything past Step 2 is
+**optional** — the dashboard is useful the moment it can reach your server.
+
+## What a complete setup looks like
+
+```text
+┌─ Palworld dedicated server ──────────────┐        ┌─ Dashboard container ─┐
+│  REST API (8212) + RCON (25575)          │◀──────▶│  reads REST + RCON     │
+│  [optional] UE4SS + PalDefender          │        │  writes flag files ────┼──▶ host integration
+└──────────────────────────────────────────┘        └────────────────────────┘        (start/stop/restart,
+                                                                                          provisioning)
+```
+
+| Tier | You get | Requires |
+| --- | --- | --- |
+| **Minimum** | Monitoring, live map, roster, saves, mods, world/engine settings, RCON | A Palworld server with **REST + RCON** + the dashboard |
+| **Enriched** | Deeper player/guild data (guild export, last-seen, offline map layer) | **+ PalDefender** (and **UE4SS** for mod-dependent features) |
+| **Managed** | Start / stop / restart, multi-server provisioning | **+ [host integration](/docs/deployment/host-integration)** |
+| **Named data** | Friendly item/Pal names + icons, save-inspector names | **+ data population** (build from source) |
+
+## Step 1 — A Palworld dedicated server
+
+You need a running dedicated server with the **REST API** and **RCON** enabled
+(the dashboard talks to both). See [Requirements](/docs/getting-started/requirements)
+for the exact settings, ports, and the info to collect (REST URL, admin
+password, RCON).
+
+- Any way you run the server works (native Linux, Windows, a community image) as
+  long as REST + RCON are reachable from the dashboard.
+- **For UE4SS-dependent features** you need the **Windows** server binary (UE4SS
+  is Windows-only; run it under Wine on Linux if needed). **PalDefender** works
+  standalone. This is optional — skip it for the Minimum tier.
+
+## Step 2 — Deploy the dashboard
+
+Fastest is the prebuilt image; or build from source for named data and a custom
+connect address.
+
+- **Prebuilt image:** [Docker deployment](/docs/deployment/docker) — `docker pull`
+  and run. (Clean image: save inspector shows IDs, connect address is a
+  placeholder — see that page's caveats.)
+- **From source:** [Docker Compose](/docs/getting-started/docker-compose) or
+  [Source Install](/docs/getting-started/source-install).
+
+Set at minimum `PANEL_INITIAL_ADMIN_PASSWORD`, `PALWORLD_ADMIN_PASSWORD`, and
+`PALWORLD_REST_URL` — full list in
+[Environment Variables](/docs/configuration/environment-variables). Then
+[log in](/docs/getting-started/first-login) and confirm the connection badge is
+green.
+
+> Not ready to touch a real server? [Demo mode](/docs/getting-started/demo-mode)
+> (`DEMO_MODE=1`, login `demo`) runs the whole UI on mock data.
+
+## Step 3 — Enriched player data (optional)
+
+Install **PalDefender** on the server (and **UE4SS** for mod-dependent features)
+to unlock the Guilds & Players tab (guild export, last-seen, offline map layer)
+and richer roster data. The dashboard auto-detects PalDefender; without it, those
+views degrade gracefully.
+
+## Step 4 — Host integration (optional)
+
+To make the **Start / Stop / Restart** buttons and the multi-server **New
+server** wizard actually act, install the host-side flag-file workers. The web
+container never gets Docker or sudo — see
+[Host Integration](/docs/deployment/host-integration) for the single-server
+systemd units and the multi-server control daemon.
+
+## Step 5 — Named items, Pals & map (optional)
+
+Game names and art aren't bundled (they're Pocketpair's; supplied from your own
+game). These need a **source build**:
+
+- **Item / Pal picker names + icons** and the **save-inspector names** —
+  [Item & Pal Datasets](/docs/configuration/item-pal-datasets) (extract with
+  FModel, run the generator, rebuild).
+- **Live map background** — bundled already; see
+  [Live Map Art](/docs/configuration/live-map-art) only if you want to replace it.
+
+Without this, pickers and the save inspector show raw game IDs, which are still
+usable.
+
+## Verify & harden
+
+- [First Login](/docs/getting-started/first-login) — seed the panel password,
+  confirm connectivity.
+- [Security](/docs/security) and the
+  [Production Checklist](/docs/deployment/production-checklist) — do this before
+  exposing the panel beyond your LAN (VPN / reverse-proxy auth / IP allowlist).
+
+## Feature → requirement quick reference
+
+| Feature | Needs |
+| --- | --- |
+| Metrics, FPS, live map, RCON, world/engine settings, mods, saves | Minimum tier |
+| Guilds & Players, offline map layer, enriched roster | PalDefender (+ UE4SS) |
+| Start / Stop / Restart, multi-server | Host integration |
+| Friendly names + icons, save-inspector names | Source build + data population |
+| Native save inspect/edit (Pals, items, stats) | Works on any build; names need data population |

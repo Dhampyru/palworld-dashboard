@@ -6,17 +6,24 @@ title: Docker Deployment
 
 ## Published image
 
-The default Compose file uses:
+CI publishes a **clean** image (no bundled Palworld game data) to GitHub
+Container Registry on each release:
 
 ```text
-ghcr.io/rnz01/palworld-server-dashboard:latest
+ghcr.io/dhampyru/palworld-dashboard:latest
 ```
 
-Override with:
+Pull and run it directly (minimal example in the README). Caveats of the clean
+image:
 
-```env
-PALWORLD_SERVER_DASHBOARD_IMAGE=ghcr.io/rnz01/palworld-server-dashboard:sha-...
-```
+- the save inspector shows raw **IDs**, not names — no bundled game data; add
+  names via [Item & Pal Datasets](/docs/configuration/item-pal-datasets) (needs a
+  source build);
+- the connect address in the header/Invite is a **placeholder**
+  (`NEXT_PUBLIC_GAME_SERVER_IP` is baked at build time).
+
+The repo's default `docker-compose.yml` **builds from source**, so those two are
+customizable there. Use the prebuilt image when you want a fast, no-build install.
 
 ## Ports
 
