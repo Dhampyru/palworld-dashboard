@@ -22,7 +22,14 @@ RUN git init -q pde \
  && git -C pde remote add origin "$PDE_FORK" \
  && git -C pde fetch -q --depth 1 origin "$PDE_SHA" \
  && git -C pde checkout -q FETCH_HEAD
-RUN dotnet publish pde/Cli/Cli.csproj -c Release -r linux-x64 --self-contained true \
+# CUE4Parse-Conversion pulls SkiaSharp (managed) but NOT its native library, so a
+# headless publish ships SkiaSharp.dll without libSkiaSharp.so — the Pal-icon PNG
+# encode then silently returns 0-byte files (data extraction is unaffected). Add
+# the matching native-asset package (NoDependencies = no libfontconfig/freetype
+# needed, which PNG encoding doesn't use) so libSkiaSharp.so is published. Pin to
+# the SkiaSharp version CUE4Parse-Conversion resolves (2.88.9) to avoid a mismatch.
+RUN dotnet add pde/Cli/Cli.csproj package SkiaSharp.NativeAssets.Linux.NoDependencies --version 2.88.9 \
+ && dotnet publish pde/Cli/Cli.csproj -c Release -r linux-x64 --self-contained true \
       -p:PublishSingleFile=false -o /extractor
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0 AS runner

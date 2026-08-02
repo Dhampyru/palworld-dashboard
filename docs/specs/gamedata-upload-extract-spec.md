@@ -75,9 +75,34 @@ ghcr.io/dhampyru/palworld-data-extractor`. Today the extractor is source-only.
 1. ✅ Extractor image + CI publish (prerequisite) — `publish-extractor.yml`.
 2. ✅ Host runner (`gamedata.request` → docker run → status) + installer wiring —
    folded into `palworld-control`.
-3. Dashboard API (upload, extract, status).
-4. Dashboard UI (Game Data card + progress polling).
+3. ✅ Dashboard API — `/api/game-data/{usmap,extract,status}` (admin-gated);
+   `/api/datasets` + `/api/game-icon` prefer the instance's extracted data.
+4. ✅ Dashboard UI — `components/game-data-card.tsx` in the Engine tab: upload,
+   guarded one-time extract (confirm-on-overwrite, disabled while running),
+   live progress + coverage.
 5. Docs + Full Self-Hosted Setup integration.
+
+## Verified live (2026-08-02)
+
+Full E2E on the live box (no players): upload usmap → extract → daemon runs the
+extractor against the real 5.4 GB pak (~4 s — CUE4Parse seeks specific data
+tables, it doesn't decompress the whole pak) → `/api/datasets` flips to
+`source: extracted` with real names (Alpaca→Melpaca, Kitsun; 603 named pals /
+1894 named items). Game container untouched (`StartedAt` unchanged).
+
+## Known limitation — Pal icons not extracted (names only)
+
+Icon PNGs come out **empty** and are omitted (the picker shows name/ID, no
+broken images). Root cause: on the pinned CUE4Parse (1.2.2.202608), Palworld's
+cooked Pal-icon textures deserialize with `FTexturePlatformData.Mips == 0` /
+`SizeX == 0`, so `Decode()` returns null — a CUE4Parse-vs-Palworld texture
+compatibility gap, **not** a Skia or wiring bug (data tables are schema-driven so
+names are unaffected; this was pre-existing — the earlier "293 icons" were always
+0-byte files). Two fixes are already in place for when the decode is solved: the
+Dockerfile publishes `libSkiaSharp.so` (`SkiaSharp.NativeAssets.Linux.NoDependencies`
+2.88.9 — it was missing, so even a successful decode would have encoded nothing),
+and `convert.py` skips 0-byte icons. Revisit with a newer CUE4Parse or a
+Palworld-specific texture path.
 
 ## Effort / risk
 

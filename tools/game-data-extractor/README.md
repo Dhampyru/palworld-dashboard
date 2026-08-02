@@ -1,7 +1,7 @@
 # Game-data extractor
 
 Turns your **own** Palworld game files into the dashboard's picker datasets
-(names) + Pal icons — the runtime clean-room path. Nothing of Pocketpair's is
+(names) — the runtime clean-room path. Nothing of Pocketpair's is
 redistributed: the pak and usmap are yours, mounted at run time, and only your
 extracted data is written out.
 
@@ -36,7 +36,8 @@ docker run --rm \
   palworld-data-extractor
 ```
 
-Outputs `{items,pals,eggs}.json` (ids + English names) and `pal/*.png` icons.
+Outputs `{items,pals,eggs}.json` (ids + English names). Pal icons are **not**
+produced right now — see the icon note below.
 Overrides via env: `PAK_NAME` (default `Pal-WindowsServer.pak`), `UE_VERSION`
 (default `5.1`).
 
@@ -48,14 +49,15 @@ already mounts `./extracted/{data,icons}`), and the names + icons appear on the
 next dashboard start — no rebuild. Re-run the extractor after a game update
 (with a fresh usmap) to refresh.
 
-Item icons aren't produced (PDE is Pal-focused) — items get names only; Pal icons
-are included.
+Item icons aren't produced (PDE is Pal-focused). **Pal icons currently come out
+empty too** and are omitted: on the pinned CUE4Parse, Palworld's cooked icon
+textures decode to zero mips, so no PNG is produced (a texture-compat gap, not a
+wiring bug — names are unaffected). So this tool populates **names only** for now.
 
 ## Notes
 
-- **Item icons** aren't produced (PDE is Pal-focused) — items get names only;
-  Pal icons are included.
-- Verified against a live 1.0 server pak: 707 pals / 1993 named items / 293 Pal
-  icons, English names matching the FModel path.
+- **Icons** aren't produced right now (see above) — names only.
+- Verified against a live 1.0 server pak: 707 pals / 1993 named items, English
+  names matching the FModel path (icons omitted — see the icon note).
 - To bump the parser after a game/CUE4Parse update, repin `PDE_SHA` in the
   Dockerfile (see `docs`/memory for the fork's port notes).

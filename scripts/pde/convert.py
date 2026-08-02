@@ -84,7 +84,12 @@ def main() -> int:
             tribe = tribe_dir.name
             image = None
             icon_src = tribe_dir / f"{tribe}.png"
-            if icon_src.is_file():
+            # Only emit an icon when the PNG actually has bytes. The extractor
+            # can write 0-byte icons when CUE4Parse can't decode a Pal texture
+            # (Palworld's cooked FTexturePlatformData deserializes to 0 mips on
+            # the pinned CUE4Parse — a known limitation), and a broken <img> is
+            # worse than none: the picker just shows the name/ID.
+            if icon_src.is_file() and icon_src.stat().st_size > 0:
                 dest = pal_icon_dest / f"{tribe}.png"
                 if not dest.exists():
                     shutil.copy2(icon_src, dest)
