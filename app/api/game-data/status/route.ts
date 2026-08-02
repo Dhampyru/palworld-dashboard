@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { readFile, access } from 'node:fs/promises'
+import { readFile, access, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { resolveGameDataPaths } from '@/lib/instances'
@@ -22,8 +22,17 @@ async function countJson(dir: string, key: string): Promise<number> {
   }
 }
 
+async function countIcons(iconsDir: string): Promise<number> {
+  try {
+    const files = await readdir(join(iconsDir, 'pal'))
+    return files.filter((f) => f.toLowerCase().endsWith('.png')).length
+  } catch {
+    return 0
+  }
+}
+
 export async function GET(request: NextRequest) {
-  const { dataDir, usmapPath, status: statusPath } = resolveGameDataPaths(
+  const { dataDir, iconsDir, usmapPath, status: statusPath } = resolveGameDataPaths(
     request.headers.get(PALWORLD_PROXY_HEADERS.instance),
   )
 
@@ -53,11 +62,12 @@ export async function GET(request: NextRequest) {
   } catch {
     /* fall back to baked */
   }
-  const [pals, items, eggs] = await Promise.all([
+  const [pals, items, eggs, icons] = await Promise.all([
     countJson(sourceDir, 'pals'),
     countJson(sourceDir, 'items'),
     countJson(sourceDir, 'eggs'),
+    countIcons(iconsDir),
   ])
 
-  return NextResponse.json({ status, hasUsmap, source, coverage: { pals, items, eggs } })
+  return NextResponse.json({ status, hasUsmap, source, coverage: { pals, items, eggs, icons } })
 }

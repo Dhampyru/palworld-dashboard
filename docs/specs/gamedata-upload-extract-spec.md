@@ -103,17 +103,24 @@ CUE4Parse/Skia/wiring bug (we're on the newest CUE4Parse 1.2.2.202608; data tabl
 are schema-driven so names are unaffected) and not fixable parser-side — **the
 pixels are not in the server pak.** The earlier "293 icons" were always 0-byte.
 
-**Where icons WOULD come from:** a CLIENT install's pak (a gaming PC), which keeps
-full texture data. The operator is already on that PC to generate the usmap (UE4SS
-is client-side), so the practical path is client-side icon extraction + upload:
-run the extractor against the client pak to get `pal/*.png`, then upload that icon
-set to the dashboard (it already serves `<srv>/gamedata/<id>/icons`). A multi-GB
-client-pak upload to the server is not practical; an icon zip (~a few MB) is.
+**Icons ARE supported — via a client-extracted upload (BUILT 2026-08-02).** Icons
+come from a CLIENT pak (a gaming PC keeps full texture data). The operator is
+already on that PC to generate the usmap (UE4SS is client-side), so they run the
+extractor there against the client pak to get `pal/*.png`, then upload that set as
+a **zip** — `POST /api/game-data/icons` (admin-gated, adm-zip, zip-slip-safe, PNG
+basenames only) flattens it into `<srv>/gamedata/<id>/icons/pal/`. `/api/datasets`
+then links each `<id>.png` to the pal of that id (server-extracted pals carry no
+`image`, so the link is derived from the icons dir at serve time). `/api/game-icon`
+serves them. A multi-GB client-pak upload to the server is not practical; an icon
+zip (~a few MB) is. The Game Data card has a "Choose icons .zip" row + an icon
+coverage count. Verified E2E (synthetic zip: 5 pals linked by id, served 200).
 
-Two fixes already landed so icons work the moment real texture data is present:
-the Dockerfile publishes `libSkiaSharp.so` (`SkiaSharp.NativeAssets.Linux.NoDependencies`
-2.88.9 — it was missing, so even a successful decode would have encoded nothing),
-and `convert.py` skips 0-byte icons.
+Perms: the daemon leaves `icons/` group-writable + setgid (`2775 root:<dashgid>`)
+so both the extractor (root) and the dashboard uid can write it; `data/` stays
+read-only to the web tier. Two fixes also landed so a client pak that IS parsed
+here yields real PNGs: the Dockerfile publishes `libSkiaSharp.so`
+(`SkiaSharp.NativeAssets.Linux.NoDependencies` 2.88.9 — was missing) and
+`convert.py` skips 0-byte icons.
 
 ## Effort / risk
 

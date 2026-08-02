@@ -312,6 +312,12 @@ extract_gamedata() { # id runDir gameDir procFile
     # docker wrote as root — make the output readable by the dashboard uid/gid.
     chown -R "root:${DASH_GID}" "$base" 2>/dev/null || true
     chmod -R a+rX "$base" 2>/dev/null || true
+    # icons/ must also be GROUP-WRITABLE + setgid: a server pak yields no icons, so
+    # the dashboard (uid ${DASH_GID}) uploads client-extracted icons into this same
+    # dir (POST /api/game-data/icons). data/ stays read-only to the web tier.
+    mkdir -p "$outIcons/pal" 2>/dev/null || true
+    chown -R "root:${DASH_GID}" "$outIcons" 2>/dev/null || true
+    chmod 2775 "$outIcons" "$outIcons/pal" 2>/dev/null || true
     local pals items
     pals=$(jq 'length' "${outData}/pals.json" 2>/dev/null || echo 0)
     items=$(jq 'length' "${outData}/items.json" 2>/dev/null || echo 0)

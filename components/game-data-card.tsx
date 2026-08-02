@@ -39,7 +39,7 @@ type Payload = {
   status: GDStatus
   hasUsmap: boolean
   source: 'extracted' | 'baked'
-  coverage: { pals: number; items: number; eggs: number }
+  coverage: { pals: number; items: number; eggs: number; icons: number }
 }
 
 export function GameDataCard() {
@@ -51,6 +51,9 @@ export function GameDataCard() {
   const [starting, setStarting] = useState(false)
   const [confirmReextract, setConfirmReextract] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const [iconFile, setIconFile] = useState<File | null>(null)
+  const [iconUploading, setIconUploading] = useState(false)
+  const iconRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     if (!config) return
@@ -105,6 +108,31 @@ export function GameDataCard() {
     }
   }, [config, file, load])
 
+  const uploadIcons = useCallback(async () => {
+    if (!config || !iconFile) return
+    setIconUploading(true)
+    const id = toast.loading('Uploading icons…')
+    try {
+      const fd = new FormData()
+      fd.append('file', iconFile)
+      const res = await fetch('/api/game-data/icons', {
+        method: 'POST',
+        headers: buildPalworldProxyHeaders(config),
+        body: fd,
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? res.statusText)
+      toast.success(`Uploaded ${json.count ?? 0} icons`, { id })
+      setIconFile(null)
+      if (iconRef.current) iconRef.current.value = ''
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : 'Icon upload failed', { id })
+    } finally {
+      setIconUploading(false)
+    }
+  }, [config, iconFile, load])
+
   const doExtract = useCallback(async () => {
     if (!config) return
     setStarting(true)
@@ -138,24 +166,20 @@ export function GameDataCard() {
   return (
     <section className="flex flex-col gap-3 rounded-md border p-3">
       <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        <DatabaseIcon className="size-3.5" /> Game data (picker names)
+        <DatabaseIcon className="size-3.5" /> Game data (names &amp; icons)
       </h3>
 
       <p className="text-[11px] text-muted-foreground">
         Populate the RCON command pickers with your game&apos;s real item/Pal names. Upload a{' '}
         <code className="font-mono">mappings.usmap</code> made on a PC with UE4SS; the host extracts from your own
-        pak — nothing is redistributed, and no rebuild is needed. One usmap per game version.{' '}
-        <span className="opacity-80">
-          (Names only: a dedicated-server pak has no texture pixel data, so Pal icons can&apos;t be
-          extracted here.)
-        </span>
+        pak — nothing is redistributed, and no rebuild is needed. One usmap per game version.
       </p>
 
       {/* Coverage */}
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
         Coverage:{' '}
         <span className="text-foreground">
-          {cov ? `${cov.pals} pals · ${cov.items} items · ${cov.eggs} eggs` : '—'}
+          {cov ? `${cov.pals} pals · ${cov.items} items · ${cov.eggs} eggs · ${cov.icons} icons` : '—'}
         </span>
         {p && (
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
@@ -228,6 +252,47 @@ export function GameDataCard() {
             {p?.source === 'extracted' ? 'Re-extract' : 'Extract'}
           </Button>
           {!isAdmin && <span className="text-[11px] text-muted-foreground">Admin access required.</span>}
+        </div>
+      </div>
+
+      {/* Pal icons (optional) — a server pak has no texture data, so icons must be
+          extracted from a CLIENT pak on a PC and uploaded here as a zip. */}
+      <div className="flex flex-col gap-2 border-t pt-2">
+        <p className="text-[11px] text-muted-foreground">
+          <span className="font-medium text-foreground">Pal icons (optional).</span> A dedicated-server pak has no
+          texture data, so icons can&apos;t be extracted here. On the PC where you made the usmap, run the extractor
+          against your <em>client</em> pak, then upload the resulting <code className="font-mono">pal/*.png</code> as a
+          zip — they&apos;re matched to Pals by id.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            ref={iconRef}
+            type="file"
+            accept=".zip"
+            className="hidden"
+            onChange={(e) => setIconFile(e.target.files?.[0] ?? null)}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5"
+            onClick={() => iconRef.current?.click()}
+            disabled={!isAdmin || iconUploading}
+          >
+            <FileUpIcon className="size-3.5" /> Choose icons .zip…
+          </Button>
+          <span className="max-w-[14rem] truncate text-[11px] text-muted-foreground">
+            {iconFile ? iconFile.name : cov && cov.icons > 0 ? `${cov.icons} icons uploaded ✓` : 'No icons uploaded'}
+          </span>
+          <Button
+            size="sm"
+            className="h-8 gap-1.5"
+            onClick={uploadIcons}
+            disabled={!isAdmin || !iconFile || iconUploading}
+          >
+            {iconUploading ? <Spinner className="size-3.5" /> : <UploadIcon className="size-3.5" />}
+            Upload icons
+          </Button>
         </div>
       </div>
 

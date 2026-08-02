@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { readFile, access } from 'node:fs/promises'
+import { readFile, access, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { resolveGameDataPaths } from '@/lib/instances'
@@ -39,7 +39,7 @@ async function load(dir: string, key: 'items' | 'pals' | 'eggs', instId: string)
 
 export async function GET(request: NextRequest) {
   const instId = (request.headers.get(PALWORLD_PROXY_HEADERS.instance) ?? 'default').trim() || 'default'
-  const { dataDir } = resolveGameDataPaths(instId)
+  const { dataDir, iconsDir } = resolveGameDataPaths(instId)
   // Prefer the instance's extracted datasets when present; else the baked dir.
   let dir = BAKED_DATASETS_DIR
   try {
@@ -53,5 +53,28 @@ export async function GET(request: NextRequest) {
     load(dir, 'pals', instId),
     load(dir, 'eggs', instId),
   ])
+
+  // Link uploaded Pal icons by id. Server extraction can't produce icons (the
+  // server pak strips texture data), so those pals arrive with no `image`; if the
+  // operator has uploaded an icon set (/api/game-data/icons), an <id>.png in the
+  // instance's icons/pal dir becomes the pal's image here. Entries that already
+  // carry an image (e.g. a full client bundle) are left as the load() rewrite set them.
+  try {
+    const files = await readdir(join(iconsDir, 'pal'))
+    const iconIds = new Set(
+      files.filter((f) => f.toLowerCase().endsWith('.png')).map((f) => f.slice(0, -4)),
+    )
+    if (iconIds.size > 0) {
+      const q = `?inst=${encodeURIComponent(instId)}`
+      for (const p of pals) {
+        if (!p.image && iconIds.has(p.id)) {
+          p.image = `${ICON_ROUTE}pal/${p.id}.png${q}`
+        }
+      }
+    }
+  } catch {
+    /* no uploaded icons — pals stay name-only */
+  }
+
   return NextResponse.json({ items, pals, eggs })
 }
