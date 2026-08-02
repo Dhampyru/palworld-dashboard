@@ -7,10 +7,6 @@
 // accepts any valid identifier. Filling a dataset in later is a data change,
 // not a code change.
 
-import itemsData from '@/data/items.json'
-import palsData from '@/data/pals.json'
-import eggsData from '@/data/eggs.json'
-
 // Only `id` is required, so a dataset can start as bare identifiers and gain
 // display names or icons later without touching the picker.
 export type DatasetEntry = {
@@ -21,14 +17,22 @@ export type DatasetEntry = {
 
 export type DatasetKey = 'items' | 'pals' | 'eggs' | 'tech'
 
-const STATIC_DATASETS: Record<'items' | 'pals' | 'eggs', DatasetEntry[]> = {
-  items: itemsData as DatasetEntry[],
-  pals: palsData as DatasetEntry[],
-  eggs: eggsData as DatasetEntry[],
-}
+export type RuntimeDatasets = { items: DatasetEntry[]; pals: DatasetEntry[]; eggs: DatasetEntry[] }
 
-export function staticDataset(key: 'items' | 'pals' | 'eggs'): DatasetEntry[] {
-  return STATIC_DATASETS[key]
+// The item/pal/egg datasets load at RUNTIME from /api/datasets (which reads them
+// from PALWORLD_DATASETS_DIR, default ./data) rather than being bundled at build
+// time — so an operator can populate them (e.g. via the game-data extractor)
+// without rebuilding the image. Empty stays a normal state: pickers degrade to
+// free-text ID entry. Memoized so every picker shares one request.
+let _datasetsPromise: Promise<RuntimeDatasets> | null = null
+
+export function fetchDatasets(): Promise<RuntimeDatasets> {
+  if (!_datasetsPromise) {
+    _datasetsPromise = fetch('/api/datasets')
+      .then((r) => (r.ok ? (r.json() as Promise<RuntimeDatasets>) : { items: [], pals: [], eggs: [] }))
+      .catch(() => ({ items: [], pals: [], eggs: [] }))
+  }
+  return _datasetsPromise
 }
 
 // Search id and name together, so a dataset with no display names is still

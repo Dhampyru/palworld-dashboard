@@ -25,14 +25,25 @@ docker build -f tools/game-data-extractor/Dockerfile -t palworld-data-extractor 
 docker run --rm \
   -v /path/to/Pal/Content/Paks:/paks:ro \
   -v /path/to/mappings.usmap:/mappings.usmap:ro \
-  -v "$PWD/data":/data \
-  -v "$PWD/public/palworld-icons":/icons \
+  -v "$PWD/extracted/data":/data \
+  -v "$PWD/extracted/icons":/icons \
   palworld-data-extractor
 ```
 
-Outputs `data/{items,pals,eggs}.json` (ids + English names) and
-`public/palworld-icons/pal/*.png`. Overrides via env: `PAK_NAME`
-(default `Pal-WindowsServer.pak`), `UE_VERSION` (default `5.1`).
+Outputs `{items,pals,eggs}.json` (ids + English names) and `pal/*.png` icons.
+Overrides via env: `PAK_NAME` (default `Pal-WindowsServer.pak`), `UE_VERSION`
+(default `5.1`).
+
+## Runtime — no rebuild
+
+The dashboard loads picker names + icons **at runtime** from `PALWORLD_DATASETS_DIR`
+and `PALWORLD_ICONS_DIR`. Point those at the output above (the full-stack compose
+already mounts `./extracted/{data,icons}`), and the names + icons appear on the
+next dashboard start — no rebuild. Re-run the extractor after a game update
+(with a fresh usmap) to refresh.
+
+Item icons aren't produced (PDE is Pal-focused) — items get names only; Pal icons
+are included.
 
 ## Notes
 

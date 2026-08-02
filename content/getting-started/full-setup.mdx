@@ -100,16 +100,20 @@ systemd units and the multi-server control daemon.
 ## Step 5 — Named items, Pals & map (optional)
 
 Game names and art aren't bundled (they're Pocketpair's; supplied from your own
-game). These need a **source build**:
+game):
 
-- **Item / Pal picker names + icons** and the **save-inspector names** —
-  [Item & Pal Datasets](/docs/configuration/item-pal-datasets) (extract with
-  FModel, run the generator, rebuild).
+- **Picker names + icons at runtime (no rebuild)** — run the
+  [game-data extractor](https://github.com/Dhampyru/palworld-dashboard/tree/main/tools/game-data-extractor)
+  against your pak + a `mappings.usmap`; point `PALWORLD_DATASETS_DIR` /
+  `PALWORLD_ICONS_DIR` at its output (the full-stack compose mounts
+  `./extracted/{data,icons}` already) and the names/icons appear on the next
+  start.
+- **Or via a source build** — [Item & Pal Datasets](/docs/configuration/item-pal-datasets)
+  (FModel + generator; also covers the save-inspector names).
 - **Live map background** — bundled already; see
-  [Live Map Art](/docs/configuration/live-map-art) only if you want to replace it.
+  [Live Map Art](/docs/configuration/live-map-art) only to replace it.
 
-Without this, pickers and the save inspector show raw game IDs, which are still
-usable.
+Without any of this, pickers show raw game IDs, which are still usable.
 
 ## Verify & harden
 

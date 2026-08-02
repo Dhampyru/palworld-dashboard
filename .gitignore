@@ -49,3 +49,6 @@ game-server/mods/
 # full-stack (docker-compose.full.yml) runtime data at repo root
 /game/
 /mods/
+
+# runtime-extracted datasets + icons (game-data extractor output)
+/extracted/

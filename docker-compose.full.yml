@@ -65,9 +65,15 @@ services:
       PALWORLD_RCON_PORT: "25575"
       # Read saves/mods/settings from the shared game volume:
       PALWORLD_GAME_DIR: "/palworld-game"
+      # Runtime picker names + icons (populated by the game-data extractor into
+      # ./extracted; empty until then → IDs). No rebuild needed to fill them.
+      PALWORLD_DATASETS_DIR: "/extracted/data"
+      PALWORLD_ICONS_DIR: "/extracted/icons"
     volumes:
       - ./game:/palworld-game
       - dashboard-data:/app/data
+      - ./extracted/data:/extracted/data:ro
+      - ./extracted/icons:/extracted/icons:ro
 
 volumes:
   dashboard-data:

@@ -8,7 +8,7 @@
 // compute them separately: the preview is a safety mechanism, and it only
 // works if it is the same string that gets sent.
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -25,7 +25,7 @@ import {
   isRunnable,
   missingRequiredParams,
 } from '@/lib/rcon-commands'
-import { type DatasetEntry, staticDataset } from '@/lib/rcon-datasets'
+import { type DatasetEntry, type RuntimeDatasets, fetchDatasets } from '@/lib/rcon-datasets'
 import { DatasetCombobox } from '@/components/dataset-combobox'
 
 type Props = {
@@ -43,14 +43,18 @@ type Props = {
 
 // data/*.json for items/pals/eggs (empty until verified — data/README.md), and
 // the live list for technologies.
-function datasetForParam(param: RconParam, techIds: DatasetEntry[]): DatasetEntry[] {
+function datasetForParam(
+  param: RconParam,
+  techIds: DatasetEntry[],
+  datasets: RuntimeDatasets,
+): DatasetEntry[] {
   switch (param.kind) {
     case 'itemId':
-      return staticDataset('items')
+      return datasets.items
     case 'palId':
-      return staticDataset('pals')
+      return datasets.pals
     case 'eggId':
-      return staticDataset('eggs')
+      return datasets.eggs
     case 'techId':
       return techIds
     default:
@@ -309,6 +313,17 @@ export function RconCommandForm({
 }: Props) {
   const preview = useMemo(() => buildCommandString(command, values), [command, values])
   const missing = useMemo(() => missingRequiredParams(command, values), [command, values])
+  // Item/Pal/egg datasets load once at runtime (empty until then → free-text).
+  const [datasets, setDatasets] = useState<RuntimeDatasets>({ items: [], pals: [], eggs: [] })
+  useEffect(() => {
+    let alive = true
+    fetchDatasets().then((d) => {
+      if (alive) setDatasets(d)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
   const runnable = isRunnable(command, values)
   const gated = Boolean(command.adminCheat) && !adminCheatsEnabled
 
@@ -358,7 +373,7 @@ export function RconCommandForm({
               value={values[param.key] ?? ''}
               onChange={(value) => onChange(param.key, value)}
               players={players}
-              dataset={datasetForParam(param, techIds)}
+              dataset={datasetForParam(param, techIds, datasets)}
             />
           ))}
         </div>
