@@ -23,18 +23,18 @@ docker compose -f docker-compose.full.yml up -d
 ```
 
 **Quick Install Dashboard Functions Provided:** 
-- **live status 
-- **FPS
-- **metrics
-- **live map
-- **roster (kick/ban)
-- **saves & backups
-- **save inspector & editor
-- **mods
-- **world settings
-- **engine settings
-- **PalDefender settings
-- **RCON console
+- **live status**
+- **FPS**
+- **metrics**
+- **live map**
+- **roster (kick/ban)**
+- **saves & backups**
+- **save inspector & editor**
+- **mods**
+- **world settings**
+- **engine settings**
+- **PalDefender settings**
+- **RCON console**
 
 **Missing Details that Requires a full setup** — additional dashboard features and polish that aren't in the quick install and are added by a full [self-hosted setup](content/getting-started/full-setup.mdx).
 - **Friendly item/Pal names + icons** — the quick install shows raw game IDs; add real names by extracting from your own game → [Item & Pal Datasets](content/configuration/item-pal-datasets.mdx).
