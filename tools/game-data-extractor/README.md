@@ -15,6 +15,12 @@ You must supply a `.usmap` for your game version. It **can't** be generated on a
 headless server — make it on a Windows PC with UE4SS after each game update and
 copy it over. This is the one manual step.
 
+UE4SS's dumper writes a versioned file like
+`Pal-5.1.1-0+++UE5+Release-5.1-<hash>.usmap` to
+`…\Steam\steamapps\common\Palworld\Pal\Binaries\Win64\ue4ss\usmap\` on the
+client. Copy that over — any filename works; point the tool at it via the
+`/mappings.usmap` mount (or `USMAP_FILE`).
+
 ## Use
 
 ```bash
