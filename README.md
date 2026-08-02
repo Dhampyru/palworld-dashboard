@@ -24,12 +24,10 @@ docker compose -f docker-compose.full.yml up -d
 
 **You get:** live status / FPS / metrics, live map, roster (kick/ban), saves & backups, save inspector & editor, mods, world / engine / PalDefender settings, RCON console.
 
-**Optional extras** (the quick install works without these — each is how to add it):
+**Beyond the quick install** — additional dashboard features and polish that aren't in the quick install and are added by a full [self-hosted setup](content/getting-started/full-setup.mdx). The quick install runs fine without them; each bullet notes how to enable it:
 - **Friendly item/Pal names + icons** — the quick install shows raw game IDs; add real names by extracting from your own game → [Item & Pal Datasets](content/configuration/item-pal-datasets.mdx).
-- **Start / Stop / Restart + multi-server** — these buttons are inert until you install the host integration → `sudo scripts/host/install.sh` ([Host Integration](content/deployment/host-integration.mdx)).
+- **Start / Stop / Restart + multi-server** — inert until you install the host integration → `sudo scripts/host/install.sh` ([Host Integration](content/deployment/host-integration.mdx)).
 - **Your real connect address in the header** — a placeholder until you build from source with it set (`docker compose build`).
-
-New to all this? The [Full Self-Hosted Setup](content/getting-started/full-setup.mdx) guide walks the whole thing end to end.
 
 ## Preview
 
