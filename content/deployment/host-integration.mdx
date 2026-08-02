@@ -73,8 +73,19 @@ ship in the repo under `scripts/host/`:
 | `palworld-control` | Watches `/run/palworld/<id>/{start,stop,restart}.request` for every registered instance, plus `provision`/`delete` requests. Provisions a new server (allocates free ports, writes its dir + `.env` + compose, brings it up, waits for an authenticated REST 200), and runs lifecycle for non-default instances. Delete keeps the save files. |
 | `palworld-metrics-publisher` | Publishes each instance's cheap runtime metrics (memory, CPU, status) to `/run/palworld/<id>/metrics.json` for the dashboard's monitoring + memory auto-restart. |
 
-Both run as `Type=simple`, `Restart=always` systemd services (example units are
-alongside the scripts). Install them like:
+Both run as `Type=simple`, `Restart=always` systemd services. The easiest way is
+the **one-shot installer**, which installs both services, the instance template,
+`/srv/palworld` + a seeded registry, and the `/run/palworld` tmpfiles rule:
+
+```bash
+sudo scripts/host/install.sh
+# override defaults via env, e.g. the image the wizard provisions from:
+#   sudo PALWORLD_INSTANCE_IMAGE=ghcr.io/dhampyru/palworld-game-server:latest \
+#        scripts/host/install.sh
+# uninstall (keeps /srv/palworld + saves):  sudo scripts/host/install.sh --uninstall
+```
+
+Or install manually:
 
 ```bash
 sudo install -m0755 scripts/host/palworld-control /usr/local/bin/palworld-control
