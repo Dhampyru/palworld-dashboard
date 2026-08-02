@@ -3,6 +3,7 @@ import { writeFile, rename, mkdir } from 'node:fs/promises'
 import { classifyPassword, tierForClass } from '@/lib/access-tier'
 import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { DEMO_MODE } from '@/lib/demo-mode'
+import { demoInstances } from '@/lib/demo'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { getInstance, listInstances, readInstanceMetrics, DEFAULT_INSTANCE_ID } from '@/lib/instances'
 
@@ -42,6 +43,9 @@ function slugify(input: string): string {
 export async function GET(request: NextRequest) {
   if (tierForClass(classifyPassword(presented(request))) === 'invalid') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (DEMO_MODE) {
+    return NextResponse.json({ instances: demoInstances })
   }
   const instances = listInstances().map((i) => {
     const m = readInstanceMetrics(i.id)

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { classifyPassword, tierForClass } from '@/lib/access-tier'
 import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { DEMO_MODE } from '@/lib/demo-mode'
+import { demoInventory } from '@/lib/demo'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { runWithInstance } from '@/lib/instances'
 import { inspectPlayerInventory, readActiveWorldId } from '@/lib/saves'
@@ -42,7 +43,7 @@ async function _GET(request: NextRequest) {
   }
 
   if (DEMO_MODE) {
-    return NextResponse.json({ uid, nickname: 'Demo', level: 1, containers: [], demo: true })
+    return NextResponse.json({ ...demoInventory, uid, demo: true })
   }
 
   const worldId = await readActiveWorldId()

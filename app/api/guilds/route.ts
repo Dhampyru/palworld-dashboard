@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { classifyPassword, tierForClass } from '@/lib/access-tier'
 import { DEMO_MODE } from '@/lib/demo-mode'
+import { demoGuilds } from '@/lib/demo'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { extractProcessOutput, getRconConfig, runRcon } from '@/lib/rcon-exec'
 import { parseGuildExport } from '@/lib/guilds'
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (DEMO_MODE) {
-    return NextResponse.json({ guilds: [], demo: true, refreshedAt: new Date().toISOString() })
+    return NextResponse.json({ guilds: demoGuilds, demo: true, refreshedAt: new Date().toISOString() })
   }
 
   const instanceId = request.headers.get(PALWORLD_PROXY_HEADERS.instance)

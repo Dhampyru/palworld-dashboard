@@ -6,19 +6,45 @@ A self-hosted web dashboard for operating **one or more** Palworld dedicated ser
 
 ## Preview
 
-Sensitive data in the dashboard screenshot below has been blurred.
+Screenshots are from the built-in demo mode (`DEMO_MODE=1`), so all data shown is
+mock sample data.
 
 ### Dashboard
 
-![Palworld Server Dashboard screenshot with sensitive data blurred](public/readme/dashboard-preview-redacted.png)
+![Palworld Server Dashboard overview](public/readme/dashboard-preview-redacted.jpg)
 
 ### Login
 
-![Palworld Server Dashboard login screen](public/readme/login-preview.png)
+![Palworld Server Dashboard login screen](public/readme/login-preview.jpg)
 
 ### Live Map
 
-![Palworld Server Dashboard live map screen](public/readme/live-map-preview.png)
+![Palworld Server Dashboard live map screen](public/readme/live-map-preview.jpg)
+
+### More views
+
+<table>
+  <tr>
+    <td width="50%" valign="top"><a href="public/readme/mods-preview.jpg"><img src="public/readme/mods-preview.jpg" alt="Mods"></a><br><sub><b>Mods</b> — install/remove pak, UE4SS &amp; PalSchema mods</sub></td>
+    <td width="50%" valign="top"><a href="public/readme/world-settings-preview.jpg"><img src="public/readme/world-settings-preview.jpg" alt="World Settings"></a><br><sub><b>World Settings</b> — editor with performance presets</sub></td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><a href="public/readme/engine-preview.jpg"><img src="public/readme/engine-preview.jpg" alt="Engine tuning"></a><br><sub><b>Engine</b> — Engine.ini tuning &amp; launch flags</sub></td>
+    <td width="50%" valign="top"><a href="public/readme/paldefender-preview.jpg"><img src="public/readme/paldefender-preview.jpg" alt="PalDefender"></a><br><sub><b>PalDefender</b> — mod configuration</sub></td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><a href="public/readme/guilds-preview.jpg"><img src="public/readme/guilds-preview.jpg" alt="Guilds and players"></a><br><sub><b>Guilds &amp; Players</b> — everyone who has ever joined</sub></td>
+    <td width="50%" valign="top"><a href="public/readme/saves-preview.jpg"><img src="public/readme/saves-preview.jpg" alt="Maintenance, saves and backups"></a><br><sub><b>Maintenance</b> — saves, backups &amp; auto-backup</sub></td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><a href="public/readme/save-inspector-preview.jpg"><img src="public/readme/save-inspector-preview.jpg" alt="Save inspector"></a><br><sub><b>Save Inspector</b> — native Pal/item/stat editing</sub></td>
+    <td width="50%" valign="top"><a href="public/readme/rcon-console-preview.jpg"><img src="public/readme/rcon-console-preview.jpg" alt="RCON console"></a><br><sub><b>RCON Console</b> — command registry &amp; forms</sub></td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><a href="public/readme/fleet-preview.jpg"><img src="public/readme/fleet-preview.jpg" alt="Fleet view"></a><br><sub><b>Fleet</b> — manage multiple servers</sub></td>
+    <td width="50%" valign="top"></td>
+  </tr>
+</table>
 
 ## Features
 

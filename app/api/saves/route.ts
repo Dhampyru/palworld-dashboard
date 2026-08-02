@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { classifyPassword, tierForClass } from '@/lib/access-tier'
 import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { DEMO_MODE } from '@/lib/demo-mode'
+import { demoWorlds, demoBackups, demoPlayerSaves, DEMO_WORLD_ID } from '@/lib/demo'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { runWithInstance } from '@/lib/instances'
 import { getRconConfig, runRcon } from '@/lib/rcon-exec'
@@ -55,7 +56,7 @@ async function _GET(request: NextRequest) {
   if (denied) return denied
 
   if (DEMO_MODE) {
-    return NextResponse.json({ worlds: [], backups: [], activeWorldId: null, demo: true })
+    return NextResponse.json({ worlds: demoWorlds, backups: demoBackups, playerSaves: demoPlayerSaves, activeWorldId: DEMO_WORLD_ID, demo: true })
   }
 
   const activeWorldId = await readActiveWorldId()
