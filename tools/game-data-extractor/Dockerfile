@@ -8,13 +8,20 @@
 # Build context is the repo root:
 #   docker build -f tools/game-data-extractor/Dockerfile -t palworld-data-extractor .
 ARG PDE_FORK=https://github.com/Dhampyru/PalworldDataExtractor
-ARG PDE_SHA=5efb9e98522f
+ARG PDE_SHA=d91a84951bcb748193b90d93f7cfc7c28bdf3f6c
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG PDE_FORK
 ARG PDE_SHA
 WORKDIR /src
-RUN git clone "$PDE_FORK" pde && git -C pde checkout --quiet "$PDE_SHA"
+# Fetch the exact commit by hash rather than `clone && checkout`: a plain clone
+# only downloads commits reachable from a branch, so a force-push that orphans
+# the pinned SHA would break the checkout in CI (bit us once). GitHub allows
+# fetching any commit by hash, so this resolves the pin even if main has moved.
+RUN git init -q pde \
+ && git -C pde remote add origin "$PDE_FORK" \
+ && git -C pde fetch -q --depth 1 origin "$PDE_SHA" \
+ && git -C pde checkout -q FETCH_HEAD
 RUN dotnet publish pde/Cli/Cli.csproj -c Release -r linux-x64 --self-contained true \
       -p:PublishSingleFile=false -o /extractor
 
