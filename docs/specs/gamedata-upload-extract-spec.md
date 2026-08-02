@@ -44,12 +44,19 @@ Dashboard (uid 2001)                      Host runner (root)
      (`{instance, pakDir, usmapPath, requestedAt}`) into `/run/palworld/<id>/`.
    - `GET /api/game-data/status` — read `gamedata.status` + dataset counts.
 
-3. **Host runner** — a new `palworld-gamedata` systemd service (or a branch in
-   `palworld-control`): watches `gamedata.request`, runs
-   `ghcr.io/dhampyru/palworld-data-extractor` with the instance's pak (ro) + the
-   uploaded usmap, output → `/srv/palworld/gamedata/<id>/{data,icons}`; writes
-   `gamedata.status` (phase/pct/message). Concurrency-guarded (one at a time),
-   timeout, memory cap. Registry-driven for multi-instance.
+3. **Host runner — BUILT (folded into `palworld-control`, Phase 2).** Rather than
+   a separate service, the existing control daemon gained a game-data branch: it
+   watches `<runDir>/gamedata.request` for **all** instances incl `default`
+   (`default` has no legacy units, so unlike lifecycle it isn't skipped), runs
+   `ghcr.io/dhampyru/palworld-data-extractor` (env `PALWORLD_EXTRACTOR_IMAGE`)
+   against the instance's pak (ro, host `gameDir` from the registry) + the
+   uploaded usmap, output → `${SRV_ROOT}/gamedata/<id>/{data,icons}`; writes
+   `<runDir>/gamedata.status` (phase/pct/message). **Serialized** (one extraction
+   at a time — skips the scan while any `gamedata.processing` exists), `timeout`
+   (`PALWORLD_GAMEDATA_TIMEOUT`, default 2400s), usmap magic-checked (`c430`),
+   output chowned to the dashboard gid. `install.sh` creates the `gamedata`
+   workspace (`2775 root:gid`) and writes the env. Verified with a stubbed
+   extractor (8/8: targets, happy path, bad-magic/missing-usmap/missing-pak).
 
 4. **Wiring** — dashboard `PALWORLD_DATASETS_DIR` / `PALWORLD_ICONS_DIR` point at
    `/srv/palworld/gamedata/<id>/{data,icons}`; the shared `/srv/palworld` mount
@@ -65,8 +72,9 @@ ghcr.io/dhampyru/palworld-data-extractor`. Today the extractor is source-only.
 
 ## Phases
 
-1. Extractor image + CI publish (prerequisite).
-2. Host runner (`gamedata.request` → docker run → status) + installer wiring.
+1. ✅ Extractor image + CI publish (prerequisite) — `publish-extractor.yml`.
+2. ✅ Host runner (`gamedata.request` → docker run → status) + installer wiring —
+   folded into `palworld-control`.
 3. Dashboard API (upload, extract, status).
 4. Dashboard UI (Game Data card + progress polling).
 5. Docs + Full Self-Hosted Setup integration.

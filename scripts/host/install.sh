@@ -24,6 +24,7 @@ DASH_GID="${PALWORLD_DASH_GID:-2001}"
 SRV_ROOT="${PALWORLD_SRV_ROOT:-/srv/palworld}"
 RUN_ROOT="${PALWORLD_RUN_DIR:-/run/palworld}"
 INSTANCE_IMAGE="${PALWORLD_INSTANCE_IMAGE:-ghcr.io/dhampyru/palworld-game-server:latest}"
+EXTRACTOR_IMAGE="${PALWORLD_EXTRACTOR_IMAGE:-ghcr.io/dhampyru/palworld-data-extractor:latest}"
 BIN_DIR=/usr/local/bin
 SHARE_DIR=/usr/local/share/palworld
 ENV_FILE=/etc/palworld-control.env
@@ -82,6 +83,13 @@ else
   say "registry.json already exists — leaving it."
 fi
 
+# Game-data extraction workspace: the dashboard uploads each instance's usmap to
+# ${SRV_ROOT}/gamedata/<id>/mappings.usmap and reads the extracted data/icons back
+# from there. setgid so subdirs the dashboard (gid ${DASH_GID}) creates keep the
+# group; kept on --uninstall (it lives under ${SRV_ROOT}).
+say "Preparing ${SRV_ROOT}/gamedata (usmap uploads + extracted datasets)…"
+install -d -m2775 -o root -g "${DASH_GID}" "${SRV_ROOT}/gamedata"
+
 # ---- /run/palworld (dashboard writes flag files here) -----------------------
 say "Installing tmpfiles rule for ${RUN_ROOT} (owned by uid/gid ${DASH_UID}:${DASH_GID})…"
 printf 'd %s 0755 %s %s -\n' "${RUN_ROOT}" "${DASH_UID}" "${DASH_GID}" > "${TMPFILES}"
@@ -101,6 +109,10 @@ PALWORLD_DASH_GID=${DASH_GID}
 PALWORLD_INSTANCE_TEMPLATE=${SHARE_DIR}/instance-template.docker-compose.yml
 # Image the dashboard's "New server" wizard provisions instances from:
 PALWORLD_INSTANCE_IMAGE=${INSTANCE_IMAGE}
+# Game-data extraction: workspace root + the extractor image the daemon runs when
+# a usmap is uploaded (usmap upload → picker names + Pal icons, no rebuild).
+PALWORLD_GAMEDATA_ROOT=${SRV_ROOT}/gamedata
+PALWORLD_EXTRACTOR_IMAGE=${EXTRACTOR_IMAGE}
 # Optional: a pre-seeded Wine prefix dir copied into each new instance. Leave
 # unset if your game-server image bakes its own prefix (this one does).
 # PALWORLD_SEED_COMPATDATA=
@@ -159,6 +171,9 @@ Next:
   • Use the dashboard's "New server" wizard to provision instances; this daemon
     handles their lifecycle. Provisioned instances use PALWORLD_INSTANCE_IMAGE
     (edit ${ENV_FILE} to change).
+  • Game-data (picker names + Pal icons): upload a mappings.usmap in the
+    dashboard's Game Data card; this daemon runs PALWORLD_EXTRACTOR_IMAGE against
+    that instance's pak and writes ${SRV_ROOT}/gamedata/<id>/{data,icons}.
   • Logs:   journalctl -u palworld-control -f
             journalctl -u palworld-metrics -f
   • Remove: sudo ./install.sh --uninstall   (keeps ${SRV_ROOT} + saves)

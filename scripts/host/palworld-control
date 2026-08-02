@@ -3,7 +3,9 @@
 # palworld-control — registry-driven lifecycle daemon (roadmap #7, Phase 3)
 # =============================================================================
 # One persistent privileged worker (modeled on palworld-metrics-publisher.sh)
-# that performs per-instance start/stop/restart for NON-default instances.
+# that performs per-instance start/stop/restart for NON-default instances,
+# provisioning/delete (Phase 5), and game-data extraction (usmap upload →
+# datasets/icons — for ALL instances incl default, since it has no legacy units).
 #
 # The live "Palkatraz" (`default`) server deliberately stays on its own proven
 # systemd units (palworld-{restart,shutdown,start}.{path,service}) watching the
@@ -38,6 +40,18 @@ IMAGE="${PALWORLD_INSTANCE_IMAGE:-palworld-proton-server:latest}"
 SEED_COMPATDATA="${PALWORLD_SEED_COMPATDATA:-/root/palworld-server/compatdata-seed}"
 PROVISION_DIR="${RUN_ROOT}/provision"
 PROVISION_TIMEOUT="${PALWORLD_PROVISION_TIMEOUT:-900}"
+# Game-data extraction (usmap upload → datasets/icons). The dashboard uploads a
+# usmap to $GAMEDATA_ROOT/<id>/mappings.usmap and drops <runDir>/gamedata.request;
+# we run the extractor image against that instance's pak (ro) + usmap and write
+# data/icons the dashboard serves at runtime. ONE extraction at a time (heavy).
+GAMEDATA_ROOT="${PALWORLD_GAMEDATA_ROOT:-${SRV_ROOT}/gamedata}"
+EXTRACTOR_IMAGE="${PALWORLD_EXTRACTOR_IMAGE:-ghcr.io/dhampyru/palworld-data-extractor:latest}"
+GAMEDATA_TIMEOUT="${PALWORLD_GAMEDATA_TIMEOUT:-2400}"
+GAMEDATA_PAK_SUBPATH="${PALWORLD_PAK_SUBPATH:-Pal/Content/Paks}"
+GAMEDATA_PAK_NAME="${PALWORLD_PAK_NAME:-Pal-WindowsServer.pak}"
+# Fallback host game dir for `default` when the registry has no default entry
+# (single-server operators who never ran the "New server" wizard).
+GAMEDATA_DEFAULT_GAME_DIR="${PALWORLD_DEFAULT_GAME_DIR:-/root/palworld-server/game}"
 
 log() { echo "[palworld-control] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 
@@ -242,6 +256,78 @@ delete_instance() { # processingFile
   log "[$id] deleted from registry; saves kept at ${dir}/game"
 }
 
+# ── game-data extraction (usmap upload → datasets/icons) ─────────────────────
+# The web tier never runs docker: the dashboard only uploads the usmap and drops
+# a request flag file; this root daemon does the privileged `docker run`. Output
+# lands where the dashboard's runtime /api/datasets + /api/game-icon read it, so
+# names + icons appear with no rebuild.
+
+gdstatus() { # runDir id phase pct message
+  local runDir="$1" id="$2" phase="$3" pct="$4" msg="$5" ts; ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local out="${runDir}/gamedata.status" tmp="${runDir}/gamedata.status.tmp"
+  printf '{"id":"%s","phase":"%s","pct":%s,"message":"%s","updatedAt":"%s"}\n' \
+    "$id" "$phase" "$pct" "$msg" "$ts" > "$tmp" 2>/dev/null || return
+  chown "${DASH_UID}:${DASH_GID}" "$tmp" 2>/dev/null; chmod 0644 "$tmp" 2>/dev/null; mv -f "$tmp" "$out"
+  log "[$id] gamedata: $phase (${pct}%) $msg"
+}
+
+# Serialize: extraction parses a multi-GB pak — never run two at once.
+gamedata_in_flight() {
+  compgen -G "${RUN_ROOT}/gamedata.processing"   >/dev/null 2>&1 && return 0
+  compgen -G "${RUN_ROOT}/*/gamedata.processing" >/dev/null 2>&1 && return 0
+  return 1
+}
+
+# id → host gameDir for every extraction target (all instances, incl default).
+gamedata_targets() {
+  local haveDefault=0
+  if [ -f "$REGISTRY" ]; then
+    jq -r '.instances[]? | select(.gameDir != null) | [.id, .gameDir] | @tsv' "$REGISTRY" 2>/dev/null
+    jq -e '.instances[]?|select(.id=="default")' "$REGISTRY" >/dev/null 2>&1 && haveDefault=1
+  fi
+  [ "$haveDefault" = 0 ] && printf 'default\t%s\n' "$GAMEDATA_DEFAULT_GAME_DIR"
+}
+
+extract_gamedata() { # id runDir gameDir procFile
+  local id="$1" runDir="$2" gameDir="$3" proc="$4"
+  local paks="${gameDir%/}/${GAMEDATA_PAK_SUBPATH}"
+  local base="${GAMEDATA_ROOT}/${id}"
+  local usmap="${base}/mappings.usmap" outData="${base}/data" outIcons="${base}/icons"
+  _gcleanup() { rm -f "$proc"; }
+
+  if [ ! -d "$paks" ]; then gdstatus "$runDir" "$id" failed 100 "Paks dir not found on host: ${paks}"; _gcleanup; return; fi
+  if [ ! -f "${paks}/${GAMEDATA_PAK_NAME}" ]; then gdstatus "$runDir" "$id" failed 100 "Pak not found: ${GAMEDATA_PAK_NAME}"; _gcleanup; return; fi
+  if [ ! -f "$usmap" ]; then gdstatus "$runDir" "$id" failed 100 "No mappings.usmap uploaded for this instance"; _gcleanup; return; fi
+  # usmap magic is 0x30C4 little-endian → first two bytes C4 30.
+  local magic; magic=$(head -c2 "$usmap" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')
+  if [ "$magic" != "c430" ]; then gdstatus "$runDir" "$id" failed 100 "Uploaded file is not a usmap (magic ${magic:-?})"; _gcleanup; return; fi
+
+  mkdir -p "$outData" "$outIcons" 2>/dev/null
+  gdstatus "$runDir" "$id" extracting 15 "Extracting from pak — this takes several minutes"
+  if timeout "$GAMEDATA_TIMEOUT" docker run --rm \
+        -e PAK_NAME="$GAMEDATA_PAK_NAME" \
+        -v "${paks}:/paks:ro" -v "${usmap}:/mappings.usmap:ro" \
+        -v "${outData}:/data" -v "${outIcons}:/icons" \
+        "$EXTRACTOR_IMAGE" >/dev/null 2>&1; then
+    # docker wrote as root — make the output readable by the dashboard uid/gid.
+    chown -R "root:${DASH_GID}" "$base" 2>/dev/null || true
+    chmod -R a+rX "$base" 2>/dev/null || true
+    local pals items
+    pals=$(jq 'length' "${outData}/pals.json" 2>/dev/null || echo 0)
+    items=$(jq 'length' "${outData}/items.json" 2>/dev/null || echo 0)
+    gdstatus "$runDir" "$id" ready 100 "Done: ${pals} pals / ${items} items"
+  else
+    local rc=$?
+    if [ "$rc" = 124 ]; then gdstatus "$runDir" "$id" failed 100 "Extraction timed out (${GAMEDATA_TIMEOUT}s)"
+    else gdstatus "$runDir" "$id" failed 100 "Extractor failed (exit ${rc}) — check image/usmap; see journalctl"; fi
+  fi
+  _gcleanup
+}
+
+# Allow sourcing for tests: define the functions above, then stop before the
+# loop. `source palworld-control` with this set never starts the daemon.
+[ "${PALWORLD_CONTROL_SOURCE_ONLY:-0}" = 1 ] && return 0 2>/dev/null
+
 log "started (registry=$REGISTRY interval=${INTERVAL}s)"
 while true; do
   if [ -f "$REGISTRY" ]; then
@@ -281,6 +367,25 @@ while true; do
     mv "$req" "$proc" 2>/dev/null || continue
     ( delete_instance "$proc" ) &
   done
+
+  # game-data extraction requests (usmap upload → datasets/icons). One at a time:
+  # skip the whole scan while any extraction is in flight; next tick picks up the
+  # rest. default watches the FLAT /run/palworld; others /run/palworld/<id>.
+  if ! gamedata_in_flight; then
+    while IFS=$'\t' read -r gid ggame; do
+      [ -z "$gid" ] && continue
+      if [ "$gid" = default ]; then grun="$RUN_ROOT"; else grun="${RUN_ROOT}/${gid}"; fi
+      greq="${grun}/gamedata.request"; gproc="${grun}/gamedata.processing"
+      [ -e "$gproc" ] && continue
+      [ -f "$greq" ] || continue
+      if [ ! -d "$grun" ]; then
+        mkdir -p "$grun" 2>/dev/null && chown "${DASH_UID}:${DASH_GID}" "$grun" 2>/dev/null && chmod 0775 "$grun" 2>/dev/null
+      fi
+      mv "$greq" "$gproc" 2>/dev/null || continue
+      ( extract_gamedata "$gid" "$grun" "$ggame" "$gproc" ) &
+      break   # serialize — handle any others on later ticks
+    done < <(gamedata_targets)
+  fi
 
   sleep "$INTERVAL"
 done
