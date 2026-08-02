@@ -4,6 +4,7 @@ import { classifyPassword, tierForClass } from '@/lib/access-tier'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { runWithInstance } from '@/lib/instances'
 import { resolveBackupPath } from '@/lib/saves'
+import { DEMO_MODE } from '@/lib/demo-mode'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,6 +20,9 @@ async function _GET(request: NextRequest) {
   const password = request.headers.get(PALWORLD_PROXY_HEADERS.adminPassword) ?? ''
   if (tierForClass(classifyPassword(password)) !== 'admin') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  if (DEMO_MODE) {
+    return NextResponse.json({ error: 'Downloads are disabled in demo mode' }, { status: 403 })
   }
 
   const file = request.nextUrl.searchParams.get('file')

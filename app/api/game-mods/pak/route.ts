@@ -6,6 +6,7 @@ import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { runWithInstance } from '@/lib/instances'
 import { pakModsDir, SAFE_PAK_FILENAME } from '@/lib/game-mods'
+import { DEMO_MODE } from '@/lib/demo-mode'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -26,6 +27,9 @@ async function _GET(request: NextRequest) {
   const ip = clientIp(request)
   if (isLockedOut(ip)) {
     return NextResponse.json({ error: 'Too many attempts. Try again later.' }, { status: 429 })
+  }
+  if (DEMO_MODE) {
+    return NextResponse.json({ error: 'Pak downloads are disabled in demo mode' }, { status: 403 })
   }
   const passwordClass = classifyPassword(presentedPassword(request))
   if (passwordClass === 'unknown') {
