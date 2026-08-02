@@ -6,7 +6,33 @@ A self-hosted web dashboard for operating **one or more** Palworld dedicated ser
 
 ## TL;DR — pick your install
 
-**Fastest — prebuilt image (~2 min).** Already have a Palworld server? Point the dashboard at it:
+### Quick Install
+
+Run the prebuilt image in ~2 minutes — no build required.
+
+<table>
+<tr><th width="50%">✅ You get</th><th width="50%">⚠️ Limitations</th></tr>
+<tr valign="top"><td>
+
+- Live status, FPS, metrics
+- Live map
+- Roster (kick / ban)
+- Saves & backups
+- Save inspector & editor
+- Mods
+- World / Engine / PalDefender settings
+- RCON console
+
+</td><td>
+
+- Item/Pal names show as **raw IDs** (no bundled game data)
+- Header connect address is a **placeholder**
+- **Start / Stop / Restart + multi-server** buttons are inert (no host integration)
+
+</td></tr>
+</table>
+
+**Already have a Palworld server?** Point the dashboard at it:
 
 ```bash
 docker run -d -p 3000:3000 \
@@ -16,30 +42,36 @@ docker run -d -p 3000:3000 \
   ghcr.io/dhampyru/palworld-dashboard:latest
 ```
 
-No server yet? One command brings up **game server + dashboard** together (create a `.env` with `PANEL_INITIAL_ADMIN_PASSWORD` + `PALWORLD_ADMIN_PASSWORD` first):
+**No server yet?** One command brings up game server + dashboard together (create a `.env` with `PANEL_INITIAL_ADMIN_PASSWORD` + `PALWORLD_ADMIN_PASSWORD` first):
 
 ```bash
 docker compose -f docker-compose.full.yml up -d
 ```
 
-**Quick Install Dashboard Functions Provided:** 
-- **live status**
-- **FPS**
-- **metrics**
-- **live map**
-- **roster (kick/ban)**
-- **saves & backups**
-- **save inspector & editor**
-- **mods**
-- **world settings**
-- **engine settings**
-- **PalDefender settings**
-- **RCON console**
+### Full Install
 
-**Missing Details that Requires a full setup** — additional dashboard features and polish that aren't in the quick install and are added by a full [self-hosted setup](content/getting-started/full-setup.mdx).
-- **Friendly item/Pal names + icons** — the quick install shows raw game IDs; add real names by extracting from your own game → [Item & Pal Datasets](content/configuration/item-pal-datasets.mdx).
-- **Start / Stop / Restart + multi-server** — inert until you install the host integration → `sudo scripts/host/install.sh` ([Host Integration](content/deployment/host-integration.mdx)).
-- **Your real connect address in the header** — a placeholder until you build from source with it set (`docker compose build`).
+Build from source + wire up the host integration to unlock everything the quick install leaves out.
+
+<table>
+<tr><th width="50%">✅ Adds</th><th width="50%">⚠️ Costs</th></tr>
+<tr valign="top"><td>
+
+- Everything in Quick Install, plus:
+- Friendly item/Pal **names + icons**
+- Your **real connect address** in the header
+- **Start / Stop / Restart + multi-server** (host integration)
+- Full control — build & customize from source
+
+</td><td>
+
+- More setup: extract game data, install host integration, build from source
+- Needs your own **licensed game files** (for names/icons)
+- Longer initial setup
+
+</td></tr>
+</table>
+
+Step-by-step: **[Full Self-Hosted Setup](content/getting-started/full-setup.mdx)**.
 
 ## Preview
 
