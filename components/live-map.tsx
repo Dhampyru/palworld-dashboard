@@ -456,6 +456,120 @@ export function LiveMap() {
     return () => element.removeEventListener('wheel', handleWheel)
   }, [handleWheel])
 
+  // Touch gestures (ported from upstream RNZ01 live-map V4): one-finger pan +
+  // two-finger pinch-zoom, using the same view-state helpers + zoom-around-point
+  // math as the wheel path. Our fork previously had mouse/wheel only.
+  const touchStateRef = useRef<
+    | { mode: 'pan'; x: number; y: number; panX: number; panY: number }
+    | { mode: 'pinch'; distance: number; midX: number; midY: number }
+    | null
+  >(null)
+
+  const getTouchDistance = (touches: TouchList) =>
+    Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY)
+
+  const getTouchMidpoint = (touches: TouchList, rect: DOMRect) => ({
+    x: (touches[0].clientX + touches[1].clientX) / 2 - rect.left,
+    y: (touches[0].clientY + touches[1].clientY) / 2 - rect.top,
+  })
+
+  // (Re)initialize the active gesture — on touchstart and whenever the finger
+  // count changes mid-gesture (e.g. a second finger lands during a pan).
+  const beginTouchGesture = useCallback((touches: TouchList, rect: DOMRect) => {
+    const base = pendingViewRef.current ?? view
+    if (touches.length === 1) {
+      touchStateRef.current = {
+        mode: 'pan',
+        x: touches[0].clientX,
+        y: touches[0].clientY,
+        panX: base?.tx ?? 0,
+        panY: base?.ty ?? 0,
+      }
+    } else if (touches.length >= 2) {
+      const mid = getTouchMidpoint(touches, rect)
+      touchStateRef.current = { mode: 'pinch', distance: getTouchDistance(touches), midX: mid.x, midY: mid.y }
+    } else {
+      touchStateRef.current = null
+    }
+  }, [view])
+
+  const handleTouchStart = useCallback((event: TouchEvent) => {
+    const rect = mapViewportRef.current?.getBoundingClientRect()
+    if (!rect) return
+    event.preventDefault()
+    beginTouchGesture(event.touches, rect)
+    setIsDragging(event.touches.length === 1)
+  }, [beginTouchGesture])
+
+  const handleTouchMove = useCallback((event: TouchEvent) => {
+    const rect = mapViewportRef.current?.getBoundingClientRect()
+    const state = touchStateRef.current
+    if (!rect || !state) return
+    event.preventDefault()
+
+    if (state.mode === 'pan' && event.touches.length === 1) {
+      const base = pendingViewRef.current ?? view
+      if (!base) return
+      const touch = event.touches[0]
+      commitView(
+        clampView(
+          { scale: base.scale, tx: state.panX + (touch.clientX - state.x), ty: state.panY + (touch.clientY - state.y) },
+          rect.width,
+          rect.height,
+        ),
+      )
+      return
+    }
+
+    if (state.mode === 'pinch' && event.touches.length >= 2) {
+      const base = pendingViewRef.current ?? view
+      if (!base) return
+      const fit = Math.min(rect.width, rect.height) / MAP_BASIS
+      const newDistance = getTouchDistance(event.touches)
+      const newMid = getTouchMidpoint(event.touches, rect)
+      const k = state.distance > 0 ? newDistance / state.distance : 1
+      const nextScale = clamp(base.scale * k, fit, 1.2)
+      const appliedK = nextScale / base.scale
+      // anchor the content point under the previous midpoint to the new midpoint —
+      // pinch-zoom and the two-finger pan it causes fall out of one formula.
+      const nextTx = newMid.x - appliedK * (state.midX - base.tx)
+      const nextTy = newMid.y - appliedK * (state.midY - base.ty)
+      commitView(clampView({ scale: nextScale, tx: nextTx, ty: nextTy }, rect.width, rect.height))
+      touchStateRef.current = { mode: 'pinch', distance: newDistance, midX: newMid.x, midY: newMid.y }
+      return
+    }
+
+    // Finger count changed mid-gesture — reinitialize rather than compute a bogus delta.
+    beginTouchGesture(event.touches, rect)
+  }, [beginTouchGesture, clampView, commitView, view])
+
+  const handleTouchEnd = useCallback((event: TouchEvent) => {
+    if (event.touches.length === 0) {
+      touchStateRef.current = null
+      setIsDragging(false)
+      return
+    }
+    const rect = mapViewportRef.current?.getBoundingClientRect()
+    if (!rect) return
+    beginTouchGesture(event.touches, rect)
+    setIsDragging(event.touches.length === 1)
+  }, [beginTouchGesture])
+
+  useEffect(() => {
+    const element = mapViewportRef.current
+    if (!element) return
+    element.addEventListener('touchstart', handleTouchStart, { passive: false })
+    element.addEventListener('touchmove', handleTouchMove, { passive: false })
+    element.addEventListener('touchend', handleTouchEnd, { passive: false })
+    element.addEventListener('touchcancel', handleTouchEnd, { passive: false })
+    return () => {
+      element.removeEventListener('touchstart', handleTouchStart)
+      element.removeEventListener('touchmove', handleTouchMove)
+      element.removeEventListener('touchend', handleTouchEnd)
+      element.removeEventListener('touchcancel', handleTouchEnd)
+    }
+  }, [handleTouchStart, handleTouchMove, handleTouchEnd])
+
   const handleMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
       return
