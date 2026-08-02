@@ -4,78 +4,46 @@ title: Live Map Art
 
 # Live Map Art (world-map background)
 
-The Live Map draws player and base markers on top of a **world-map background
-image**. That background is a **Palworld game asset**, so — like the item/Pal
-[datasets](item-pal-datasets.mdx) — it **ships empty on purpose** and you supply
-it from your own copy of the game.
+The Live Map's world-map background and marker glyphs are **bundled with the
+dashboard** — no setup required. They're inherited, unchanged, from the upstream
+project [RNZ01/palworld-server-dashboard](https://github.com/RNZ01/palworld-server-dashboard)
+(MIT); see [Acknowledgments](../../README.md#acknowledgments).
 
-Without it, the Live Map shows a **"Map art not installed"** placeholder; markers
-render on the map as soon as you add the images. Everything else (roster, player
-detail, coordinates) works regardless.
+This page is just a reference for anyone who wants to **replace or update** the
+map art (e.g. swap in a higher-res or updated-for-a-new-patch map).
 
-> **Why not bundle it?** The map is extracted from Pocketpair's map texture; an
-> MIT license on this project can't grant redistribution of their art. Generating
-> it from your own install keeps the licensing clean. See
-> [Item & Pal Datasets](item-pal-datasets.mdx) for the same rationale.
+## Files
 
-## Files the dashboard looks for
-
-Place these in `public/palworld-map/` (create it if missing), then rebuild:
+They live in `public/palworld-map/`:
 
 | File | Purpose | Format |
 | --- | --- | --- |
 | `full-map-native-8192.webp` | Default ("world") map | WebP, 8192×8192 |
-| `full-map-tree-8192.webp` | The "tree"/terrain map layer (Layers toggle) | WebP, 8192×8192 |
-| `full-map-z4.png` | Firefox-safe fallback (Firefox struggled with the large WebP) | PNG, 4096×4096 |
+| `full-map-tree-8192.webp` | The "tree"/terrain layer (Layers toggle) | WebP, 8192×8192 |
+| `full-map-z4.png` | Firefox-safe fallback | PNG, 4096×4096 |
+| `player.webp`, `fast_travel.webp`, `boss_tower.webp` | Marker glyphs | WebP |
 
-The small marker glyphs (`player.webp`, `fast_travel.webp`, `boss_tower.webp`)
-are bundled — you only supply the three full-map images above.
+(`*.avif` variants may also be present; the app currently loads the WebP/PNG set
+above.)
 
-> **Alignment is critical.** The map→screen transform assumes each image spans
-> the **full world at exact bounds**. If your image is cropped, padded, or a
-> different projection, markers will be offset. Use the complete map texture at
-> its native bounds — don't trim margins.
+## Replacing the map
 
-## Producing the images
-
-The world map comes from Palworld's own **map texture**, extracted with
-[FModel](https://fmodel.app/) — the same tool and `.usmap` you use for the
-[datasets](item-pal-datasets.mdx). In that same FModel session:
-
-1. Locate the game's **full world-map texture** in the map assets and **export it
-   as PNG** (the highest-resolution variant available). Palworld exposes more
-   than one map style; the standard map becomes `native`, and the terrain/"tree"
-   style becomes `tree`.
-2. **Convert to the required files.** Example with `cwebp` + ImageMagick:
-   ```bash
-   # World (native) — 8192 WebP + a 4096 PNG fallback
-   magick native-source.png -resize 8192x8192 native-8192.png
-   cwebp -q 92 native-8192.png -o full-map-native-8192.webp
-   magick native-8192.png -resize 4096x4096 full-map-z4.png
-   # Terrain (tree) — 8192 WebP
-   magick tree-source.png -resize 8192x8192 tree-8192.png
-   cwebp -q 92 tree-8192.png -o full-map-tree-8192.webp
-   ```
-3. Copy the three outputs into `public/palworld-map/`.
-
-## Rebuild
-
-The images are served as static assets, so rebuild the dashboard to include them:
+Drop replacement files in with the **same names**, then rebuild:
 
 ```bash
 docker compose build palworld-server-dashboard
 docker compose up -d palworld-server-dashboard
 ```
 
-Open the Live Map — the background appears and markers sit on the world. If
-markers are visibly offset, re-check the **alignment** note above (the source
-must be the full map at native bounds).
+> **Alignment matters.** The map→screen transform assumes each image spans the
+> **full world at exact bounds**. A cropped, padded, or differently-projected
+> image will make markers land in the wrong place — keep replacements at the same
+> bounds and aspect as the originals.
 
 ## Troubleshooting
 
-- **"Map art not installed" persists** — the files aren't at the exact names/path
-  above, or you didn't rebuild (static assets are baked at build time).
-- **Markers are offset** — the image isn't the full map at exact world bounds
-  (cropped/padded/wrong style).
-- **Blank in Firefox but fine in Chrome** — the `full-map-z4.png` fallback is
-  missing; Firefox falls back to it for the large map.
+- **"Map image failed to load"** — a file is missing or misnamed under
+  `public/palworld-map/`, or you didn't rebuild (static assets are baked at build
+  time).
+- **Markers offset after a replacement** — the new image isn't the full map at
+  the same world bounds as the original.
