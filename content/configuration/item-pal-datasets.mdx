@@ -277,8 +277,20 @@ Two separate reasons the data ships empty, only the second a licensing one:
   never held over extracted game assets. Generating from your own install
   sidesteps the question entirely.
 
-The same extraction also provides the friendly Pal names for the save inspector
-(`psp-data`); on a clean-room build that is operator-supplied the same way.
+## Save inspector names
+
+The **save inspector** (Maintenance → Inspect) shows friendly Pal/item names + icons
+from the **same runtime datasets** as the RCON pickers — so once you populate names
+(usmap upload → extract) and icons, the inspector fills in too, with no extra step.
+It falls back to raw IDs until then.
+
+`psp-core` (which reads the `.sav` files) also has its own optional game-data bundle,
+**`psp-data`**. The clean-room image ships **without** it (`BUNDLE_PSP_DATA=0`) — and
+that's fine: the save parser degrades to raw IDs on its own, and the inspector UI
+supplies the friendly names from the datasets above. `psp-data` is therefore
+**optional and operator-suppliable**: drop a `data/json` bundle at
+`<srv>/gamedata/psp-data/json` and it's used at runtime (no rebuild); otherwise it's
+simply not needed. A private/source build can still bake it (`BUNDLE_PSP_DATA=1`).
 
 ## Troubleshooting
 

@@ -5,6 +5,7 @@
 // built here; they belong in the route's POST once the design is signed off.
 
 import { mkdir, readFile, readdir, rm, stat, unlink } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
@@ -294,11 +295,28 @@ export async function decodeSaveToJson(fullPath: string): Promise<string> {
 // returns domain summaries { players, guilds, pals }. Needs the bundled game
 // data (Pal names). Large worlds produce a lot of JSON, so allow a big buffer.
 const PSP_INSPECT_BIN = process.env.PSP_INSPECT_BIN ?? 'psp-inspect'
-const PSP_GAME_DATA_DIR = process.env.PSP_GAME_DATA_DIR ?? '/usr/local/share/psp-data/json'
+
+// psp-core game-data dir (Pal/item metadata). OPERATOR-SUPPLIABLE: a bundle placed
+// at <srv>/gamedata/psp-data/json (fleet-wide) is used ahead of the baked one, so
+// a clean-room image (built with BUNDLE_PSP_DATA=0, no bundled Pocketpair data)
+// can be given it at runtime without a rebuild. If neither is present the binaries
+// degrade to raw ids (load_game_data_or_empty) — and the inspector UI resolves
+// friendly names from the runtime datasets (/api/datasets) anyway, so this is
+// optional. A private build (BUNDLE_PSP_DATA=1) keeps the baked path.
+const PSP_GAME_DATA_BAKED = process.env.PSP_GAME_DATA_DIR ?? '/usr/local/share/psp-data/json'
+const PSP_SUPPLIED_DATA = `${process.env.PALWORLD_SRV_ROOT ?? '/srv/palworld'}/gamedata/psp-data/json`
+function pspGameDataDir(): string {
+  try {
+    if (existsSync(PSP_SUPPLIED_DATA)) return PSP_SUPPLIED_DATA
+  } catch {
+    /* fall through to baked */
+  }
+  return PSP_GAME_DATA_BAKED
+}
 
 export async function inspectWorld(worldId: string): Promise<unknown> {
   const worldDir = join(saveGamesDir(), worldId)
-  const { stdout } = await execFileP(PSP_INSPECT_BIN, [worldDir, PSP_GAME_DATA_DIR], {
+  const { stdout } = await execFileP(PSP_INSPECT_BIN, [worldDir, pspGameDataDir()], {
     maxBuffer: 512 * 1024 * 1024,
   })
   return JSON.parse(stdout)
@@ -341,7 +359,7 @@ export async function inspectPlayerInventory(
   playerUid: string,
 ): Promise<PlayerInventory> {
   const worldDir = join(saveGamesDir(), worldId)
-  const { stdout } = await execFileP(PSP_PLAYER_BIN, [worldDir, PSP_GAME_DATA_DIR, playerUid], {
+  const { stdout } = await execFileP(PSP_PLAYER_BIN, [worldDir, pspGameDataDir(), playerUid], {
     maxBuffer: 512 * 1024 * 1024,
   })
   return JSON.parse(stdout) as PlayerInventory
@@ -385,7 +403,7 @@ export async function editPlayerBasics(
   const worldDir = join(saveGamesDir(), worldId)
   const { stdout } = await execFileP(
     PSP_EDIT_PLAYER_BIN,
-    [worldDir, PSP_GAME_DATA_DIR, playerUid, JSON.stringify(edit)],
+    [worldDir, pspGameDataDir(), playerUid, JSON.stringify(edit)],
     { maxBuffer: 512 * 1024 * 1024 },
   )
   return JSON.parse(stdout) as PlayerEditResult
@@ -413,7 +431,7 @@ export async function deletePlayerFromWorld(
   playerUid: string,
 ): Promise<DeletePlayerResult> {
   const worldDir = join(saveGamesDir(), worldId)
-  const { stdout } = await execFileP(PSP_DELETE_PLAYER_BIN, [worldDir, PSP_GAME_DATA_DIR, playerUid], {
+  const { stdout } = await execFileP(PSP_DELETE_PLAYER_BIN, [worldDir, pspGameDataDir(), playerUid], {
     maxBuffer: 512 * 1024 * 1024,
   })
   return JSON.parse(stdout) as DeletePlayerResult

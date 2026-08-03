@@ -1564,8 +1564,8 @@ export function SavesPanel() {
             )}
 
             <p className="text-[11px] text-muted-foreground">
-              Decoded natively from Level.sav via psp-core (MIT). Items show their game IDs — the bundled
-              data has no localized names.
+              Decoded natively from Level.sav via psp-core (MIT). Pals &amp; items show friendly names + icons when
+              game data is populated (World → Game Data, or a source build); otherwise they fall back to raw IDs.
             </p>
           </div>
 
