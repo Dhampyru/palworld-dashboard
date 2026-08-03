@@ -255,7 +255,9 @@ export function GameDataCard({ scope }: { scope?: string }) {
         </div>
 
         <details className="text-[11px] text-muted-foreground">
-          <summary className="cursor-pointer select-none hover:text-foreground">How do I make a mappings.usmap?</summary>
+          <summary className="cursor-pointer select-none hover:text-foreground">
+            How do I make a <code className="font-mono">mappings.usmap</code>?
+          </summary>
           <ol className="mt-1 list-decimal space-y-0.5 pl-4">
             <li>
               On a PC with the Palworld <em>client</em> and <strong>UE4SS</strong> installed, edit{' '}
