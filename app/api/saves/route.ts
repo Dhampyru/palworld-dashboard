@@ -8,9 +8,11 @@ import { runWithInstance } from '@/lib/instances'
 import { getRconConfig, runRcon } from '@/lib/rcon-exec'
 import {
   createBackup,
+  createWorld,
   deleteBackup,
   deletePlayerFromWorld,
   deletePlayerSave,
+  deleteWorld,
   editPlayerBasics,
   type PlayerEdit,
   isGameServerUp,
@@ -108,6 +110,8 @@ async function _POST(request: NextRequest) {
     action !== 'backup' &&
     action !== 'delete' &&
     action !== 'switch' &&
+    action !== 'newWorld' &&
+    action !== 'deleteWorld' &&
     action !== 'restore' &&
     action !== 'deletePlayerSave' &&
     action !== 'resetPlayer' &&
@@ -152,6 +156,36 @@ async function _POST(request: NextRequest) {
         success: true,
         note: 'Active world set — restart the server to load it.',
       })
+    }
+
+    if (action === 'newWorld') {
+      // Point the server at a brand-new world id; the game generates the empty
+      // world on next start. Non-destructive: the current world is kept and stays
+      // switchable, so this needs no server-down and no backup.
+      const worldId = await createWorld()
+      return NextResponse.json({
+        success: true,
+        worldId,
+        note: 'New world created and set active — restart the server to generate it. Your previous world is kept and can be switched back to under Worlds.',
+      })
+    }
+
+    if (action === 'deleteWorld') {
+      if (!(await worldExists(body.worldId))) {
+        return NextResponse.json({ error: 'Unknown world' }, { status: 400 })
+      }
+      // Never delete the world the server is set to load — switch/new-world first.
+      const activeWorldId = await readActiveWorldId()
+      if (body.worldId === activeWorldId) {
+        return NextResponse.json(
+          { error: 'This is the active world. Switch to (or create) another world first, then delete this one.' },
+          { status: 409 },
+        )
+      }
+      // Snapshot everything first so a mistaken delete is reversible via restore.
+      await createBackup('preworlddelete')
+      await deleteWorld(body.worldId as string)
+      return NextResponse.json({ success: true, note: 'World deleted. A "preworlddelete" backup was taken first.' })
     }
 
     if (action === 'deletePlayerSave') {

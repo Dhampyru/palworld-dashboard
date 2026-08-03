@@ -4,8 +4,9 @@
 // operations (create backup, restore, switch active world) are specced but not
 // built here; they belong in the route's POST once the design is signed off.
 
-import { mkdir, readFile, readdir, stat, unlink } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, stat, unlink } from 'node:fs/promises'
 import { basename, join } from 'node:path'
+import { randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { writeConfigFileWithBackup } from '@/lib/config-write'
@@ -459,6 +460,25 @@ export async function setActiveWorld(worldId: string): Promise<void> {
     gameUserSettingsPath(),
     raw.replace(/^DedicatedServerName=.*$/m, `DedicatedServerName=${worldId}`),
   )
+}
+
+// Create a fresh world: pick a new Palworld-style id (32 uppercase hex) and point
+// the server at it. The game generates the empty world dir on its NEXT start (we
+// deliberately don't create it here), so the current world is untouched and stays
+// listed + switchable until then. Returns the new id.
+export async function createWorld(): Promise<string> {
+  const id = randomBytes(16).toString('hex').toUpperCase()
+  await setActiveWorld(id)
+  return id
+}
+
+// Permanently remove a world's save directory. Charset-guarded and confined to
+// SaveGames/0 (worldExists rejects traversal + non-world dirs like `backup`). The
+// ROUTE is responsible for refusing the active world and snapshotting first; this
+// just performs the delete.
+export async function deleteWorld(worldId: unknown): Promise<void> {
+  if (!(await worldExists(worldId))) throw new Error('World not found')
+  await rm(join(saveGamesDir(), worldId as string), { recursive: true, force: true })
 }
 
 // Is the game server currently SERVING? Restore refuses while it is, since

@@ -46,6 +46,7 @@ import {
   SaveIcon,
   HeartPulseIcon,
   TimerIcon,
+  PlusIcon,
 } from 'lucide-react'
 
 type WorldInfo = {
@@ -189,6 +190,8 @@ export function SavesPanel() {
   const [testingSchedule, setTestingSchedule] = useState(false)
 
   const [confirmSwitch, setConfirmSwitch] = useState<WorldInfo | null>(null)
+  const [confirmNewWorld, setConfirmNewWorld] = useState(false)
+  const [confirmDeleteWorld, setConfirmDeleteWorld] = useState<WorldInfo | null>(null)
   const [confirmRestore, setConfirmRestore] = useState<BackupInfo | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<BackupInfo | null>(null)
   const [confirmDeletePlayer, setConfirmDeletePlayer] = useState<PlayerSaveInfo | null>(null)
@@ -743,9 +746,21 @@ export function SavesPanel() {
 
           {/* Worlds */}
           <section className="flex flex-col gap-2">
-            <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <GlobeIcon className="size-3.5" /> Worlds ({data?.worlds.length ?? 0})
-            </h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <GlobeIcon className="size-3.5" /> Worlds ({data?.worlds.length ?? 0})
+              </h3>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmNewWorld(true)}
+                disabled={busy !== null}
+                className="gap-1.5"
+                title="Start a fresh world (your current world is kept)"
+              >
+                <PlusIcon className="size-3.5" /> New world
+              </Button>
+            </div>
             {data?.worlds.length ? (
               data.worlds.map((w) => (
                 <div key={w.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
@@ -764,15 +779,31 @@ export function SavesPanel() {
                     </span>
                   </div>
                   {!w.active && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setConfirmSwitch(w)}
-                      disabled={busy !== null}
-                      className="gap-1.5"
-                    >
-                      <CheckIcon className="size-3.5" /> Make active
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setConfirmSwitch(w)}
+                        disabled={busy !== null}
+                        className="gap-1.5"
+                      >
+                        <CheckIcon className="size-3.5" /> Make active
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setConfirmDeleteWorld(w)}
+                        disabled={busy !== null}
+                        className="text-destructive hover:text-destructive"
+                        title="Delete this world (permanent)"
+                      >
+                        {busy === `deleteWorld:${w.id}` ? (
+                          <Spinner className="size-3.5" />
+                        ) : (
+                          <Trash2Icon className="size-3.5" />
+                        )}
+                      </Button>
+                    </div>
                   )}
                 </div>
               ))
@@ -918,6 +949,64 @@ export function SavesPanel() {
               }}
             >
               Make active
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* New world confirm — non-destructive (current world is kept) */}
+      <AlertDialog open={confirmNewWorld} onOpenChange={setConfirmNewWorld}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Start a new world?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Creates a fresh, empty world and sets it active. It&apos;s generated on the next server{' '}
+              <strong>restart</strong> — players joining after that start over. Your current world is{' '}
+              <strong>kept</strong> and stays under Worlds, so you can switch back to it (or delete it) anytime.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                runAction('newWorld', { action: 'newWorld' }, () => {})
+                setConfirmNewWorld(false)
+              }}
+            >
+              Create new world
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete world confirm — destructive */}
+      <AlertDialog open={confirmDeleteWorld !== null} onOpenChange={(o) => !o && setConfirmDeleteWorld(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this world?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Permanently deletes <code className="font-mono text-xs">{confirmDeleteWorld?.id}</code> and all its save
+              data ({confirmDeleteWorld ? fmtBytes(confirmDeleteWorld.sizeBytes) : ''},{' '}
+              {confirmDeleteWorld?.playerCount ?? 0} player{confirmDeleteWorld?.playerCount === 1 ? '' : 's'}). A full{' '}
+              <code className="font-mono text-xs">preworlddelete</code> backup is taken first, so it&apos;s recoverable
+              via Restore. This is not the active world.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (confirmDeleteWorld)
+                  runAction(
+                    `deleteWorld:${confirmDeleteWorld.id}`,
+                    { action: 'deleteWorld', worldId: confirmDeleteWorld.id },
+                    () => {},
+                  )
+                setConfirmDeleteWorld(null)
+              }}
+            >
+              Delete world
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
