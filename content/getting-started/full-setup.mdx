@@ -23,7 +23,7 @@ step links to the detailed page; follow them in order. Everything past Step 2 is
 | **Minimum** | Monitoring, live map, roster, saves, mods, world/engine settings, RCON | A Palworld server with **REST + RCON** + the dashboard |
 | **Enriched** | Deeper player/guild data (guild export, last-seen, offline map layer) | **+ PalDefender** (and **UE4SS** for mod-dependent features) |
 | **Managed** | Start / stop / restart, multi-server provisioning | **+ [host integration](/docs/deployment/host-integration)** |
-| **Named data** | Friendly item/Pal names + icons, save-inspector names | **+ data population** (build from source) |
+| **Named data** | Friendly item/Pal names + icons | **In-dashboard Game Data** (upload usmap + icons, no rebuild) or a source build |
 
 ## Fastest path: the whole stack in one command
 
@@ -102,14 +102,13 @@ systemd units and the multi-server control daemon.
 Game names and art aren't bundled (they're Pocketpair's; supplied from your own
 game):
 
-- **Picker names + icons at runtime (no rebuild)** — run the
-  [game-data extractor](https://github.com/Dhampyru/palworld-dashboard/tree/main/tools/game-data-extractor)
-  against your pak + a `mappings.usmap`; point `PALWORLD_DATASETS_DIR` /
-  `PALWORLD_ICONS_DIR` at its output (the full-stack compose mounts
-  `./extracted/{data,icons}` already) and the names/icons appear on the next
-  start.
-- **Or via a source build** — [Item & Pal Datasets](/docs/configuration/item-pal-datasets)
-  (FModel + generator; also covers the save-inspector names).
+- **In the dashboard, no rebuild (recommended)** — open **Engine tab → Game Data**,
+  upload a `mappings.usmap`, and click **Extract**: the host parses your server's
+  own pak and the pickers get real item/Pal names. For art, upload a zip of
+  client-extracted `<id>.png` icons (a server pak has no texture data). Full
+  walkthrough: [Item & Pal Datasets](/docs/configuration/item-pal-datasets#in-dashboard-at-runtime-no-rebuild--recommended).
+- **Or a source build** — [Item & Pal Datasets](/docs/configuration/item-pal-datasets)
+  (FModel + generator, baked at build time; also covers the save-inspector names).
 - **Live map background** — bundled already; see
   [Live Map Art](/docs/configuration/live-map-art) only to replace it.
 
@@ -130,5 +129,6 @@ Without any of this, pickers show raw game IDs, which are still usable.
 | Metrics, FPS, live map, RCON, world/engine settings, mods, saves | Minimum tier |
 | Guilds & Players, offline map layer, enriched roster | PalDefender (+ UE4SS) |
 | Start / Stop / Restart, multi-server | Host integration |
-| Friendly names + icons, save-inspector names | Source build + data population |
+| Friendly names + icons | In-dashboard Game Data (usmap + icon upload, no rebuild) or a source build |
+| Save-inspector friendly names | Data population (source build) |
 | Native save inspect/edit (Pals, items, stats) | Works on any build; names need data population |

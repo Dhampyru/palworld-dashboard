@@ -20,6 +20,91 @@ source whose licensing is unambiguous, since you extract assets you already own.
 > does not own. So the repo ships empty stubs and this guide instead. See
 > [Why empty](#licensing--clean-room) below.
 
+There are **two ways** to populate the datasets:
+
+- **In-dashboard, at runtime (no rebuild) — recommended.** Upload a `.usmap` and
+  the dashboard extracts names from your server's own pak; upload an icon zip for
+  art. Covered immediately below.
+- **A source build (build-time).** Extract with FModel and bake the data into the
+  image. Full control; needed if you don't run the host integration. Starts at
+  [Prerequisites](#prerequisites).
+
+## In-dashboard, at runtime (no rebuild) — recommended
+
+The dashboard populates the datasets from a small per-instance workspace, with no
+source build and no image rebuild. It lives in the **Engine tab → Game Data** card
+(admin only), which shows current coverage and its own progress. Requires the
+[host integration](/docs/deployment/host-integration) for name extraction; the
+icon upload works regardless.
+
+### Names — from your server's own pak
+
+1. On a PC running the Palworld **client**, generate a build-matched
+   `mappings.usmap` with UE4SS ([Step 1](#step-1--generate-a-build-matched-usmap)
+   below — a headless server can't do this).
+2. In **Game Data**, click **Choose usmap**, upload that file, then **Extract**.
+   A host runner parses your server's own pak and writes the item/Pal/egg names;
+   the card shows progress and flips to *ready* — no restart, no rebuild.
+
+Extraction is a guarded one-time run: re-running (after a game update, with a fresh
+usmap) asks for confirmation, since it overwrites the datasets.
+
+> **Names come from the _server_ pak; icons cannot.** A dedicated-server build
+> **strips texture pixel data** (servers never render), so the server can extract
+> names but not icons. Icons come from a **client** pak — next.
+
+### Icons — from your client pak (Pal + item)
+
+Because the server pak has no texture data, icons are produced on the PC that runs
+the **client** and uploaded as a zip:
+
+1. On that PC, run the game-data extractor against your **client** pak
+   (`Pal-Windows.pak`, which keeps full texture data). It writes id-named Pal
+   icons (`pal/<id>.png`):
+
+   ```sh
+   docker run --rm \
+     -v "/path/to/Palworld/Pal/Content/Paks":/paks:ro \
+     -v "/path/to/mappings.usmap":/mappings.usmap:ro \
+     -v "$PWD/extracted/data":/data -v "$PWD/extracted/icons":/icons \
+     -e PAK_NAME=Pal-Windows.pak \
+     ghcr.io/dhampyru/palworld-data-extractor:latest
+   ```
+
+   Item icons need FModel (the extractor is Pal-focused): export
+   `Pal/Content/Others/InventoryItemIcon/Texture/` as PNG, then rename each to its
+   **item id** using `DT_ItemIconDataTable` (id → texture) so files are
+   `item/<id>.png`. (Same idea for any Pal icons you export by texture name:
+   `DT_PalCharacterIconDataTable` gives id → texture.)
+
+2. Zip a `pal/` and/or `item/` folder of `<id>.png` files:
+
+   ```sh
+   cd extracted/icons && zip -r ../../icons.zip pal item
+   ```
+
+3. In **Game Data**, click **Choose icons .zip** and upload it. Each `<id>.png` is
+   matched to the Pal or item of that id and served immediately — no rebuild.
+
+> **Filenames must be the dataset id** (`Anubis.png`, `Stone.png`), not the raw
+> texture name (`T_Anubis_icon_normal.png`). The extractor's Pal output is already
+> id-named; FModel exports are texture-named and must be renamed (the DataTables
+> above are the mapping). Files that don't match an id are ignored — nothing
+> breaks, those entries just stay name-only.
+
+### Where it lives
+
+Uploads land in the shared workspace `<srv>/gamedata/<instance>/` —
+`mappings.usmap`, `data/{items,pals,eggs}.json`, and `icons/{pal,item}/` — served
+by `/api/datasets` and `/api/game-icon`. Nothing is baked into the image or the
+git repo, so it stays clean-room. To refresh after a game update, re-extract with a
+fresh usmap and re-upload.
+
+---
+
+The rest of this page is the **source-build** alternative (FModel → generator →
+rebuild): use it for full control, or when you don't run the host integration.
+
 ## Overview
 
 The work happens in two places:

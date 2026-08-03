@@ -17,6 +17,12 @@ The dashboard uses internal Next.js API routes. These are implementation details
 | `/api/panel-auth/admin-password` | Admin password management endpoint. |
 | `/api/panel-auth/mod-password` | Moderator password management endpoint. |
 | `/api/demo-mode` | Reports whether runtime demo mode is enabled. |
+| `/api/datasets` | Serves the RCON picker datasets (items/pals/eggs) at runtime, per instance, preferring extracted data over the baked stubs. |
+| `/api/game-icon/[...path]` | Streams Pal/item icons at runtime (`?inst=` selects the instance's uploaded icons, else baked). |
+| `/api/game-data/usmap` | Uploads a `mappings.usmap` for the active instance (admin; magic + size validated). |
+| `/api/game-data/extract` | Queues a name extraction — drops the host flag file the control daemon acts on (admin). |
+| `/api/game-data/icons` | Uploads a zip of client-extracted `pal/`+`item/` `<id>.png` icons (admin; zip-slip-safe). |
+| `/api/game-data/status` | Extraction progress + dataset/icon coverage for the active instance. |
 
 ## Authentication
 
