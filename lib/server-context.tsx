@@ -221,14 +221,13 @@ export function ServerProvider({ children }: { children: ReactNode }) {
       )
       .forEach((key) => localStorage.removeItem(key))
 
-    // Restore the drilled-into instance and fold it into the config so every
-    // request carries the header immediately on reload.
-    const storedInstance = shouldRestoreActiveSession ? localStorage.getItem(ACTIVE_INSTANCE_STORAGE_KEY) : null
-    setActiveInstanceIdState(storedInstance)
+    // Always land on the fleet (Instances) page: keep the login (config) so the
+    // operator isn't asked to reconnect, but do NOT auto-restore the previously
+    // drilled-into server — they pick a server each visit. (enterInstance still
+    // persists the last id; it's simply not consumed on load.)
+    setActiveInstanceIdState(null)
     setConfigState(
-      shouldRestoreActiveSession && storedConfig
-        ? { ...storedConfig, instanceId: storedInstance ?? undefined }
-        : null,
+      shouldRestoreActiveSession && storedConfig ? { ...storedConfig, instanceId: undefined } : null,
     )
     setPlayersState(normalizePlayersPayload(readStorageValue(STORAGE_KEYS.players, [])))
     setServerInfoState(readStorageValue<ServerInfo | null>(STORAGE_KEYS.serverInfo, null))

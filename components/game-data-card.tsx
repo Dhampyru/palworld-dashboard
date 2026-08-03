@@ -39,7 +39,11 @@ type Payload = {
   status: GDStatus
   hasUsmap: boolean
   source: 'extracted' | 'baked'
-  coverage: { pals: number; items: number; eggs: number; icons: number; itemIcons: number }
+  coverage: {
+    pals: { total: number; named: number; iconed: number }
+    items: { total: number; named: number; iconed: number }
+    eggs: { total: number; named: number }
+  }
 }
 
 export function GameDataCard() {
@@ -175,20 +179,35 @@ export function GameDataCard() {
         pak — nothing is redistributed, and no rebuild is needed. One usmap per game version.
       </p>
 
-      {/* Coverage */}
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-        Coverage:{' '}
-        <span className="text-foreground">
-          {cov
-            ? `${cov.pals} pals · ${cov.items} items · ${cov.eggs} eggs · ${cov.icons} pal + ${cov.itemIcons} item icons`
-            : '—'}
-        </span>
-        {p && (
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
-            {p.source === 'extracted' ? 'extracted' : 'baked defaults'}
-          </span>
+      {/* Coverage — reflects what the pickers actually serve (baked or extracted) */}
+      <div className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <span>Coverage</span>
+          {p && (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+              {p.source === 'extracted' ? 'extracted' : 'baked defaults'}
+            </span>
+          )}
+        </div>
+        {cov ? (
+          <div className="grid grid-cols-[3rem_1fr] gap-x-2 gap-y-0.5 font-mono">
+            <span>Pals</span>
+            <span className="text-foreground">
+              {cov.pals.named}/{cov.pals.total} named · {cov.pals.iconed} with icon
+            </span>
+            <span>Items</span>
+            <span className="text-foreground">
+              {cov.items.named}/{cov.items.total} named · {cov.items.iconed} with icon
+            </span>
+            <span>Eggs</span>
+            <span className="text-foreground">
+              {cov.eggs.named}/{cov.eggs.total} named
+            </span>
+          </div>
+        ) : (
+          <span>—</span>
         )}
-      </p>
+      </div>
 
       {/* Live run / last result */}
       {running ? (
@@ -287,9 +306,9 @@ export function GameDataCard() {
           <span className="max-w-[14rem] truncate text-[11px] text-muted-foreground">
             {iconFile
               ? iconFile.name
-              : cov && (cov.icons > 0 || cov.itemIcons > 0)
-                ? `${cov.icons + cov.itemIcons} icons uploaded ✓`
-                : 'No icons uploaded'}
+              : cov && cov.pals.iconed + cov.items.iconed > 0
+                ? `${cov.pals.iconed + cov.items.iconed} icons showing`
+                : 'No icons yet'}
           </span>
           <Button
             size="sm"

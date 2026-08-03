@@ -16,7 +16,6 @@ import { RconConsoleModal } from '@/components/rcon-console-modal'
 import { GuildsPanel } from '@/components/guilds-panel'
 import { InvitePanel } from '@/components/invite-panel'
 import { EngineTuningPanel } from '@/components/engine-tuning-panel'
-import { GameDataCard } from '@/components/game-data-card'
 import { PalDefenderPanel } from '@/components/paldefender-panel'
 import { SavesPanel } from '@/components/saves-panel'
 import { FleetView } from '@/components/fleet-view'
@@ -248,9 +247,6 @@ export function Dashboard() {
                 <main className="flex min-h-0 flex-1 flex-col lg:overflow-hidden">
                   <div className="flex-1 overflow-y-auto lg:overflow-hidden">
                     <ScrollArea className="h-full lg:h-auto lg:flex-1">
-                      <div className="px-3 pt-3 sm:px-4">
-                        <GameDataCard />
-                      </div>
                       <EngineTuningPanel />
                     </ScrollArea>
                   </div>
