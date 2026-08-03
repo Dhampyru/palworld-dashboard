@@ -44,6 +44,7 @@ type InstanceRow = {
   status: string | null
   memBytes: number | null
   startedAt: string | null
+  activeWorld: string | null
 }
 
 type ProvisionStatus = { phase: string; pct?: number; message?: string } | null
@@ -279,6 +280,11 @@ export function InstancesPanel() {
                       <span className="font-mono">{row.id}</span> · game {row.ports.game} · REST {row.ports.rest}
                       {row.running === true && <> · {fmtMem(row.memBytes)}</>}
                     </div>
+                    {row.activeWorld && (
+                      <div className="truncate pl-[18px] text-xs text-muted-foreground" title={row.activeWorld}>
+                        active world <span className="font-mono">{row.activeWorld}</span>
+                      </div>
+                    )}
                   </div>
                   <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground" />
                 </button>

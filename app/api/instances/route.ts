@@ -5,7 +5,8 @@ import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { DEMO_MODE } from '@/lib/demo-mode'
 import { demoInstances } from '@/lib/demo'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
-import { getInstance, listInstances, readInstanceMetrics, DEFAULT_INSTANCE_ID } from '@/lib/instances'
+import { getInstance, listInstances, readInstanceMetrics, runWithInstance, DEFAULT_INSTANCE_ID } from '@/lib/instances'
+import { readActiveWorldId } from '@/lib/saves'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -47,20 +48,31 @@ export async function GET(request: NextRequest) {
   if (DEMO_MODE) {
     return NextResponse.json({ instances: demoInstances })
   }
-  const instances = listInstances().map((i) => {
-    const m = readInstanceMetrics(i.id)
-    return {
-      id: i.id,
-      displayName: i.displayName,
-      isDefault: i.isDefault,
-      enabled: i.enabled,
-      ports: i.ports,
-      running: m ? m.present && m.status === 'running' : null,
-      status: m?.status ?? null,
-      memBytes: m?.memBytes ?? null,
-      startedAt: m?.startedAt ?? null,
-    }
-  })
+  const instances = await Promise.all(
+    listInstances().map(async (i) => {
+      const m = readInstanceMetrics(i.id)
+      // Active world = DedicatedServerName in this instance's GameUserSettings.ini
+      // (a small file read, per instance). Best-effort — null if unreadable.
+      let activeWorld: string | null = null
+      try {
+        activeWorld = await runWithInstance(i.id, () => readActiveWorldId())
+      } catch {
+        /* leave null */
+      }
+      return {
+        id: i.id,
+        displayName: i.displayName,
+        isDefault: i.isDefault,
+        enabled: i.enabled,
+        ports: i.ports,
+        running: m ? m.present && m.status === 'running' : null,
+        status: m?.status ?? null,
+        memBytes: m?.memBytes ?? null,
+        startedAt: m?.startedAt ?? null,
+        activeWorld,
+      }
+    }),
+  )
   return NextResponse.json({ instances })
 }
 
