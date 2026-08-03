@@ -221,13 +221,16 @@ export function ServerProvider({ children }: { children: ReactNode }) {
       )
       .forEach((key) => localStorage.removeItem(key))
 
-    // Always land on the fleet (Instances) page: keep the login (config) so the
-    // operator isn't asked to reconnect, but do NOT auto-restore the previously
-    // drilled-into server — they pick a server each visit. (enterInstance still
-    // persists the last id; it's simply not consumed on load.)
-    setActiveInstanceIdState(null)
+    // Reload / return within a session: RESTORE the drilled-into server (remember
+    // where you were), folding it into the config so requests carry the header
+    // immediately. A FRESH login instead lands on the fleet — setConfig() clears
+    // the active instance, so this restore only ever fires on reload, not on login.
+    const storedInstance = shouldRestoreActiveSession ? localStorage.getItem(ACTIVE_INSTANCE_STORAGE_KEY) : null
+    setActiveInstanceIdState(storedInstance)
     setConfigState(
-      shouldRestoreActiveSession && storedConfig ? { ...storedConfig, instanceId: undefined } : null,
+      shouldRestoreActiveSession && storedConfig
+        ? { ...storedConfig, instanceId: storedInstance ?? undefined }
+        : null,
     )
     setPlayersState(normalizePlayersPayload(readStorageValue(STORAGE_KEYS.players, [])))
     setServerInfoState(readStorageValue<ServerInfo | null>(STORAGE_KEYS.serverInfo, null))
@@ -249,6 +252,11 @@ export function ServerProvider({ children }: { children: ReactNode }) {
     setConnectionStatus('checking')
     setLastConnectionError(null)
     setFpsHistoryState([]) // repopulated from /api/fps-history on connect
+    // A fresh login always lands on the fleet: forget any previously drilled-into
+    // server (state + persisted id) so the restore-on-reload path can't jump past
+    // the Instances page right after logging on.
+    setActiveInstanceIdState(null)
+    localStorage.removeItem(ACTIVE_INSTANCE_STORAGE_KEY)
 
     if (rememberMe) {
       writeStorageValue(STORAGE_KEYS.config, normalizedConfig)
