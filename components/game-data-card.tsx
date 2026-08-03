@@ -11,7 +11,7 @@
 // re-running once data already exists requires an explicit confirm.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useServer } from '@/lib/server-context'
-import { buildPalworldProxyHeaders } from '@/lib/palworld'
+import { buildPalworldProxyHeaders, PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
@@ -46,7 +46,7 @@ type Payload = {
   }
 }
 
-export function GameDataCard() {
+export function GameDataCard({ scope }: { scope?: string }) {
   const { config } = useServer()
   const isAdmin = config?.accessTier === 'admin'
   const [p, setP] = useState<Payload | null>(null)
@@ -59,19 +59,27 @@ export function GameDataCard() {
   const [iconUploading, setIconUploading] = useState(false)
   const iconRef = useRef<HTMLInputElement>(null)
 
+  // Headers for this card's requests. `scope` (e.g. the fleet-wide '_shared')
+  // overrides which game-data workspace every call reads/writes.
+  const hdrs = useCallback(
+    (extra?: Record<string, string>): Record<string, string> => {
+      const h: Record<string, string> = { ...(buildPalworldProxyHeaders(config!) as Record<string, string>), ...extra }
+      if (scope) h[PALWORLD_PROXY_HEADERS.instance] = scope
+      return h
+    },
+    [config, scope],
+  )
+
   const load = useCallback(async () => {
     if (!config) return
     try {
-      const res = await fetch('/api/game-data/status', {
-        headers: buildPalworldProxyHeaders(config),
-        cache: 'no-store',
-      })
+      const res = await fetch('/api/game-data/status', { headers: hdrs(), cache: 'no-store' })
       const json = await res.json()
       if (res.ok) setP(json as Payload)
     } catch {
       /* keep last known state */
     }
-  }, [config])
+  }, [config, hdrs])
 
   useEffect(() => {
     void load()
@@ -94,11 +102,7 @@ export function GameDataCard() {
       const fd = new FormData()
       fd.append('file', file)
       // NB: no Content-Type header — the browser sets the multipart boundary.
-      const res = await fetch('/api/game-data/usmap', {
-        method: 'POST',
-        headers: buildPalworldProxyHeaders(config),
-        body: fd,
-      })
+      const res = await fetch('/api/game-data/usmap', { method: 'POST', headers: hdrs(), body: fd })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? res.statusText)
       toast.success(`Uploaded (${Math.round((json.size ?? 0) / 1024)} KB)`, { id })
@@ -110,7 +114,7 @@ export function GameDataCard() {
     } finally {
       setUploading(false)
     }
-  }, [config, file, load])
+  }, [config, file, load, hdrs])
 
   const uploadIcons = useCallback(async () => {
     if (!config || !iconFile) return
@@ -119,11 +123,7 @@ export function GameDataCard() {
     try {
       const fd = new FormData()
       fd.append('file', iconFile)
-      const res = await fetch('/api/game-data/icons', {
-        method: 'POST',
-        headers: buildPalworldProxyHeaders(config),
-        body: fd,
-      })
+      const res = await fetch('/api/game-data/icons', { method: 'POST', headers: hdrs(), body: fd })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? res.statusText)
       toast.success(`Uploaded ${json.count ?? 0} icons`, { id })
@@ -135,7 +135,7 @@ export function GameDataCard() {
     } finally {
       setIconUploading(false)
     }
-  }, [config, iconFile, load])
+  }, [config, iconFile, load, hdrs])
 
   const doExtract = useCallback(async () => {
     if (!config) return
@@ -144,7 +144,7 @@ export function GameDataCard() {
     try {
       const res = await fetch('/api/game-data/extract', {
         method: 'POST',
-        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+        headers: hdrs({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({}),
       })
       const json = await res.json()
@@ -156,7 +156,7 @@ export function GameDataCard() {
     } finally {
       setStarting(false)
     }
-  }, [config, load])
+  }, [config, load, hdrs])
 
   // One-time-run guard: confirm before overwriting existing extracted data.
   const onExtractClick = useCallback(() => {
@@ -254,6 +254,27 @@ export function GameDataCard() {
           </Button>
         </div>
 
+        <details className="text-[11px] text-muted-foreground">
+          <summary className="cursor-pointer select-none hover:text-foreground">How do I make a mappings.usmap?</summary>
+          <ol className="mt-1 list-decimal space-y-0.5 pl-4">
+            <li>
+              On a PC with the Palworld <em>client</em> and <strong>UE4SS</strong> installed, edit{' '}
+              <code className="font-mono">Pal/Binaries/Win64/ue4ss/UE4SS-settings.ini</code> and, under{' '}
+              <code className="font-mono">[Debug]</code>, set <code className="font-mono">ConsoleEnabled</code>,{' '}
+              <code className="font-mono">GuiConsoleEnabled</code> and{' '}
+              <code className="font-mono">GuiConsoleVisible</code> to <code className="font-mono">1</code>.
+            </li>
+            <li>
+              Launch the game to the main menu; in the UE4SS console open the <strong>Dumpers</strong> tab and generate
+              the <code className="font-mono">.usmap</code>.
+            </li>
+            <li>Set those three keys back to 0, then upload the generated file above.</li>
+          </ol>
+          <a href="/docs/configuration/item-pal-datasets" className="mt-1 inline-block underline hover:text-foreground">
+            Full walkthrough →
+          </a>
+        </details>
+
         <div className="flex items-center gap-2">
           <Button
             size="sm"
@@ -284,8 +305,39 @@ export function GameDataCard() {
           data, so icons can&apos;t be extracted here. On the PC where you made the usmap, run the extractor against
           your <em>client</em> pak, then upload a zip with a <code className="font-mono">pal/</code> and/or{' '}
           <code className="font-mono">item/</code> folder of <code className="font-mono">&lt;id&gt;.png</code> files —
-          they&apos;re matched to Pals and items by id.
+          they&apos;re matched to Pals and items by id (a base icon also covers its BOSS/tier variants).
         </p>
+        <details className="text-[11px] text-muted-foreground">
+          <summary className="cursor-pointer select-none hover:text-foreground">How do I make the icon zip?</summary>
+          <p className="mt-1">
+            Icons live only in a <em>client</em> install (a dedicated-server pak strips texture data). Today that
+            means <strong>FModel</strong> — and it exports loose, texture-named PNGs, not a ready zip. Easiest path:
+          </p>
+          <ol className="mt-1 list-decimal space-y-0.5 pl-4">
+            <li>
+              In FModel (using your usmap), export as PNG:{' '}
+              <code className="font-mono">Pal/Content/Pal/Texture/PalIcon/Normal</code> and{' '}
+              <code className="font-mono">Pal/Content/Others/InventoryItemIcon</code>; and as JSON (Save Properties):{' '}
+              <code className="font-mono">DT_PalCharacterIconDataTable</code> +{' '}
+              <code className="font-mono">DT_ItemIconDataTable</code>.
+            </li>
+            <li>
+              Run{' '}
+              <code className="font-mono">scripts/pde/package-icons.py --export-dir &lt;FModel Output/Exports&gt;</code>{' '}
+              — it maps each texture to its id and writes a ready-to-upload{' '}
+              <code className="font-mono">icons.zip</code>.
+            </li>
+            <li>Upload that zip below.</li>
+          </ol>
+          <p className="mt-1">
+            No script? Zip a <code className="font-mono">pal/</code> and/or <code className="font-mono">item/</code>{' '}
+            folder of <code className="font-mono">&lt;id&gt;.png</code> yourself (rename FModel&apos;s texture-named
+            files to ids first).
+          </p>
+          <a href="/docs/configuration/item-pal-datasets" className="mt-1 inline-block underline hover:text-foreground">
+            Full walkthrough →
+          </a>
+        </details>
         <div className="flex flex-wrap items-center gap-2">
           <input
             ref={iconRef}

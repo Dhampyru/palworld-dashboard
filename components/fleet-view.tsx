@@ -11,6 +11,7 @@
 // targets the default instance and is purely additive; the dashboard is fully
 // functional without it.
 import { useServer } from '@/lib/server-context'
+import { GAMEDATA_SHARED_ID } from '@/lib/gamedata-icon-base'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { InstancesPanel } from '@/components/instances-panel'
@@ -55,10 +56,11 @@ export function FleetView() {
                 <p className="mt-2 text-[11px] text-muted-foreground">
                   Palworld&apos;s names and art are Pocketpair&apos;s, so they can&apos;t be bundled with this
                   (MIT-licensed) project — instead you generate them from your <em>own</em> copy of the game, which is
-                  unambiguously yours to extract. Nothing is redistributed by us.
+                  unambiguously yours to extract. Nothing is redistributed by us. Applies to <strong>every</strong>{' '}
+                  server here (fleet-wide).
                 </p>
               </div>
-              <GameDataCard />
+              <GameDataCard scope={GAMEDATA_SHARED_ID} />
             </aside>
           </div>
         </ScrollArea>

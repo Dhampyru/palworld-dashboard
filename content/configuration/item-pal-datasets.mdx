@@ -31,11 +31,13 @@ There are **two ways** to populate the datasets:
 
 ## In-dashboard, at runtime (no rebuild) — recommended
 
-The dashboard populates the datasets from a small per-instance workspace, with no
-source build and no image rebuild. It lives in the **Engine tab → Game Data** card
-(admin only), which shows current coverage and its own progress. Requires the
-[host integration](/docs/deployment/host-integration) for name extraction; the
-icon upload works regardless.
+The dashboard populates the datasets at runtime, with no source build and no image
+rebuild. It lives in the **Game Data** card on the **Instances (fleet) landing
+page** (admin only) — the box on the right — which shows current coverage and its
+own progress. What you upload here is **fleet-wide**: every server falls back to it
+(read order per instance: the instance's own override → this shared set → the baked
+defaults). Requires the [host integration](/docs/deployment/host-integration) for
+name extraction; the icon upload works regardless.
 
 ### Names — from your server's own pak
 
@@ -53,52 +55,50 @@ usmap) asks for confirmation, since it overwrites the datasets.
 > **strips texture pixel data** (servers never render), so the server can extract
 > names but not icons. Icons come from a **client** pak — next.
 
-### Icons — from your client pak (Pal + item)
+### Icons — from your client files (Pal + item)
 
-Because the server pak has no texture data, icons are produced on the PC that runs
-the **client** and uploaded as a zip:
+Because the server pak has no texture data, icons come from a **client** install
+and are uploaded as a zip. Today the only tool that extracts Palworld's icon
+textures is **[FModel](https://fmodel.app/)** — and it exports loose, texture-named
+PNGs, not a ready zip. To skip the hand-renaming, this repo ships a packager that
+maps textures to ids and zips them for you.
 
-1. On that PC, run the game-data extractor against your **client** pak
-   (`Pal-Windows.pak`, which keeps full texture data). It writes id-named Pal
-   icons (`pal/<id>.png`):
-
-   ```sh
-   docker run --rm \
-     -v "/path/to/Palworld/Pal/Content/Paks":/paks:ro \
-     -v "/path/to/mappings.usmap":/mappings.usmap:ro \
-     -v "$PWD/extracted/data":/data -v "$PWD/extracted/icons":/icons \
-     -e PAK_NAME=Pal-Windows.pak \
-     ghcr.io/dhampyru/palworld-data-extractor:latest
-   ```
-
-   Item icons need FModel (the extractor is Pal-focused): export
-   `Pal/Content/Others/InventoryItemIcon/Texture/` as PNG, then rename each to its
-   **item id** using `DT_ItemIconDataTable` (id → texture) so files are
-   `item/<id>.png`. (Same idea for any Pal icons you export by texture name:
-   `DT_PalCharacterIconDataTable` gives id → texture.)
-
-2. Zip a `pal/` and/or `item/` folder of `<id>.png` files:
+1. **Export from FModel** (using your usmap from Step 1). As **PNG**:
+   `Pal/Content/Pal/Texture/PalIcon/Normal` and
+   `Pal/Content/Others/InventoryItemIcon`. As **JSON (Save Properties)**:
+   `DT_PalCharacterIconDataTable` and `DT_ItemIconDataTable` (the id → texture maps).
+2. **Package it** — point the script at FModel's `Output/Exports` folder:
 
    ```sh
-   cd extracted/icons && zip -r ../../icons.zip pal item
+   ./scripts/pde/package-icons.py --export-dir "/path/to/FModel/Output/Exports"
    ```
 
-3. In **Game Data**, click **Choose icons .zip** and upload it. Each `<id>.png` is
-   matched to the Pal or item of that id and served immediately — no rebuild.
+   It reads the DataTables, copies each texture to `pal/<id>.png` / `item/<id>.png`,
+   and writes `icons.zip`. (`--pals-only` / `--items-only` to limit it.)
+3. **Upload** — in the **Game Data** card, click **Choose icons .zip** and upload
+   `icons.zip`. Each `<id>.png` is matched to the Pal/item of that id and served
+   immediately — no rebuild. A base icon also covers its `BOSS_`/tier variants.
 
-> **Filenames must be the dataset id** (`Anubis.png`, `Stone.png`), not the raw
-> texture name (`T_Anubis_icon_normal.png`). The extractor's Pal output is already
-> id-named; FModel exports are texture-named and must be renamed (the DataTables
-> above are the mapping). Files that don't match an id are ignored — nothing
-> breaks, those entries just stay name-only.
+> **Doing it by hand?** Zip a `pal/` and/or `item/` folder of `<id>.png` files
+> yourself — but note FModel names files by **texture** (`T_Anubis_icon_normal.png`),
+> not by **id** (`Anubis.png`), so you'd rename them first (the DataTables are the
+> mapping the script automates). Files that don't match a dataset id are ignored —
+> nothing breaks, those entries just stay name-only.
+
+> **Pal-only shortcut (no FModel):** the game-data extractor already emits id-named
+> Pal icons when run against a **client** pak (`-e PAK_NAME=Pal-Windows.pak`); zip
+> its `extracted/icons/pal` and upload. It does **not** produce item icons (it's
+> Pal-focused), so item icons still need the FModel + packager route above.
 
 ### Where it lives
 
-Uploads land in the shared workspace `<srv>/gamedata/<instance>/` —
-`mappings.usmap`, `data/{items,pals,eggs}.json`, and `icons/{pal,item}/` — served
-by `/api/datasets` and `/api/game-icon`. Nothing is baked into the image or the
-git repo, so it stays clean-room. To refresh after a game update, re-extract with a
-fresh usmap and re-upload.
+Fleet uploads land in `<srv>/gamedata/_shared/` — `mappings.usmap`,
+`data/{items,pals,eggs}.json`, and `icons/{pal,item}/` — served by `/api/datasets`
+and `/api/game-icon`, with every instance falling back to it. (A single server can
+still be given its own override at `<srv>/gamedata/<id>/`, which wins over the
+shared set for that instance.) Nothing is baked into the image or the git repo, so
+it stays clean-room. To refresh after a game update, re-extract with a fresh usmap
+and re-upload.
 
 ---
 

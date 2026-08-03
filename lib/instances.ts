@@ -346,9 +346,17 @@ export interface GameDataPaths {
   runDir: string
 }
 
+// Fleet-wide game-data scope. Uploads/extractions from the fleet landing target
+// this pseudo-instance; every instance falls back to it (read order: the
+// instance's own override → shared → baked). Its extraction uses the default
+// server's pak (all instances run the same game version). The constant lives in
+// the client-safe gamedata-icon-base module; re-exported here for server callers.
+export { GAMEDATA_SHARED_ID } from './gamedata-icon-base'
+import { GAMEDATA_SHARED_ID } from './gamedata-icon-base'
+
 export function resolveGameDataPaths(id?: string | null): GameDataPaths {
-  const wanted = normalizeId(id)
-  const { runDir } = resolveLifecyclePaths(wanted)
+  const wanted = id === GAMEDATA_SHARED_ID ? GAMEDATA_SHARED_ID : normalizeId(id)
+  const runDir = wanted === GAMEDATA_SHARED_ID ? `${RUN_DIR}/${wanted}` : resolveLifecyclePaths(wanted).runDir
   const dir = `${SRV_ROOT}/gamedata/${wanted}`
   return {
     dir,
@@ -359,6 +367,16 @@ export function resolveGameDataPaths(id?: string | null): GameDataPaths {
     status: `${runDir}/gamedata.status`,
     runDir,
   }
+}
+
+// Ordered read scopes for datasets/icons: the active instance's own override
+// first, then the fleet-wide shared scope. Callers try these, then the baked dir.
+export function gameDataReadScopes(id?: string | null): { dataDir: string; iconsDir: string }[] {
+  const inst = resolveGameDataPaths(id)
+  const shared = resolveGameDataPaths(GAMEDATA_SHARED_ID)
+  const scopes = [{ dataDir: inst.dataDir, iconsDir: inst.iconsDir }]
+  if (shared.dataDir !== inst.dataDir) scopes.push({ dataDir: shared.dataDir, iconsDir: shared.iconsDir })
+  return scopes
 }
 
 // ─── request-scoped active instance (AsyncLocalStorage) ─────────────────────

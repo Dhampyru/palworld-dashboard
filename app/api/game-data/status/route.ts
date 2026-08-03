@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { readFile, access, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
-import { resolveGameDataPaths } from '@/lib/instances'
+import { resolveGameDataPaths, gameDataReadScopes } from '@/lib/instances'
+import { iconCandidates } from '@/lib/gamedata-icon-base'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -38,21 +39,22 @@ async function iconIdSet(dir: string): Promise<Set<string>> {
   }
 }
 
-// {total, named, iconed} where iconed = has a baked image OR an uploaded icon.
-function tally(entries: Entry[], uploaded: Set<string>) {
+// {total, named, iconed} where iconed = has a baked image OR an uploaded icon
+// (exact id or a base-name candidate — same rule the linker uses).
+function tally(entries: Entry[], uploaded: Set<string>, cat: 'pal' | 'item') {
   let named = 0
   let iconed = 0
   for (const e of entries) {
     if (e.name) named++
-    if (e.image || uploaded.has(e.id)) iconed++
+    if (e.image || iconCandidates(cat, e.id).some((c) => uploaded.has(c))) iconed++
   }
   return { total: entries.length, named, iconed }
 }
 
 export async function GET(request: NextRequest) {
-  const { dataDir, iconsDir, usmapPath, status: statusPath } = resolveGameDataPaths(
-    request.headers.get(PALWORLD_PROXY_HEADERS.instance),
-  )
+  const instHeader = request.headers.get(PALWORLD_PROXY_HEADERS.instance)
+  const { usmapPath, status: statusPath } = resolveGameDataPaths(instHeader)
+  const scopes = gameDataReadScopes(instHeader)
 
   let status: unknown = null
   try {
@@ -69,23 +71,31 @@ export async function GET(request: NextRequest) {
     /* not uploaded */
   }
 
-  // Which dir serves datasets: the instance's extracted dir if present, else baked.
+  // Which dir serves datasets: first scope (instance override → shared) with data, else baked.
   let sourceDir = BAKED_DATASETS_DIR
   let source: 'extracted' | 'baked' = 'baked'
-  try {
-    await access(join(dataDir, 'pals.json'))
-    sourceDir = dataDir
-    source = 'extracted'
-  } catch {
-    /* fall back to baked */
+  for (const s of scopes) {
+    try {
+      await access(join(s.dataDir, 'pals.json'))
+      sourceDir = s.dataDir
+      source = 'extracted'
+      break
+    } catch {
+      /* try next scope */
+    }
   }
 
-  const [pals, items, eggs, palIcons, itemIcons] = await Promise.all([
+  // Uploaded icon ids = union across scopes (instance override + shared).
+  const palIcons = new Set<string>()
+  const itemIcons = new Set<string>()
+  for (const s of scopes) {
+    for (const id of await iconIdSet(join(s.iconsDir, 'pal'))) palIcons.add(id)
+    for (const id of await iconIdSet(join(s.iconsDir, 'item'))) itemIcons.add(id)
+  }
+  const [pals, items, eggs] = await Promise.all([
     loadArr(sourceDir, 'pals'),
     loadArr(sourceDir, 'items'),
     loadArr(sourceDir, 'eggs'),
-    iconIdSet(join(iconsDir, 'pal')),
-    iconIdSet(join(iconsDir, 'item')),
   ])
 
   return NextResponse.json({
@@ -93,9 +103,9 @@ export async function GET(request: NextRequest) {
     hasUsmap,
     source,
     coverage: {
-      pals: tally(pals, palIcons),
-      items: tally(items, itemIcons),
-      eggs: tally(eggs, new Set()),
+      pals: tally(pals, palIcons, 'pal'),
+      items: tally(items, itemIcons, 'item'),
+      eggs: tally(eggs, new Set(), 'item'),
     },
   })
 }

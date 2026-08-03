@@ -278,14 +278,20 @@ gamedata_in_flight() {
   return 1
 }
 
-# id → host gameDir for every extraction target (all instances, incl default).
+# id → host gameDir for every extraction target (all instances, incl default),
+# plus the fleet-wide `_shared` scope which extracts from the DEFAULT server's pak
+# (all instances run the same game version; every instance falls back to _shared).
 gamedata_targets() {
-  local haveDefault=0
+  local haveDefault=0 defaultDir="$GAMEDATA_DEFAULT_GAME_DIR"
   if [ -f "$REGISTRY" ]; then
     jq -r '.instances[]? | select(.gameDir != null) | [.id, .gameDir] | @tsv' "$REGISTRY" 2>/dev/null
-    jq -e '.instances[]?|select(.id=="default")' "$REGISTRY" >/dev/null 2>&1 && haveDefault=1
+    if jq -e '.instances[]?|select(.id=="default")' "$REGISTRY" >/dev/null 2>&1; then
+      haveDefault=1
+      defaultDir=$(jq -r '.instances[]?|select(.id=="default")|.gameDir' "$REGISTRY" 2>/dev/null)
+    fi
   fi
   [ "$haveDefault" = 0 ] && printf 'default\t%s\n' "$GAMEDATA_DEFAULT_GAME_DIR"
+  printf '_shared\t%s\n' "$defaultDir"
 }
 
 extract_gamedata() { # id runDir gameDir procFile

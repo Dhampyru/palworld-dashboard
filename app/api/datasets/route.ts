@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { readFile, access, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
-import { resolveGameDataPaths } from '@/lib/instances'
+import { gameDataReadScopes } from '@/lib/instances'
+import { iconCandidates } from '@/lib/gamedata-icon-base'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -39,34 +40,45 @@ async function load(dir: string, key: 'items' | 'pals' | 'eggs', instId: string)
 
 // Set each entry's `image` from an uploaded icon of the same id, when it has none.
 // Server extraction can't produce icons (the server pak strips texture data), so
-// entries arrive without an `image`; an <id>.png in the instance's icons/<cat> dir
-// (uploaded via /api/game-data/icons) becomes the image here. Entries that already
-// carry an image (e.g. a full client bundle) are left as load() set them.
-async function linkIcons(dir: string, cat: 'pal' | 'item', entries: Entry[], q: string): Promise<void> {
-  try {
-    const files = await readdir(dir)
-    const ids = new Set(
-      files.filter((f) => f.toLowerCase().endsWith('.png')).map((f) => f.slice(0, -4)),
-    )
-    if (ids.size === 0) return
-    for (const e of entries) {
-      if (!e.image && ids.has(e.id)) e.image = `${ICON_ROUTE}${cat}/${e.id}.png${q}`
+// entries arrive without an `image`; an <id>.png uploaded via /api/game-data/icons
+// (into the instance's own scope OR the fleet-wide shared scope) becomes the image
+// here. The URL keeps ?inst=<active>; /api/game-icon resolves the file across the
+// same scopes. Entries that already carry an image (e.g. a full client bundle) are
+// left as load() set them.
+async function linkIcons(dirs: string[], cat: 'pal' | 'item', entries: Entry[], q: string): Promise<void> {
+  const ids = new Set<string>()
+  for (const dir of dirs) {
+    try {
+      for (const f of await readdir(dir)) {
+        if (f.toLowerCase().endsWith('.png')) ids.add(f.slice(0, -4))
+      }
+    } catch {
+      /* scope has no icons */
     }
-  } catch {
-    /* no uploaded icons for this category */
+  }
+  if (ids.size === 0) return
+  for (const e of entries) {
+    if (e.image) continue
+    // Try the exact id, then base-name candidates (a BOSS_/tier variant reuses
+    // the base icon). The URL points at whichever file actually exists.
+    const hit = iconCandidates(cat, e.id).find((c) => ids.has(c))
+    if (hit) e.image = `${ICON_ROUTE}${cat}/${hit}.png${q}`
   }
 }
 
 export async function GET(request: NextRequest) {
   const instId = (request.headers.get(PALWORLD_PROXY_HEADERS.instance) ?? 'default').trim() || 'default'
-  const { dataDir, iconsDir } = resolveGameDataPaths(instId)
-  // Prefer the instance's extracted datasets when present; else the baked dir.
+  const scopes = gameDataReadScopes(instId)
+  // Data: first scope (instance override → shared) that has datasets, else baked.
   let dir = BAKED_DATASETS_DIR
-  try {
-    await access(join(dataDir, 'pals.json'))
-    dir = dataDir
-  } catch {
-    /* fall back to baked */
+  for (const s of scopes) {
+    try {
+      await access(join(s.dataDir, 'pals.json'))
+      dir = s.dataDir
+      break
+    } catch {
+      /* try the next scope */
+    }
   }
   const [items, pals, eggs] = await Promise.all([
     load(dir, 'items', instId),
@@ -74,14 +86,9 @@ export async function GET(request: NextRequest) {
     load(dir, 'eggs', instId),
   ])
 
-  // Link uploaded Pal icons by id. Server extraction can't produce icons (the
-  // server pak strips texture data), so those pals arrive with no `image`; if the
-  // operator has uploaded an icon set (/api/game-data/icons), an <id>.png in the
-  // instance's icons/pal dir becomes the pal's image here. Entries that already
-  // carry an image (e.g. a full client bundle) are left as the load() rewrite set them.
   const q = `?inst=${encodeURIComponent(instId)}`
-  await linkIcons(join(iconsDir, 'pal'), 'pal', pals, q)
-  await linkIcons(join(iconsDir, 'item'), 'item', items, q)
+  await linkIcons(scopes.map((s) => join(s.iconsDir, 'pal')), 'pal', pals, q)
+  await linkIcons(scopes.map((s) => join(s.iconsDir, 'item')), 'item', items, q)
 
   return NextResponse.json({ items, pals, eggs })
 }

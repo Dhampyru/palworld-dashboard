@@ -102,11 +102,13 @@ systemd units and the multi-server control daemon.
 Game names and art aren't bundled (they're Pocketpair's; supplied from your own
 game):
 
-- **In the dashboard, no rebuild (recommended)** — open **Engine tab → Game Data**,
-  upload a `mappings.usmap`, and click **Extract**: the host parses your server's
-  own pak and the pickers get real item/Pal names. For art, upload a zip of
-  client-extracted `<id>.png` icons (a server pak has no texture data). Full
-  walkthrough: [Item & Pal Datasets](/docs/configuration/item-pal-datasets#in-dashboard-at-runtime-no-rebuild--recommended).
+- **In the dashboard, no rebuild (recommended)** — on the **Instances landing page**,
+  the **Game Data** box (right column) applies fleet-wide: upload a `mappings.usmap`
+  and click **Extract** and the host parses your server's own pak so the pickers get
+  real item/Pal names. For art, upload a zip of client-extracted `<id>.png` icons (a
+  server pak has no texture data) — the built-in packager (`scripts/pde/package-icons.py`)
+  turns an FModel export into that zip. Full walkthrough:
+  [Item & Pal Datasets](/docs/configuration/item-pal-datasets#in-dashboard-at-runtime-no-rebuild--recommended).
 - **Or a source build** — [Item & Pal Datasets](/docs/configuration/item-pal-datasets)
   (FModel + generator, baked at build time; also covers the save-inspector names).
 - **Live map background** — bundled already; see
