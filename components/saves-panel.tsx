@@ -10,6 +10,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useServer } from '@/lib/server-context'
 import { buildPalworldProxyHeaders } from '@/lib/palworld'
+import { fetchDatasets, type RuntimeDatasets } from '@/lib/rcon-datasets'
+import { palIconCandidates, itemIconCandidates } from '@/lib/gamedata-icon-base'
 import { RestartAutomationCard } from '@/components/restart-automation-card'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -195,6 +197,10 @@ export function SavesPanel() {
   const [savingSchedule, setSavingSchedule] = useState(false)
   const [testingSchedule, setTestingSchedule] = useState(false)
   const [cleaningSnapshots, setCleaningSnapshots] = useState(false)
+  // Friendly names + icons for the inspector, from the runtime datasets (populated
+  // by the usmap upload → extract flow — the SAME clean-room source the RCON
+  // pickers use). Absent → the inspector falls back to raw IDs, exactly as before.
+  const [datasets, setDatasets] = useState<RuntimeDatasets>({ items: [], pals: [], eggs: [] })
 
   const [confirmSwitch, setConfirmSwitch] = useState<WorldInfo | null>(null)
   const [confirmNewWorld, setConfirmNewWorld] = useState(false)
@@ -484,6 +490,30 @@ export function SavesPanel() {
   useEffect(() => {
     void loadSchedule()
   }, [loadSchedule])
+
+  // Pull the picker datasets once (memoized/shared with the RCON console) so the
+  // inspector can show friendly Pal/item names + icons.
+  useEffect(() => {
+    void fetchDatasets().then(setDatasets)
+  }, [])
+
+  const palMap = useMemo(() => new Map(datasets.pals.map((p) => [p.id, p])), [datasets])
+  // Items + eggs share the item-id space (PalEgg_* are items in a save).
+  const itemMap = useMemo(
+    () => new Map([...datasets.items, ...datasets.eggs].map((i) => [i.id, i])),
+    [datasets],
+  )
+  // Resolve an id (exact, then base-name candidates for BOSS_/tier variants) to a
+  // friendly {name, image}; null when no dataset is loaded / no match → caller
+  // falls back to the raw id.
+  const palInfo = useCallback(
+    (id: string) => palIconCandidates(id).map((c) => palMap.get(c)).find(Boolean) ?? null,
+    [palMap],
+  )
+  const itemInfo = useCallback(
+    (id: string) => itemIconCandidates(id).map((c) => itemMap.get(c)).find(Boolean) ?? null,
+    [itemMap],
+  )
 
   const patchSchedule = useCallback((patch: Partial<BackupSchedule>) => {
     setSchedule((s) => (s ? { ...s, ...patch } : s))
@@ -1395,9 +1425,21 @@ export function SavesPanel() {
                       </tr>
                     </thead>
                     <tbody>
-                      {inspect.pals.map((pal) => (
+                      {inspect.pals.map((pal) => {
+                        const info = palInfo(pal.character_id)
+                        return (
                         <tr key={pal.instance_id} className="border-t">
-                          <td className="p-1.5 font-mono">{pal.character_key || pal.character_id}</td>
+                          <td className="p-1.5">
+                            <span className="flex items-center gap-1.5">
+                              {info?.image && (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={info.image} alt="" className="size-5 shrink-0 rounded" loading="lazy" />
+                              )}
+                              <span className={info?.name ? '' : 'font-mono'} title={pal.character_id}>
+                                {info?.name ?? pal.character_key ?? pal.character_id}
+                              </span>
+                            </span>
+                          </td>
                           <td className="p-1.5 tabular-nums">
                             {editValues ? (
                               <Input
@@ -1425,7 +1467,8 @@ export function SavesPanel() {
                           <td className="p-1.5">{pal.nickname || '—'}</td>
                           <td className="p-1.5">{pal.gender ? pal.gender[0].toUpperCase() : '—'}</td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1459,9 +1502,20 @@ export function SavesPanel() {
                                 key={`${c.kind}-${s.slot}`}
                                 className="flex items-center justify-between gap-2 px-2 py-1 text-xs"
                               >
-                                <span className="min-w-0 truncate font-mono" title={s.id}>
-                                  {s.id}
-                                </span>
+                                {(() => {
+                                  const info = itemInfo(s.id)
+                                  return (
+                                    <span className="flex min-w-0 items-center gap-1.5 truncate" title={s.id}>
+                                      {info?.image && (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img src={info.image} alt="" className="size-4 shrink-0 rounded" loading="lazy" />
+                                      )}
+                                      <span className={info?.name ? 'truncate' : 'truncate font-mono'}>
+                                        {info?.name ?? s.id}
+                                      </span>
+                                    </span>
+                                  )
+                                })()}
                                 <span className="flex shrink-0 items-center gap-2 text-[10px] text-muted-foreground">
                                   {s.category && (
                                     <span className="rounded bg-muted px-1 py-0.5">{s.category}</span>
