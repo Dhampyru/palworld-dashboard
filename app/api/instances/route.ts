@@ -7,6 +7,7 @@ import { demoInstances } from '@/lib/demo'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { getInstance, listInstances, readInstanceMetrics, runWithInstance, DEFAULT_INSTANCE_ID } from '@/lib/instances'
 import { readActiveWorldId } from '@/lib/saves'
+import { diskUsage } from '@/lib/disk'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -59,6 +60,9 @@ export async function GET(request: NextRequest) {
       } catch {
         /* leave null */
       }
+      // Free/total disk on the volume holding this instance's saves (bind-mounted
+      // → the host disk). Best-effort; null if the game dir isn't reachable yet.
+      const disk = await diskUsage(i.gameDir)
       return {
         id: i.id,
         displayName: i.displayName,
@@ -70,6 +74,7 @@ export async function GET(request: NextRequest) {
         memBytes: m?.memBytes ?? null,
         startedAt: m?.startedAt ?? null,
         activeWorld,
+        disk,
       }
     }),
   )

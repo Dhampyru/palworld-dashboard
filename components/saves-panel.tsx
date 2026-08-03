@@ -47,6 +47,7 @@ import {
   HeartPulseIcon,
   TimerIcon,
   PlusIcon,
+  HardDriveIcon,
 } from 'lucide-react'
 
 type WorldInfo = {
@@ -125,6 +126,7 @@ type SavesData = {
   backups: BackupInfo[]
   playerSaves: PlayerSaveInfo[]
   activeWorldId: string | null
+  disk: { totalBytes: number; freeBytes: number; usedBytes: number } | null
 }
 
 // A player save's filename is the Palworld PlayerUId (8 significant hex chars +
@@ -164,7 +166,9 @@ function isNamedGuild(name: string | null): boolean {
 function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
-  return `${(n / 1024 / 1024).toFixed(1)} MB`
+  if (n < 1024 ** 3) return `${(n / 1024 / 1024).toFixed(1)} MB`
+  if (n < 1024 ** 4) return `${(n / 1024 ** 3).toFixed(1)} GB`
+  return `${(n / 1024 ** 4).toFixed(2)} TB`
 }
 function fmtDate(iso: string | null): string {
   if (!iso) return '—'
@@ -626,6 +630,29 @@ export function SavesPanel() {
         Back up and restore worlds. Switching a world or restoring a backup takes effect on the next
         server restart — use the header controls to restart or stop the server.
       </p>
+
+      {data?.disk && data.disk.totalBytes > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border p-2 text-xs">
+          <HardDriveIcon className="size-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">Disk</span>
+          <span className="font-medium text-foreground">{fmtBytes(data.disk.freeBytes)}</span>
+          <span className="text-muted-foreground">free of {fmtBytes(data.disk.totalBytes)}</span>
+          {(() => {
+            const pct = Math.min(100, Math.max(0, Math.round((data.disk.usedBytes / data.disk.totalBytes) * 100)))
+            return (
+              <>
+                <div className="ml-1 h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={pct >= 90 ? 'h-full bg-destructive' : 'h-full bg-primary'}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <span className={pct >= 90 ? 'text-destructive' : 'text-muted-foreground'}>{pct}% used</span>
+              </>
+            )
+          })()}
+        </div>
+      )}
 
       {error && (
         <p className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">

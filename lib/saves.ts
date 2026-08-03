@@ -11,6 +11,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { writeConfigFileWithBackup } from '@/lib/config-write'
 import { currentGameDir, currentRestConfig } from '@/lib/instances'
+import { diskUsage, type DiskUsage } from '@/lib/disk'
 
 const execFileP = promisify(execFile)
 
@@ -173,6 +174,11 @@ export async function worldExists(worldId: unknown): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+// Free/total disk on the volume holding this instance's worlds + backups.
+export async function getSavesDisk(): Promise<DiskUsage | null> {
+  return diskUsage(gameDir())
 }
 
 // backup.sh's timestamp shape: YYYYMMDD_HHMMSS (local time).

@@ -18,6 +18,7 @@ import {
   isGameServerUp,
   listBackups,
   listPlayerSaves,
+  getSavesDisk,
   listWorlds,
   readActiveWorldId,
   resolveBackupPath,
@@ -62,12 +63,13 @@ async function _GET(request: NextRequest) {
   }
 
   const activeWorldId = await readActiveWorldId()
-  const [worlds, backups, playerSaves] = await Promise.all([
+  const [worlds, backups, playerSaves, disk] = await Promise.all([
     listWorlds(activeWorldId),
     listBackups(),
     activeWorldId ? listPlayerSaves(activeWorldId) : Promise.resolve([]),
+    getSavesDisk(),
   ])
-  return NextResponse.json({ worlds, backups, playerSaves, activeWorldId })
+  return NextResponse.json({ worlds, backups, playerSaves, activeWorldId, disk })
 }
 
 // Mutating actions (spec §2/§3). Admin-tier only; rate-limited like the other

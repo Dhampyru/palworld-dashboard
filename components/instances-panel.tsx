@@ -45,6 +45,7 @@ type InstanceRow = {
   memBytes: number | null
   startedAt: string | null
   activeWorld: string | null
+  disk: { totalBytes: number; freeBytes: number; usedBytes: number } | null
 }
 
 type ProvisionStatus = { phase: string; pct?: number; message?: string } | null
@@ -283,6 +284,12 @@ export function InstancesPanel() {
                     {row.activeWorld && (
                       <div className="truncate pl-[18px] text-xs text-muted-foreground" title={row.activeWorld}>
                         active world <span className="font-mono">{row.activeWorld}</span>
+                      </div>
+                    )}
+                    {row.disk && (
+                      <div className="pl-[18px] text-xs text-muted-foreground">
+                        disk <span className="text-foreground">{fmtMem(row.disk.freeBytes)}</span> free of{' '}
+                        {fmtMem(row.disk.totalBytes)}
                       </div>
                     )}
                   </div>
