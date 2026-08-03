@@ -62,6 +62,8 @@ type BackupSchedule = {
   enabled: boolean
   intervalMinutes: number
   keep: number
+  keepPre: number
+  keepManual: number
   skipWhenEmpty: boolean
   lastRunAt: string | null
   lastCheckAt: string | null
@@ -500,6 +502,8 @@ export function SavesPanel() {
             enabled: schedule.enabled,
             intervalMinutes: schedule.intervalMinutes,
             keep: schedule.keep,
+            keepPre: schedule.keepPre,
+            keepManual: schedule.keepManual,
             skipWhenEmpty: schedule.skipWhenEmpty,
           },
         }),
@@ -726,6 +730,41 @@ export function SavesPanel() {
                       <span className="text-[11px]">(avoids stacking identical backups)</span>
                     </span>
                   </label>
+                </div>
+
+                {/* Snapshot retention — applies even when auto-backup is OFF, so
+                    old pre-edit/restore/delete + manual/daily backups don't pile up. */}
+                <div className="flex flex-col gap-2 border-t pt-2">
+                  <div className="text-[11px] font-medium text-foreground">Snapshot retention</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[11px] text-muted-foreground">Keep safety snapshots</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={500}
+                        className="h-8 text-xs"
+                        value={schedule.keepPre}
+                        onChange={(e) => patchSchedule({ keepPre: Number(e.target.value) })}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[11px] text-muted-foreground">Keep manual / daily</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={500}
+                        className="h-8 text-xs"
+                        value={schedule.keepManual}
+                        onChange={(e) => patchSchedule({ keepManual: Number(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Newest N of each kept; older pruned every minute (<span className="font-mono">0</span> = keep all).
+                    Safety = auto pre-edit/restore/delete snapshots; manual/daily = your “Back up now” + cron backups.
+                    Runs even when auto-backup is off.
+                  </p>
                 </div>
 
                 <p className="text-[11px] text-muted-foreground">

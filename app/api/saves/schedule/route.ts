@@ -71,6 +71,8 @@ export async function POST(request: NextRequest) {
         enabled: typeof s.enabled === 'boolean' ? s.enabled : undefined,
         intervalMinutes: typeof s.intervalMinutes === 'number' ? s.intervalMinutes : undefined,
         keep: typeof s.keep === 'number' ? s.keep : undefined,
+        keepPre: typeof s.keepPre === 'number' ? s.keepPre : undefined,
+        keepManual: typeof s.keepManual === 'number' ? s.keepManual : undefined,
         skipWhenEmpty: typeof s.skipWhenEmpty === 'boolean' ? s.skipWhenEmpty : undefined,
       })
       return NextResponse.json({ schedule, note: 'Auto-backup settings saved.' })

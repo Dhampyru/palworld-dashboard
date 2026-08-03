@@ -26,6 +26,10 @@ export type BackupSchedule = {
   enabled: boolean
   intervalMinutes: number
   keep: number
+  // Retention for NON-auto backups, so safety snapshots + manual backups don't
+  // pile up. 0 = keep all. Applied every scheduler tick, independent of `enabled`.
+  keepPre: number // pre-edit/pre-restore/pre-delete safety snapshots (palworld-save-pre*)
+  keepManual: number // manual "Back up now" + daily cron backups (timestamp-only names)
   skipWhenEmpty: boolean
   lastRunAt: string | null // last SUCCESSFUL auto-backup
   lastCheckAt: string | null // last scheduler attempt (any outcome)
@@ -46,6 +50,8 @@ const DEFAULTS: BackupSchedule = {
   enabled: false,
   intervalMinutes: 60,
   keep: 24,
+  keepPre: 10, // trim old safety snapshots by default (they accrue without user intent)
+  keepManual: 0, // keep all manual/daily by default — the operator opts in to pruning these
   skipWhenEmpty: true,
   lastRunAt: null,
   lastCheckAt: null,
@@ -64,6 +70,8 @@ function normalize(s: Partial<BackupSchedule>): BackupSchedule {
     enabled: Boolean(s.enabled),
     intervalMinutes: clampNumber(s.intervalMinutes, 5, 1440, 60),
     keep: clampNumber(s.keep, 1, 200, 24),
+    keepPre: clampNumber(s.keepPre, 0, 500, 10),
+    keepManual: clampNumber(s.keepManual, 0, 500, 0),
     skipWhenEmpty: s.skipWhenEmpty ?? true,
     lastRunAt: s.lastRunAt ?? null,
     lastCheckAt: s.lastCheckAt ?? null,
@@ -99,6 +107,8 @@ export function saveScheduleSettings(id: string, input: Partial<BackupSchedule>)
     enabled: input.enabled ?? cur.enabled,
     intervalMinutes: input.intervalMinutes ?? cur.intervalMinutes,
     keep: input.keep ?? cur.keep,
+    keepPre: input.keepPre ?? cur.keepPre,
+    keepManual: input.keepManual ?? cur.keepManual,
     skipWhenEmpty: input.skipWhenEmpty ?? cur.skipWhenEmpty,
   })
   writeSchedule(id, next)
@@ -129,6 +139,35 @@ async function pruneAutoBackups(keep: number): Promise<number> {
     if (full) await deleteBackup(full)
   }
   return stale.length
+}
+
+// Safety snapshots the dashboard auto-creates before destructive ops.
+const PRE_PREFIX = 'palworld-save-pre'
+
+// Keep only the newest N of a backup category; delete the rest. 0 = keep all.
+async function pruneCategory(match: (file: string) => boolean, keep: number): Promise<number> {
+  if (keep <= 0) return 0
+  const stale = (await listBackups())
+    .filter((b) => match(b.file))
+    .sort((a, b) => (b.modifiedAt ?? '').localeCompare(a.modifiedAt ?? ''))
+    .slice(keep)
+  for (const b of stale) {
+    const full = resolveBackupPath(b.file)
+    if (full) await deleteBackup(full)
+  }
+  return stale.length
+}
+
+// Trim the NON-auto backups so old snapshots don't accumulate: pre* safety
+// snapshots (keepPre) and manual/daily timestamped backups (keepManual). Never
+// touches AUTO_PREFIX (that's pruneAutoBackups' job). Caller runs it per instance.
+async function pruneOtherBackups(keepPre: number, keepManual: number): Promise<{ pre: number; manual: number }> {
+  const pre = await pruneCategory((f) => f.startsWith(PRE_PREFIX), keepPre)
+  const manual = await pruneCategory(
+    (f) => !f.startsWith(AUTO_PREFIX) && !f.startsWith(PRE_PREFIX),
+    keepManual,
+  )
+  return { pre, manual }
 }
 
 const running = new Map<string, boolean>()
@@ -178,6 +217,16 @@ let started = false
 async function tick(): Promise<void> {
   for (const inst of listInstances()) {
     const s = readSchedule(inst.id)
+    // Retention for pre*/manual snapshots runs every tick, INDEPENDENT of the
+    // auto-backup toggle, so old safety backups get trimmed even when auto-backup
+    // is off. Only prunes when a keep limit is set (0 = keep all).
+    if (s.keepPre > 0 || s.keepManual > 0) {
+      try {
+        await runWithInstance(inst.id, () => pruneOtherBackups(s.keepPre, s.keepManual))
+      } catch {
+        /* best-effort cleanup; never let it break the tick */
+      }
+    }
     if (!s.enabled) continue
     const due = !s.lastRunAt || Date.now() - Date.parse(s.lastRunAt) >= s.intervalMinutes * 60_000
     if (due) await runAutoBackup(inst.id)

@@ -128,6 +128,12 @@ export function GameModsPanel() {
   const [steamConnected, setSteamConnected] = useState(false)
   const [steamUrl, setSteamUrl] = useState('')
   const [steamInstalling, setSteamInstalling] = useState(false)
+  // Bulk Workshop install: paste many URLs/ids, install each sequentially.
+  const [steamBulk, setSteamBulk] = useState('')
+  const [steamBulkBusy, setSteamBulkBusy] = useState(false)
+  const [steamBulkResults, setSteamBulkResults] = useState<
+    { url: string; itemId: string | null; ok: boolean; name?: string; error?: string }[] | null
+  >(null)
   // Bulk install (Phase 3 follow-up): paste many URLs, auto-pick MAIN per mod.
   const [nexusBulk, setNexusBulk] = useState('')
   const [nexusBulkBusy, setNexusBulkBusy] = useState(false)
@@ -489,6 +495,36 @@ export function GameModsPanel() {
       setSteamInstalling(false)
     }
   }, [config, steamUrl, load])
+
+  // Bulk: paste many Workshop URLs/ids; the server installs each sequentially and
+  // returns a per-item result. Mirrors the Nexus bulk flow.
+  const bulkInstallFromWorkshop = useCallback(async () => {
+    if (!config) return
+    const urls = steamBulk
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+    if (!urls.length) return
+    setSteamBulkBusy(true)
+    setSteamBulkResults(null)
+    const toastId = toast.loading(`Installing ${urls.length} Workshop mod${urls.length === 1 ? '' : 's'}…`)
+    try {
+      const res = await fetch('/api/steam/workshop', {
+        method: 'POST',
+        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Bulk install failed')
+      setSteamBulkResults(json.results ?? [])
+      toast.success((json.note as string) ?? 'Done', { id: toastId })
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Bulk install failed', { id: toastId })
+    } finally {
+      setSteamBulkBusy(false)
+    }
+  }, [config, steamBulk, load])
 
   // One-click update (Premium): reinstall a linked mod's latest Nexus file and
   // bump its baseline. Uses the same download+install pipeline as a fresh install.
@@ -1436,6 +1472,45 @@ export function GameModsPanel() {
                 (reading its manifest: Lua → UE4SS Mods, PalSchema data → PalSchema, paks → ~mods). Restart the server
                 to load it. UE4SS/PalSchema framework items are skipped — you already have those.
               </p>
+
+              {/* Bulk install: paste many Workshop URLs/ids (parallel of the Nexus bulk). */}
+              <details className="rounded-md border border-border/60 bg-background/40 p-2">
+                <summary className="cursor-pointer select-none text-xs font-medium">Bulk install</summary>
+                <div className="mt-2 flex flex-col gap-2">
+                  <textarea
+                    placeholder={
+                      'One Workshop URL or item id per line:\nhttps://steamcommunity.com/sharedfiles/filedetails/?id=123456789\n987654321'
+                    }
+                    value={steamBulk}
+                    onChange={(e) => setSteamBulk(e.target.value)}
+                    rows={4}
+                    className="w-full rounded-md border bg-background px-2 py-1 font-mono text-xs"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={bulkInstallFromWorkshop}
+                    disabled={steamBulkBusy || !steamBulk.trim()}
+                    className="w-fit"
+                  >
+                    {steamBulkBusy ? <Spinner className="mr-2 size-4" /> : <DownloadIcon className="mr-2 size-4" />}
+                    {steamBulkBusy ? 'Installing…' : 'Install all'}
+                  </Button>
+                  {steamBulkResults && (
+                    <ul className="flex flex-col gap-0.5 text-[11px]">
+                      {steamBulkResults.map((r, i) => (
+                        <li
+                          key={`${r.url}-${i}`}
+                          className={r.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}
+                        >
+                          {r.ok ? '✓' : '✗'} {r.name ?? r.itemId ?? r.url}
+                          {!r.ok && r.error ? ` — ${r.error}` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </details>
             </div>
           ) : (
             <div className="flex flex-col gap-1 rounded-md border border-dashed border-sky-500/40 bg-sky-500/5 p-2 opacity-90">

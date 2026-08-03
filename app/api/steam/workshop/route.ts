@@ -49,12 +49,42 @@ async function _POST(request: NextRequest) {
     )
   }
 
-  let body: { url?: string }
+  let body: { url?: string; urls?: string[] }
   try {
     body = (await request.json()) as typeof body
   } catch {
     return NextResponse.json({ error: 'Malformed request body' }, { status: 400 })
   }
+
+  // Bulk: paste many Workshop URLs/ids; install each sequentially (SteamCMD is
+  // one-at-a-time anyway) and report a per-item result — mirrors the Nexus bulk.
+  if (Array.isArray(body.urls)) {
+    const results: { url: string; itemId: string | null; ok: boolean; name?: string; error?: string }[] = []
+    const seen = new Set<string>()
+    for (const raw of body.urls) {
+      const id = parseWorkshopId(raw)
+      if (!id) {
+        results.push({ url: raw, itemId: null, ok: false, error: 'Not a valid Workshop URL or id' })
+        continue
+      }
+      if (seen.has(id)) continue
+      seen.add(id)
+      if (isFrameworkWorkshopId(id)) {
+        results.push({ url: raw, itemId: id, ok: false, error: 'Framework (UE4SS/PalSchema) — skipped' })
+        continue
+      }
+      try {
+        const { contentDir } = await downloadWorkshopItem(id)
+        const result = await installWorkshopPackageToProxy(contentDir, id)
+        results.push({ url: raw, itemId: id, ok: true, name: result.modName ?? result.packageName })
+      } catch (error) {
+        results.push({ url: raw, itemId: id, ok: false, error: error instanceof Error ? error.message : 'Install failed' })
+      }
+    }
+    const ok = results.filter((r) => r.ok).length
+    return NextResponse.json({ results, note: `Installed ${ok}/${results.length} — restart the server to load them.` })
+  }
+
   const itemId = parseWorkshopId(body.url ?? '')
   if (!itemId) {
     return NextResponse.json({ error: 'Paste a valid Steam Workshop URL or item id' }, { status: 400 })
