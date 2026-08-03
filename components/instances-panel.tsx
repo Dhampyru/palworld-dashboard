@@ -20,6 +20,7 @@ import {
 import { toast } from 'sonner'
 import {
   ServerIcon,
+  HardDriveIcon,
   PlayIcon,
   SquareIcon,
   RefreshCwIcon,
@@ -45,8 +46,8 @@ type InstanceRow = {
   memBytes: number | null
   startedAt: string | null
   activeWorld: string | null
-  disk: { totalBytes: number; freeBytes: number; usedBytes: number } | null
 }
+type DiskInfo = { totalBytes: number; freeBytes: number; usedBytes: number }
 
 type ProvisionStatus = { phase: string; pct?: number; message?: string } | null
 
@@ -65,6 +66,7 @@ function StatusDot({ running }: { running: boolean | null }) {
 export function InstancesPanel() {
   const { config, enterInstance } = useServer()
   const [rows, setRows] = useState<InstanceRow[] | null>(null)
+  const [disk, setDisk] = useState<DiskInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null) // `${action}:${id}`
   const [deleteTarget, setDeleteTarget] = useState<InstanceRow | null>(null)
@@ -96,6 +98,7 @@ export function InstancesPanel() {
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? res.statusText)
       setRows(json.instances as InstanceRow[])
+      setDisk((json.disk as DiskInfo | null) ?? null)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load instances')
@@ -239,6 +242,31 @@ export function InstancesPanel() {
         a brand-new server, or delete one (its save files are always kept).
       </p>
 
+      {/* Environment-wide disk (the host all instances share), shown once here
+          rather than per-server. */}
+      {disk && disk.totalBytes > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border p-2 text-xs">
+          <HardDriveIcon className="size-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">Disk (this host)</span>
+          <span className="font-medium text-foreground">{fmtMem(disk.freeBytes)}</span>
+          <span className="text-muted-foreground">free of {fmtMem(disk.totalBytes)}</span>
+          {(() => {
+            const pct = Math.min(100, Math.max(0, Math.round((disk.usedBytes / disk.totalBytes) * 100)))
+            return (
+              <>
+                <div className="ml-1 h-1.5 w-28 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={pct >= 90 ? 'h-full bg-destructive' : 'h-full bg-primary'}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <span className={pct >= 90 ? 'text-destructive' : 'text-muted-foreground'}>{pct}% used</span>
+              </>
+            )
+          })()}
+        </div>
+      )}
+
       {error && (
         <div className="mb-3 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
@@ -284,12 +312,6 @@ export function InstancesPanel() {
                     {row.activeWorld && (
                       <div className="truncate pl-[18px] text-xs text-muted-foreground" title={row.activeWorld}>
                         active world <span className="font-mono">{row.activeWorld}</span>
-                      </div>
-                    )}
-                    {row.disk && (
-                      <div className="pl-[18px] text-xs text-muted-foreground">
-                        disk <span className="text-foreground">{fmtMem(row.disk.freeBytes)}</span> free of{' '}
-                        {fmtMem(row.disk.totalBytes)}
                       </div>
                     )}
                   </div>

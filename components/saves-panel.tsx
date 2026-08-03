@@ -194,6 +194,7 @@ export function SavesPanel() {
   const [schedule, setSchedule] = useState<BackupSchedule | null>(null)
   const [savingSchedule, setSavingSchedule] = useState(false)
   const [testingSchedule, setTestingSchedule] = useState(false)
+  const [cleaningSnapshots, setCleaningSnapshots] = useState(false)
 
   const [confirmSwitch, setConfirmSwitch] = useState<WorldInfo | null>(null)
   const [confirmNewWorld, setConfirmNewWorld] = useState(false)
@@ -541,6 +542,31 @@ export function SavesPanel() {
     }
   }, [config, load])
 
+  const cleanupSnapshots = useCallback(async () => {
+    if (!config || !schedule) return
+    setCleaningSnapshots(true)
+    const toastId = toast.loading('Cleaning up old snapshots…')
+    try {
+      const res = await fetch('/api/saves/schedule', {
+        method: 'POST',
+        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+        // Prune using the values currently shown (not just the saved ones).
+        body: JSON.stringify({
+          action: 'cleanup',
+          settings: { keepPre: schedule.keepPre, keepManual: schedule.keepManual },
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? res.statusText)
+      toast.success((json.note as string) ?? 'Cleaned up', { id: toastId })
+      await load() // refresh the Backups list to reflect removals
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : 'Cleanup failed', { id: toastId })
+    } finally {
+      setCleaningSnapshots(false)
+    }
+  }, [config, schedule, load])
+
   // Eagerly load the world summary once player saves are known, so each save
   // shows its owner's name even while they're offline -- no Inspect needed.
   // Best-effort: on failure, rows just fall back to the roster/raw UID.
@@ -765,6 +791,17 @@ export function SavesPanel() {
                     Safety = auto pre-edit/restore/delete snapshots; manual/daily = your “Back up now” + cron backups.
                     Runs even when auto-backup is off.
                   </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={cleanupSnapshots}
+                    disabled={cleaningSnapshots}
+                    className="h-8 w-fit gap-1.5"
+                    title="Prune old snapshots now using the values above (uses your unsaved changes)"
+                  >
+                    {cleaningSnapshots ? <Spinner className="size-3.5" /> : <Trash2Icon className="size-3.5" />}
+                    Clean up now
+                  </Button>
                 </div>
 
                 <p className="text-[11px] text-muted-foreground">

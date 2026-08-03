@@ -212,6 +212,19 @@ export async function runAutoBackup(id: string = DEFAULT_INSTANCE_ID, opts: { fo
   return readSchedule(id)
 }
 
+// On-demand snapshot cleanup (the "Clean up now" button). Prunes pre*/manual to
+// the given limits immediately, without waiting for the next tick. Uses the
+// supplied override (the UI's current values) when present, else the saved ones.
+export async function runSnapshotCleanup(
+  id: string = DEFAULT_INSTANCE_ID,
+  override: { keepPre?: number; keepManual?: number } = {},
+): Promise<{ pre: number; manual: number }> {
+  const s = readSchedule(id)
+  const keepPre = clampNumber(override.keepPre ?? s.keepPre, 0, 500, s.keepPre)
+  const keepManual = clampNumber(override.keepManual ?? s.keepManual, 0, 500, s.keepManual)
+  return runWithInstance(id, () => pruneOtherBackups(keepPre, keepManual))
+}
+
 let started = false
 
 async function tick(): Promise<void> {

@@ -60,9 +60,6 @@ export async function GET(request: NextRequest) {
       } catch {
         /* leave null */
       }
-      // Free/total disk on the volume holding this instance's saves (bind-mounted
-      // → the host disk). Best-effort; null if the game dir isn't reachable yet.
-      const disk = await diskUsage(i.gameDir)
       return {
         id: i.id,
         displayName: i.displayName,
@@ -74,11 +71,16 @@ export async function GET(request: NextRequest) {
         memBytes: m?.memBytes ?? null,
         startedAt: m?.startedAt ?? null,
         activeWorld,
-        disk,
       }
     }),
   )
-  return NextResponse.json({ instances })
+  // Environment-wide disk (host filesystem all instances live on), reported once
+  // rather than per-card. Prefer the shared /srv/palworld root; fall back to the
+  // default instance's game dir if that isn't mounted.
+  const srvRoot = process.env.PALWORLD_SRV_ROOT ?? '/srv/palworld'
+  const defaultGameDir = listInstances().find((i) => i.isDefault)?.gameDir
+  const disk = (await diskUsage(srvRoot)) ?? (defaultGameDir ? await diskUsage(defaultGameDir) : null)
+  return NextResponse.json({ instances, disk })
 }
 
 // ─── POST: provision a new instance (admin) ─────────────────────────────────

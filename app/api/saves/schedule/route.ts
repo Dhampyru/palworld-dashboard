@@ -3,7 +3,7 @@ import { classifyPassword, tierForClass } from '@/lib/access-tier'
 import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { DEMO_MODE } from '@/lib/demo-mode'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
-import { readSchedule, runAutoBackup, saveScheduleSettings } from '@/lib/backup-schedule'
+import { readSchedule, runAutoBackup, runSnapshotCleanup, saveScheduleSettings } from '@/lib/backup-schedule'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Malformed request body' }, { status: 400 })
   }
 
-  if (body.action !== 'save' && body.action !== 'test') {
+  if (body.action !== 'save' && body.action !== 'test' && body.action !== 'cleanup') {
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
   }
 
@@ -76,6 +76,24 @@ export async function POST(request: NextRequest) {
         skipWhenEmpty: typeof s.skipWhenEmpty === 'boolean' ? s.skipWhenEmpty : undefined,
       })
       return NextResponse.json({ schedule, note: 'Auto-backup settings saved.' })
+    }
+
+    if (body.action === 'cleanup') {
+      // Prune pre*/manual snapshots right now, using the UI's current keep values
+      // (falls back to saved). Doesn't create anything — just trims.
+      const s = (body.settings ?? {}) as Record<string, unknown>
+      const { pre, manual } = await runSnapshotCleanup(instanceId, {
+        keepPre: typeof s.keepPre === 'number' ? s.keepPre : undefined,
+        keepManual: typeof s.keepManual === 'number' ? s.keepManual : undefined,
+      })
+      const total = pre + manual
+      return NextResponse.json({
+        schedule: readSchedule(instanceId),
+        pruned: { pre, manual },
+        note: total
+          ? `Removed ${total} old backup${total === 1 ? '' : 's'} (${pre} safety, ${manual} manual/daily).`
+          : 'Nothing to prune — already within the keep limits.',
+      })
     }
 
     // test: force a backup now, ignoring the enabled/interval/empty gates.
