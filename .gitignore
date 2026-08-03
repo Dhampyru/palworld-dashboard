@@ -52,3 +52,6 @@ game-server/mods/
 
 # runtime-extracted datasets + icons (game-data extractor output)
 /extracted/
+
+# Local-only preview harness (never commit)
+docker-compose.preview.yml
