@@ -25,7 +25,7 @@ Run the prebuilt image in ~2 minutes — no build required.
 
 </td><td>
 
-- Item/Pal names show as **raw IDs** (no bundled game data)
+- Item/Pal pickers show **raw IDs** by default (add real names + icons later, in-dashboard — see Full Install)
 - Header connect address is a **placeholder**
 - **Start / Stop / Restart + multi-server** buttons are inert (no host integration)
 
@@ -50,22 +50,22 @@ docker compose -f docker-compose.full.yml up -d
 
 ### Full Install
 
-Build from source + wire up the host integration to unlock everything the quick install leaves out.
+Wire up the host integration (and optionally build from source) to unlock everything the quick install leaves out.
 
 <table>
 <tr><th width="50%">✅ Adds</th><th width="50%">⚠️ Costs</th></tr>
 <tr valign="top"><td>
 
 - Everything in Quick Install, plus:
-- Friendly item/Pal **names + icons**
+- Friendly item/Pal **names + icons** — added **in the dashboard** (upload a `mappings.usmap` + an icon zip), no rebuild
 - Your **real connect address** in the header
 - **Start / Stop / Restart + multi-server** (host integration)
-- Full control — build & customize from source
+- Optional: build & customize from source
 
 </td><td>
 
-- More setup: extract game data, install host integration, build from source
-- Needs your own **licensed game files** (for names/icons)
+- Install the **host integration** (also powers in-dashboard name extraction)
+- Provide your own **licensed game files** (for names/icons — nothing is bundled)
 - Longer initial setup
 
 </td></tr>
@@ -176,9 +176,11 @@ docker run -d -p 3000:3000 \
 
 Caveats for the prebuilt image:
 
-- **Save inspector shows raw IDs** (not names) — the image ships no Palworld game
-  data. Add names/icons per [Item & Pal Datasets](content/configuration/item-pal-datasets.mdx),
-  which requires building from source.
+- **Pickers/save inspector show raw IDs** (not names) — the image ships no Palworld
+  game data. Add names + icons **in-dashboard**, no rebuild (Game Data card: upload a
+  `mappings.usmap` + an icon zip; name extraction uses the host integration, icon
+  upload doesn't) — see [Item & Pal Datasets](content/configuration/item-pal-datasets.mdx).
+  A source build is only one alternative.
 - **Connect address is a placeholder** in the header/Invite — `NEXT_PUBLIC_GAME_SERVER_IP`
   is baked at build time, so showing your real address means building from source
   (players can still connect via your real IP regardless).
