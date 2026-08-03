@@ -248,10 +248,10 @@ export function Dashboard() {
                 <main className="flex min-h-0 flex-1 flex-col lg:overflow-hidden">
                   <div className="flex-1 overflow-y-auto lg:overflow-hidden">
                     <ScrollArea className="h-full lg:h-auto lg:flex-1">
-                      <EngineTuningPanel />
-                      <div className="px-3 pb-3 sm:px-4">
+                      <div className="px-3 pt-3 sm:px-4">
                         <GameDataCard />
                       </div>
+                      <EngineTuningPanel />
                     </ScrollArea>
                   </div>
                 </main>
