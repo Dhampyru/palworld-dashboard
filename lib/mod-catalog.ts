@@ -99,3 +99,61 @@ export async function getDeclaration(
 export async function getDeclaredConfigBasenames(modName: string): Promise<Set<string>> {
   return (await getDeclaration(modName)).basenames
 }
+
+// ── Catalog entries (client-mod-sync.md §2a / §6) ────────────────────────────
+// The same operator dataset carries an `Install On` flag per mod (mods.json). We read
+// it to SEED the client-mod picker: which mods a friend's client needs. Absent dataset
+// → empty list → the picker just shows manually-staged mods (no suggestions).
+export type CatalogEntry = {
+  source: 'nexus' | 'workshop'
+  id: string
+  name: string
+  url: string
+  category: string | null
+  author: string | null
+  installOn: string
+  keep: string | null // the owner's own "Keep?" call for this mod
+  clientRelevant: boolean
+}
+
+// A mod a friend's CLIENT needs, inferred from the free-text `Install On` flag. "both"
+// / "all clients" always count; a plain "client" counts EXCEPT the "server for dedicated
+// / client for solo" case (client-side only in solo play, so server-side on a dedicated
+// box). This is only a DEFAULT suggestion — the admin's keep/skip toggle is authoritative.
+export function isClientRelevant(installOn: string): boolean {
+  const s = installOn.toLowerCase()
+  if (/both|all clients/.test(s)) return true
+  if (/client/.test(s)) return !/for dedicated\s*\/\s*client for solo/.test(s)
+  return false
+}
+
+// Parse the operator's mods.json → catalog entries. Tolerates absent/garbage file.
+export async function readCatalog(): Promise<CatalogEntry[]> {
+  const text = await readText(join(MOD_DATA_DIR, 'mods.json'))
+  if (!text) return []
+  try {
+    const j = JSON.parse(text) as { mods?: unknown[] } | unknown[]
+    const arr = Array.isArray(j) ? j : Array.isArray(j.mods) ? j.mods : []
+    const out: CatalogEntry[] = []
+    for (const raw of arr) {
+      const m = raw as Record<string, unknown>
+      const id = m.id != null ? String(m.id) : ''
+      if (!id) continue
+      const installOn = String(m['Install On'] ?? m.installOn ?? '').trim()
+      out.push({
+        source: m.source === 'workshop' ? 'workshop' : 'nexus',
+        id,
+        name: String(m.name ?? m['Mod Name'] ?? `Mod ${id}`),
+        url: String(m.url ?? ''),
+        category: m.category ? String(m.category) : null,
+        author: m.author ? String(m.author) : null,
+        installOn,
+        keep: m['Keep?'] != null ? String(m['Keep?']) : null,
+        clientRelevant: isClientRelevant(installOn),
+      })
+    }
+    return out
+  } catch {
+    return []
+  }
+}

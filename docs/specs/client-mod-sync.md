@@ -1,6 +1,7 @@
 # Spec: Client Mod-Sync & Onboarding
 
-Status: **Phase 1 BUILT (2026-07-27); Phase 2 RE-SCOPED 2026-08-06, not started.**
+Status: **Phase 1 BUILT (2026-07-27); Phase 2 RE-SCOPED 2026-08-06 — client-mod INTAKE
+built, loadout generator deferred (see §7).**
 The manifest + Invite tab ship (server info + per-pak client download + copy-invite).
 Phase 2 (the "let friends install it easily" automation) was re-scoped after the Steam
 Workshop feature, the Nexus/Steam compatibility work, and the mod catalog all landed —
@@ -169,6 +170,22 @@ them, and this area turns that into a one-click friend loadout + human-readable 
 - **Phase 2 (RE-SCOPED 2026-08-06 — the client loadout):** deliver the owner's public-
   release goal — any admin loads Nexus/Steam mods and gets a one-click friend loadout.
   Concretely:
+  0. **Client-mod intake — BUILT 2026-08-06.** Where the admin STAGES the mods a friend's
+     client needs, WITHOUT installing them on the server (the server pipeline would load
+     them into the running game — wrong for a client-only mod). `lib/client-mods.ts` keeps
+     a store in the data volume (`data/client-mods/<id>/` payloads + `data/client-mods.json`
+     index with a per-mod `keep` flag), staging from a Nexus URL (Premium auto-download,
+     newest MAIN file → normalized zip), a Steam Workshop URL (SteamCMD content copy — NOT
+     `installWorkshopPackageToProxy`), or a manual `.zip/.rar/.7z/.pak` upload. `lib/mod-
+     catalog.ts readCatalog()` reads the operator dataset's `Install On` flag → `is
+     ClientRelevant()` (74/121 on the owner's box) seeds keep/skip SUGGESTIONS.
+     `app/api/client-mods` (admin-only: GET list+suggestions, POST addNexus/addSteam/
+     addCatalog/upload/setKeep/remove) + a **Client-only mods** section in the Invite tab
+     (`components/invite-panel.tsx`). The dashboard-data backup excludes the payload dir
+     (re-downloadable, large) but keeps the small index. Verified live: authenticated GET
+     (74 suggestions) + upload→list→setKeep→remove round-trip, store self-cleans. **The
+     loadout generator (below) that consumes this is the remaining piece — deferred until
+     the owner has staged their client-only mods, then built + tested together.**
   1. **Manifest v2** — extend §3's manifest beyond `~mods` paks to the full **client-only**
      set (§2a): per mod, `{ name, kind (ue4ss|pak|palschema-pak), source (nexus|steam),
      files[] with sha256, link }`, seeded from the catalog's client flags with admin

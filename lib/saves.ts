@@ -278,6 +278,9 @@ export async function backupDashboardData(
       '--exclude',
       'steam', // SteamCMD session token
       '--exclude',
+      'client-mods', // staged client-mod PAYLOADS (re-downloadable, up to 100s of MB) — the
+      // small client-mods.json index (keep flags/links) is a different name and stays in
+      '--exclude',
       '*.tmp', // half-written atomic temps
       '-czf',
       dest,
