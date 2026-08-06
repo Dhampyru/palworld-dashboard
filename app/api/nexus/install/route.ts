@@ -17,6 +17,7 @@ import {
 } from '@/lib/nexus'
 import { archiveHasPalSchemaData, detectModKind, installPakArchive, installUe4ssModArchive, setModGroup } from '@/lib/game-mods'
 import { installPalSchemaSubmod } from '@/lib/palschema'
+import { normalizeArchiveToZip } from '@/lib/archive'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -80,16 +81,22 @@ async function installModFile(
   modId: number,
   fileId: number,
 ): Promise<{ kind: 'palschema' | 'pak' | 'ue4ss'; name: string; version: string | null; assocKey: string | null }> {
-  const buffer = await downloadNexusFile(modId, fileId)
+  const download = await downloadNexusFile(modId, fileId)
+  // Nexus authors often ship .rar/.7z — normalize those to a zip so the rest of
+  // the pipeline (detect + install) is format-agnostic. A corrupt/unreadable
+  // archive throws here and surfaces as a plain "couldn't open" to the caller.
+  let buffer: Buffer
+  try {
+    buffer = await normalizeArchiveToZip(download)
+  } catch {
+    throw new Error(
+      "Couldn't open this download as an archive — it may be corrupt, password-protected, or an unsupported format. Try installing it via manual upload.",
+    )
+  }
   const kind = detectModKind(buffer)
   if (!kind) {
-    // A valid zip whose content we can't classify vs. a non-zip download are
-    // different problems — Nexus authors sometimes ship .rar/.7z, which we can't open.
-    const isZip = buffer.length > 4 && buffer[0] === 0x50 && buffer[1] === 0x4b
     throw new Error(
-      isZip
-        ? "Couldn't identify this mod's type from its contents — install it via manual upload, choosing the right tab."
-        : "This download isn't a .zip (likely .rar or .7z, which the dashboard can't open). Repack it as a .zip, or install it via manual upload.",
+      "Couldn't identify this mod's type from its contents — install it via manual upload, choosing the right tab.",
     )
   }
 

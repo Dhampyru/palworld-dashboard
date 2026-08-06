@@ -71,8 +71,11 @@ RUN groupadd --system --gid 2001 nodejs \
 # path) tolerates the release tarball's internal folder name changing between
 # versions.
 ARG RCON_CLI_VERSION=0.10.2
+# `unar` (The Unarchiver, GPL) lets the mod installer open .rar/.7z uploads and
+# Nexus downloads, not just .zip (lib/archive.ts normalizes them to zip). It is
+# explicitly installed, so the curl purge/autoremove below leaves it in place.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends curl ca-certificates \
+  && apt-get install -y --no-install-recommends curl ca-certificates unar \
   && curl -fsSL -o /tmp/rcon.tar.gz \
     "https://github.com/gorcon/rcon-cli/releases/download/v${RCON_CLI_VERSION}/rcon-${RCON_CLI_VERSION}-amd64_linux.tar.gz" \
   && mkdir -p /tmp/rcon-extract \

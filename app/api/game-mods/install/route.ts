@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { mkdir, writeFile, rename, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import AdmZip from 'adm-zip'
+import { normalizeArchiveToZip } from '@/lib/archive'
 import { classifyPassword, tierForClass } from '@/lib/access-tier'
 import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { DEMO_MODE } from '@/lib/demo-mode'
@@ -150,11 +151,13 @@ async function _POST(request: NextRequest) {
       // doesn't exist yet — good, proceed
     }
 
+    // Accept .rar/.7z uploads too — normalize to a zip buffer, then extract as
+    // usual. A .zip passes through unchanged.
     let zip: AdmZip
     try {
-      zip = new AdmZip(buffer)
+      zip = new AdmZip(await normalizeArchiveToZip(buffer))
     } catch {
-      return NextResponse.json({ error: 'Not a valid zip file' }, { status: 400 })
+      return NextResponse.json({ error: 'Not a valid archive (expected .zip, .rar or .7z)' }, { status: 400 })
     }
     const entries = zip.getEntries()
 
