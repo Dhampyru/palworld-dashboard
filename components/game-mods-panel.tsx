@@ -21,7 +21,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
-import { PackageIcon, RefreshCwIcon, Trash2Icon, UploadIcon, ShieldAlertIcon, ShieldCheckIcon, CpuIcon, DownloadIcon } from 'lucide-react'
+import { PackageIcon, RefreshCwIcon, Trash2Icon, UploadIcon, ShieldAlertIcon, ShieldCheckIcon, CpuIcon, DownloadIcon, SlidersHorizontalIcon } from 'lucide-react'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 
 // Brand marks for the mod sources — lucide has no brand icons, so these are the
 // official Steam / Nexus Mods logos (Simple Icons, CC0). Monochrome via
@@ -46,6 +47,15 @@ interface GameModEntry {
   kind: 'ue4ss' | 'pak' | 'paldefender'
   name: string
   enabled: boolean
+}
+
+type ModConfigFileMeta = {
+  id: string
+  label: string
+  format: 'json' | 'jsonc' | 'ini' | 'lua'
+  editable: boolean
+  exists: boolean
+  isTemplate: boolean
 }
 
 type Ue4ssSource = 'official' | 'experimental-palworld' | 'beta' | 'unknown'
@@ -102,6 +112,14 @@ export function GameModsPanel() {
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [removeTarget, setRemoveTarget] = useState<GameModEntry | null>(null)
   const [disableWarnTarget, setDisableWarnTarget] = useState<GameModEntry | null>(null)
+
+  // Mod Config Editor (docs/specs/mod-config-editor.md) — per-mod config file editor.
+  const [configMod, setConfigMod] = useState<GameModEntry | null>(null)
+  const [configFiles, setConfigFiles] = useState<ModConfigFileMeta[] | null>(null)
+  const [configActiveId, setConfigActiveId] = useState<string | null>(null)
+  const [configText, setConfigText] = useState('')
+  const [configDirty, setConfigDirty] = useState(false)
+  const [configBusy, setConfigBusy] = useState(false)
 
   const [installKind, setInstallKind] = useState<InstallKind>('ue4ss')
   const [installModName, setInstallModName] = useState('')
@@ -675,6 +693,100 @@ export function GameModsPanel() {
     doToggle(target, false)
   }, [disableWarnTarget, doToggle])
 
+  // ── Mod config editor ─────────────────────────────────────────────────────
+  const loadConfigFile = useCallback(
+    async (modName: string, file: ModConfigFileMeta) => {
+      if (!config) return
+      setConfigActiveId(file.id)
+      setConfigText('')
+      setConfigDirty(false)
+      if (!file.exists) return
+      try {
+        const res = await fetch(
+          `/api/mod-config?mod=${encodeURIComponent(modName)}&file=${encodeURIComponent(file.id)}`,
+          { headers: buildPalworldProxyHeaders(config), cache: 'no-store' },
+        )
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? res.statusText)
+        setConfigText(data.content ?? '')
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to read config file')
+      }
+    },
+    [config],
+  )
+
+  const openConfig = useCallback(
+    async (mod: GameModEntry) => {
+      if (!config) return
+      setConfigMod(mod)
+      setConfigFiles(null)
+      setConfigActiveId(null)
+      setConfigText('')
+      setConfigDirty(false)
+      try {
+        const res = await fetch(`/api/mod-config?mod=${encodeURIComponent(mod.name)}`, {
+          headers: buildPalworldProxyHeaders(config),
+          cache: 'no-store',
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? res.statusText)
+        const files: ModConfigFileMeta[] = data.files ?? []
+        setConfigFiles(files)
+        // Auto-open the first editable file so the common case is one click.
+        const first = files.find((f) => f.editable && f.exists) ?? files[0]
+        if (first) await loadConfigFile(mod.name, first)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to load mod config')
+        setConfigFiles([])
+      }
+    },
+    [config, loadConfigFile],
+  )
+
+  const saveConfig = useCallback(async () => {
+    if (!config || !configMod || !configActiveId) return
+    setConfigBusy(true)
+    try {
+      const res = await fetch('/api/mod-config', {
+        method: 'POST',
+        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mod: configMod.name, file: configActiveId, content: configText }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? res.statusText)
+      setConfigDirty(false)
+      toast.success('Saved — restart the server to apply.')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Save failed')
+    } finally {
+      setConfigBusy(false)
+    }
+  }, [config, configMod, configActiveId, configText])
+
+  const createConfig = useCallback(
+    async (file: ModConfigFileMeta) => {
+      if (!config || !configMod) return
+      setConfigBusy(true)
+      try {
+        const res = await fetch('/api/mod-config', {
+          method: 'POST',
+          headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mod: configMod.name, file: file.id, action: 'create' }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? res.statusText)
+        toast.success('Config created from template.')
+        await openConfig(configMod) // re-discover so it's now editable
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Create failed')
+      } finally {
+        setConfigBusy(false)
+      }
+    },
+    [config, configMod, openConfig],
+  )
+
   const confirmRemove = useCallback(async () => {
     if (!config || !removeTarget) return
     const target = removeTarget
@@ -922,6 +1034,16 @@ export function GameModsPanel() {
             ))}
         </div>
         <div className="flex shrink-0 items-center gap-3">
+          {mod.kind === 'ue4ss' && (
+            <button
+              onClick={() => openConfig(mod)}
+              title={`Edit ${mod.name} config`}
+              className="rounded-md p-1.5 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+              aria-label={`Edit ${mod.name} config`}
+            >
+              <SlidersHorizontalIcon className="size-4" />
+            </button>
+          )}
           {mod.kind === 'pak' && (
             <button
               onClick={() => downloadPak(mod.name)}
@@ -1732,6 +1854,92 @@ export function GameModsPanel() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Mod config editor */}
+      <Sheet open={configMod !== null} onOpenChange={(o) => !o && setConfigMod(null)}>
+        <SheetContent side="right" className="flex w-full flex-col gap-3 sm:max-w-2xl">
+          <SheetHeader>
+            <SheetTitle>Configure {configMod?.name}</SheetTitle>
+          </SheetHeader>
+          <p className="text-xs text-muted-foreground">
+            Edit this mod&apos;s own config files. Changes take effect on the next server restart. Lua
+            configs are code and shown read-only.
+          </p>
+          {configFiles === null ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner className="size-4" /> Loading…
+            </div>
+          ) : configFiles.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No config files found for this mod.</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {configFiles.map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => configMod && loadConfigFile(configMod.name, f)}
+                    className={`rounded-md border px-2 py-1 font-mono text-[11px] ${
+                      f.id === configActiveId
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'text-muted-foreground hover:bg-muted/40'
+                    }`}
+                  >
+                    {f.label}
+                    {!f.editable && f.exists && <span className="ml-1 opacity-60">(read-only)</span>}
+                    {f.isTemplate && <span className="ml-1 opacity-60">(not created)</span>}
+                  </button>
+                ))}
+              </div>
+              {(() => {
+                const active = configFiles.find((f) => f.id === configActiveId)
+                if (!active) return <p className="text-sm text-muted-foreground">Select a file above.</p>
+                if (active.isTemplate) {
+                  return (
+                    <div className="flex flex-col items-start gap-2 rounded-md border border-dashed p-4">
+                      <p className="text-sm text-muted-foreground">
+                        This mod ships a default template but no live config exists yet.
+                      </p>
+                      <Button size="sm" onClick={() => createConfig(active)} disabled={configBusy}>
+                        Create from template
+                      </Button>
+                    </div>
+                  )
+                }
+                return (
+                  <>
+                    <textarea
+                      value={configText}
+                      onChange={(e) => {
+                        setConfigText(e.target.value)
+                        setConfigDirty(true)
+                      }}
+                      readOnly={!active.editable}
+                      spellCheck={false}
+                      className="min-h-0 flex-1 rounded-md border bg-muted/20 p-3 font-mono text-xs"
+                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {active.format}
+                        {!active.editable && ' · read-only'}
+                      </span>
+                      {active.editable && (
+                        <Button size="sm" onClick={saveConfig} disabled={configBusy || !configDirty}>
+                          {configBusy ? <Spinner className="size-4" /> : 'Save'}
+                        </Button>
+                      )}
+                    </div>
+                    {!active.editable && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Lua config — edit on disk; too risky to edit as text here.
+                      </p>
+                    )}
+                  </>
+                )
+              })()}
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

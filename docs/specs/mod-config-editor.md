@@ -1,9 +1,30 @@
 # Spec: Mod Config Editor
 
-Status: **PROPOSED (2026-08-06) — not built.** Awaiting an explicit "start" per the
-repo's one-feature-at-a-time rule. Prompted by BaseRadiusImproved: an installed mod
-whose only way to change its settings today is editing a file on disk by hand.
-Motivation and the config-landscape survey below are from the live box.
+Status: **BUILT — backend live-verified, UI browser-unverified (2026-08-06).** MVP
+shipped: `lib/mod-config.ts` (discovery/read/validate/write/create-from-template) +
+`app/api/mod-config` (GET list/content, POST save/create; admin-only, instance-scoped)
++ a **Config** (sliders) button on each UE4SS mod row in the Mods tab opening a
+right-side editor Sheet (`components/game-mods-panel.tsx`). Verified live via the API:
+discovery on BaseRadiusImproved/SmartPalFeeding/PalworldBaseAutomation (Lua filtered to
+config-looking only, sorted last, read-only); a save round-trip (edit → `.bak` snapshot
++ atomic write → restore); and rejection of invalid JSON, read-only-Lua writes, and
+path traversal. Create-from-template exercised on PalworldBaseAutomation's
+`recipe-toggles`. **Not browser-verified** (no Chrome in-session) — the UI follows the
+established Sheet/fetch/toast patterns; a browser QA pass is the one open item.
+Prompted by BaseRadiusImproved (config-file-only, edited by hand). The config-landscape
+survey below is from the live box.
+
+Deltas from the proposal, worth noting:
+- **Lua is filtered to config-looking names** (`config.lua`/`settings*.lua`), not every
+  `.lua` — a mod ships dozens of source modules and listing them all as "config" was
+  noise. They remain **read-only** when shown.
+- **Discovery lists what exists** + a template placeholder when a `*.default.*`/
+  `*.example.*` has no live sibling; the fully-generic "mod wants a Saved config that
+  doesn't exist yet" case isn't detectable, so that one (BaseRadiusImproved) was the
+  manual pre-create on 2026-08-06 — the editor now finds and edits it.
+- **Path guard is a whitelist:** the client can only name a file that discovery
+  produced (re-discover + match by id on every read/write), so traversal is impossible
+  by construction — verified `../../../../etc/passwd` → "not found".
 
 ## 1. Goal
 Let an admin view and edit an installed mod's **own** configuration from the Mods
