@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import {
   ChevronDownIcon,
   DownloadIcon,
@@ -15,9 +16,20 @@ import {
   PackageIcon,
   PlusIcon,
   RefreshCwIcon,
+  RotateCcwIcon,
+  SlidersHorizontalIcon,
   Trash2Icon,
   UploadIcon,
 } from 'lucide-react'
+
+type ClientConfigFile = {
+  id: string
+  relWithin: string
+  modFolder: string
+  format: 'json' | 'jsonc' | 'ini' | 'lua' | 'text'
+  content: string
+  overridden: boolean
+}
 
 // PATCH (not upstream): client-only mod staging (docs/specs/client-mod-sync.md §2c, Phase
 // 2 intake), the "Client mods" sub-tab of the Mods page. Where the admin STAGES the mods a
@@ -83,6 +95,14 @@ export function ClientModsPanel() {
   const [includeUe4ss, setIncludeUe4ss] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [lastLoadout, setLastLoadout] = useState<string | null>(null)
+
+  // Config editor.
+  const [configMod, setConfigMod] = useState<ClientMod | null>(null)
+  const [configFiles, setConfigFiles] = useState<ClientConfigFile[]>([])
+  const [configLoading, setConfigLoading] = useState(false)
+  const [configSel, setConfigSel] = useState<string | null>(null)
+  const [configDraft, setConfigDraft] = useState('')
+  const [configBusy, setConfigBusy] = useState(false)
 
   const load = useCallback(async () => {
     if (!config) return
@@ -283,6 +303,73 @@ export function ClientModsPanel() {
       setGenerating(false)
     }
   }, [config, includeUe4ss])
+
+  const openConfig = useCallback(
+    async (m: ClientMod) => {
+      setConfigMod(m)
+      setConfigFiles([])
+      setConfigSel(null)
+      setConfigDraft('')
+      setConfigLoading(true)
+      try {
+        const json = await postJson({ action: 'configList', id: m.id })
+        const files: ClientConfigFile[] = json?.configs ?? []
+        setConfigFiles(files)
+        if (files.length) {
+          setConfigSel(files[0].id)
+          setConfigDraft(files[0].content)
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Could not read config')
+      } finally {
+        setConfigLoading(false)
+      }
+    },
+    [postJson],
+  )
+
+  const selectConfig = useCallback(
+    (id: string) => {
+      const f = configFiles.find((x) => x.id === id)
+      if (!f) return
+      setConfigSel(id)
+      setConfigDraft(f.content)
+    },
+    [configFiles],
+  )
+
+  const saveConfig = useCallback(async () => {
+    if (!configMod || !configSel) return
+    setConfigBusy(true)
+    try {
+      await postJson({ action: 'configSave', id: configMod.id, cfg: configSel, content: configDraft })
+      toast.success('Config saved — it ships in the loadout')
+      setConfigFiles((prev) => prev.map((f) => (f.id === configSel ? { ...f, content: configDraft, overridden: true } : f)))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Save failed (check the format)')
+    } finally {
+      setConfigBusy(false)
+    }
+  }, [configMod, configSel, configDraft, postJson])
+
+  const resetConfig = useCallback(async () => {
+    if (!configMod || !configSel) return
+    setConfigBusy(true)
+    try {
+      await postJson({ action: 'configClear', id: configMod.id, cfg: configSel })
+      // reload to pull the shipped default back in
+      const json = await postJson({ action: 'configList', id: configMod.id })
+      const files: ClientConfigFile[] = json?.configs ?? []
+      setConfigFiles(files)
+      const f = files.find((x) => x.id === configSel)
+      if (f) setConfigDraft(f.content)
+      toast.success('Reset to the mod’s shipped config')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Reset failed')
+    } finally {
+      setConfigBusy(false)
+    }
+  }, [configMod, configSel, postJson])
 
   const filteredSuggestions = useMemo(() => {
     const f = filter.trim().toLowerCase()
@@ -491,14 +578,26 @@ export function ClientModsPanel() {
                     </div>
                   </div>
                 </label>
-                <button
-                  onClick={() => remove(m)}
-                  disabled={busy === m.id}
-                  title="Remove from the client-mod set"
-                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
-                >
-                  {busy === m.id ? <Spinner className="size-3.5" /> : <Trash2Icon className="size-3.5" />}
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {m.kind !== 'pak' && (
+                    <button
+                      onClick={() => openConfig(m)}
+                      title="Edit this mod's config (ships in the loadout)"
+                      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                    >
+                      <SlidersHorizontalIcon className="size-3.5" />
+                      Config
+                    </button>
+                  )}
+                  <button
+                    onClick={() => remove(m)}
+                    disabled={busy === m.id}
+                    title="Remove from the client-mod set"
+                    className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+                  >
+                    {busy === m.id ? <Spinner className="size-3.5" /> : <Trash2Icon className="size-3.5" />}
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -561,6 +660,72 @@ export function ClientModsPanel() {
           )}
         </div>
       )}
+
+      {/* Config editor */}
+      <Sheet open={!!configMod} onOpenChange={(o) => !o && setConfigMod(null)}>
+        <SheetContent side="right" className="flex w-full flex-col gap-3 sm:max-w-2xl">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <SlidersHorizontalIcon className="size-4 text-primary" />
+              {configMod?.name} · config
+            </SheetTitle>
+          </SheetHeader>
+          <p className="text-xs text-muted-foreground">
+            Edits are stored as an override and shipped into every client&apos;s loadout — the mod&apos;s staged files
+            aren&apos;t changed. Reset drops back to the mod&apos;s shipped config.
+          </p>
+          {configLoading ? (
+            <p className="text-sm text-muted-foreground">Reading config…</p>
+          ) : configFiles.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No editable config file found in this mod. (Some mods generate their config only on first run.)
+            </p>
+          ) : (
+            <>
+              {configFiles.length > 1 && (
+                <select
+                  value={configSel ?? ''}
+                  onChange={(e) => selectConfig(e.target.value)}
+                  className="rounded-md border bg-background px-2 py-1.5 text-xs"
+                >
+                  {configFiles.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.relWithin}
+                      {f.overridden ? ' (edited)' : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {configSel && (
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span className="font-mono">{configSel}</span>
+                  <span>{configFiles.find((f) => f.id === configSel)?.format}</span>
+                </div>
+              )}
+              <textarea
+                value={configDraft}
+                onChange={(e) => setConfigDraft(e.target.value)}
+                spellCheck={false}
+                className="min-h-0 flex-1 resize-none rounded-md border bg-muted/20 p-3 font-mono text-xs"
+              />
+              <div className="flex items-center gap-2">
+                <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={saveConfig} disabled={configBusy}>
+                  {configBusy ? <Spinner className="size-3.5" /> : null}
+                  Save
+                </Button>
+                <button
+                  onClick={resetConfig}
+                  disabled={configBusy || !configFiles.find((f) => f.id === configSel)?.overridden}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs hover:bg-muted disabled:opacity-40"
+                >
+                  <RotateCcwIcon className="size-3.5" />
+                  Reset to shipped
+                </button>
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

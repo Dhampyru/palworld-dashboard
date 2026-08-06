@@ -1,5 +1,5 @@
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, join, sep } from 'node:path'
+import { basename, dirname, join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -7,6 +7,7 @@ import { currentGameDir } from '@/lib/instances'
 import { serializeModsTxt } from '@/lib/game-mods'
 import { UE4SS_FRAMEWORK_DEFAULTS } from '@/lib/ue4ss-framework-defaults'
 import { clientModStorePath, listClientMods, type ClientMod } from '@/lib/client-mods'
+import { readClientModConfigOverrides } from '@/lib/client-mod-config'
 
 const execFileP = promisify(execFile)
 
@@ -36,6 +37,7 @@ export type LoadoutSummary = {
   mods: LoadoutMod[]
   skipped: LoadoutSkip[]
   totalKept: number
+  configOverrides: number // admin config edits shipped into the bundle
   sizeBytes: number
   generatedAt: string
 }
@@ -105,7 +107,7 @@ async function dirIsMod(dir: string): Promise<boolean> {
 const PAK_RE = /\.(pak|utoc|ucas)$/i
 
 // Copy every pak/utoc/ucas found anywhere under `roots` into destDir (flat). Returns the
-// .pak basenames placed (for the summary). Deduped by basename.
+// .pak basenames placed (for the summary). Deduped by basename. Explicit dest.
 async function collectPaks(roots: string[], destDir: string, seen: Set<string>): Promise<string[]> {
   const placed: string[] = []
   for (const root of roots) {
@@ -122,22 +124,60 @@ async function collectPaks(roots: string[], destDir: string, seen: Set<string>):
   return placed
 }
 
-// Find the Lua mod root(s) inside an extracted archive: a top-level mod dir, several of
-// them, or guts-at-root (Scripts/ at the root → the whole thing is one mod). Peels a
-// single non-mod wrapper dir (a common Nexus packaging).
+// Like collectPaks but ROUTES each pak by its path: a pak under a LogicMods/ folder is a
+// Blueprint LogicMod (→ Content/Paks/LogicMods), everything else → ~mods. This is what a
+// bare Nexus/upload archive needs (Steam items are routed by their InstallRule instead).
+async function collectPaksRouted(
+  roots: string[],
+  pakDir: string,
+  logicDir: string,
+  seen: Set<string>,
+): Promise<{ paks: string[]; logic: string[]; dupes: number }> {
+  const paks: string[] = []
+  const logic: string[] = []
+  let dupes = 0 // pak(s) present but already placed by an earlier mod (a staged duplicate)
+  for (const root of roots) {
+    for (const f of await walkFiles(root)) {
+      if (!PAK_RE.test(f)) continue
+      const name = basename(f)
+      if (seen.has(name.toLowerCase())) {
+        if (/\.pak$/i.test(name)) dupes++
+        continue
+      }
+      seen.add(name.toLowerCase())
+      const isLogic = /(^|\/)logicmods\//i.test(f.replace(/\\/g, '/'))
+      const dest = isLogic ? logicDir : pakDir
+      await mkdir(dest, { recursive: true })
+      await cp(f, join(dest, name))
+      if (/\.pak$/i.test(name)) (isLogic ? logic : paks).push(name)
+    }
+  }
+  return { paks, logic, dupes }
+}
+
+// Find the Lua/BP mod dir(s) inside an extracted archive, at ANY depth. Handles: the mod
+// folder at the root, several mod folders, guts-at-root (Scripts/ at the root), AND the
+// common Nexus packaging that ships the whole game path
+// (`Pal/Binaries/Win64/ue4ss/Mods/<name>/…`). A dir that IS a mod isn't descended into,
+// so we never mistake a mod's own Scripts/dlls subfolder for another mod.
 async function findLuaModRoots(scratch: string, fallbackName: string): Promise<{ name: string; dir: string }[]> {
   if (await dirIsMod(scratch)) return [{ name: safeName(fallbackName), dir: scratch }]
-  const topDirs = (await readdir(scratch, { withFileTypes: true })).filter((e) => e.isDirectory())
   const mods: { name: string; dir: string }[] = []
-  for (const d of topDirs) if (await dirIsMod(join(scratch, d.name))) mods.push({ name: safeName(d.name), dir: join(scratch, d.name) })
-  if (mods.length) return mods
-  // no mod at this level — peel a single wrapper dir and try once more
-  if (topDirs.length === 1) {
-    const inner = join(scratch, topDirs[0].name)
-    if (await dirIsMod(inner)) return [{ name: safeName(topDirs[0].name), dir: inner }]
-    const innerDirs = (await readdir(inner, { withFileTypes: true })).filter((e) => e.isDirectory())
-    for (const d of innerDirs) if (await dirIsMod(join(inner, d.name))) mods.push({ name: safeName(d.name), dir: join(inner, d.name) })
+  const rec = async (dir: string): Promise<void> => {
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue
+      const full = join(dir, e.name)
+      if (await dirIsMod(full)) mods.push({ name: safeName(e.name), dir: full })
+      else await rec(full)
+    }
   }
+  await rec(scratch)
   return mods
 }
 
@@ -157,6 +197,7 @@ async function placeWorkshop(
   luaMods: string[],
   seenPaks: Set<string>,
   uniqueMod: (base: string) => string,
+  produced: string[],
 ): Promise<string[]> {
   let info: { InstallRule?: unknown; PackageName?: string }
   try {
@@ -193,6 +234,7 @@ async function placeWorkshop(
         if (await isDir(root)) await cp(root, dest, { recursive: true })
       }
       luaMods.push(name)
+      produced.push(name)
       placed.push(`ue4ss/Mods/${name}`)
     } else if (type === 'Paks') {
       const p = await collectPaks(roots, paths.pakDir, seenPaks)
@@ -331,6 +373,9 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     const seenPaks = new Set<string>()
     const mods: LoadoutMod[] = []
     const skipped: LoadoutSkip[] = []
+    // client-mod id → the ue4ss/Mods folder name(s) it produced, so admin config overrides
+    // can be overlaid onto the right folder after assembly.
+    const producedFolders = new Map<string, string[]>()
 
     // Unique mod-folder names — a safeName() collision (e.g. two non-ASCII names both
     // reducing to the same slug) must not let one mod overwrite another. Seed with the
@@ -348,10 +393,11 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       const store = clientModStorePath(m.id)
       const scratch = join(work, 'scratch', m.id)
       const placed: string[] = []
+      const producedForMod: string[] = []
       try {
         if (m.source === 'steam' || (m.kind === 'unknown' && (await exists(join(store, 'content'))))) {
           // Steam Workshop item — place by its Info.json InstallRule.
-          const where = await placeWorkshop(join(store, 'content'), m.name, { modsDir, pakDir, logicDir }, luaMods, seenPaks, uniqueMod)
+          const where = await placeWorkshop(join(store, 'content'), m.name, { modsDir, pakDir, logicDir }, luaMods, seenPaks, uniqueMod, producedForMod)
           placed.push(...where)
         } else if (m.payload === 'payload.pak') {
           // Bare uploaded pak — name from the mod (original filename wasn't retained).
@@ -369,41 +415,77 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
             const name = uniqueMod(r.name)
             await cp(r.dir, join(modsDir, name), { recursive: true })
             luaMods.push(name)
+            producedForMod.push(name)
             placed.push(`ue4ss/Mods/${name}`)
           }
-          // hybrid: any paks shipped alongside → ~mods
-          const p = await collectPaks([scratch], pakDir, seenPaks)
-          pakFiles.push(...p)
-          if (p.length) placed.push(`~mods (${p.length})`)
-          if (!roots.length && !p.length) skipped.push({ name: m.name, reason: 'no Lua mod folder or pak found' })
+          // hybrid: any paks shipped alongside → ~mods / LogicMods (by path)
+          const { paks, logic, dupes } = await collectPaksRouted([scratch], pakDir, logicDir, seenPaks)
+          if (paks.length) placed.push(`~mods (${paks.length})`)
+          if (logic.length) placed.push(`LogicMods (${logic.length})`)
+          if (dupes && !paks.length && !logic.length) placed.push('already in loadout (duplicate)')
+          if (!roots.length && !paks.length && !logic.length && !dupes) skipped.push({ name: m.name, reason: 'no Lua mod folder or pak found' })
         } else if (m.kind === 'pak' || m.kind === 'palschema') {
           await unpack(join(store, 'payload.zip'), scratch)
-          const p = await collectPaks([scratch], pakDir, seenPaks)
-          pakFiles.push(...p)
-          if (p.length) placed.push(`~mods (${p.length})`)
-          else if (m.kind === 'palschema') skipped.push({ name: m.name, reason: 'PalSchema data is server-side; no client pak' })
-          else skipped.push({ name: m.name, reason: 'no pak found in archive' })
+          const { paks, logic, dupes } = await collectPaksRouted([scratch], pakDir, logicDir, seenPaks)
+          if (paks.length) placed.push(`~mods (${paks.length})`)
+          if (logic.length) placed.push(`LogicMods (${logic.length})`)
+          if (dupes && !paks.length && !logic.length) placed.push('already in loadout (duplicate)')
+          if (!paks.length && !logic.length && !dupes) {
+            skipped.push({
+              name: m.name,
+              reason: m.kind === 'palschema' ? 'PalSchema data is server-side; no client pak' : 'no pak found in archive',
+            })
+          }
         } else {
-          // unknown from a zip payload — best effort: mod folder → Mods, paks → ~mods.
+          // unknown from a zip payload — best effort: mod folder → Mods, paks → ~mods/LogicMods.
           await unpack(join(store, 'payload.zip'), scratch)
           const roots = await findLuaModRoots(scratch, m.name)
           for (const r of roots) {
             const name = uniqueMod(r.name)
             await cp(r.dir, join(modsDir, name), { recursive: true })
             luaMods.push(name)
+            producedForMod.push(name)
             placed.push(`ue4ss/Mods/${name}`)
           }
-          const p = await collectPaks([scratch], pakDir, seenPaks)
-          pakFiles.push(...p)
-          if (p.length) placed.push(`~mods (${p.length})`)
-          if (!roots.length && !p.length) skipped.push({ name: m.name, reason: 'could not classify — add manually' })
+          const { paks, logic, dupes } = await collectPaksRouted([scratch], pakDir, logicDir, seenPaks)
+          if (paks.length) placed.push(`~mods (${paks.length})`)
+          if (logic.length) placed.push(`LogicMods (${logic.length})`)
+          if (dupes && !paks.length && !logic.length) placed.push('already in loadout (duplicate)')
+          if (!roots.length && !paks.length && !logic.length && !dupes) {
+            // Some Nexus "mods" are just Engine.ini text tweaks (no installable files).
+            const files = await walkFiles(scratch)
+            const engineTweak = files.length > 0 && files.every((f) => /engine\.ini|\.txt$/i.test(f))
+            skipped.push({
+              name: m.name,
+              reason: engineTweak
+                ? 'Engine.ini tweak (text only) — not an installable mod; apply to Engine.ini manually'
+                : 'could not classify — add manually',
+            })
+          }
         }
       } catch (e) {
         skipped.push({ name: m.name, reason: e instanceof Error ? e.message : 'failed to place' })
       } finally {
         await rm(scratch, { recursive: true, force: true }).catch(() => {})
       }
+      if (producedForMod.length) producedFolders.set(m.id, producedForMod)
       if (placed.length) mods.push({ name: m.name, kind: m.kind, source: m.source, placed })
+    }
+
+    // Overlay the admin's config edits onto the placed mods so every client ships the
+    // host's config. Applied only when a mod produced exactly ONE folder (the common case;
+    // ambiguous multi-folder mods are left with their shipped config).
+    let configOverrides = 0
+    for (const m of kept) {
+      const folders = producedFolders.get(m.id)
+      if (!folders || folders.length !== 1) continue
+      const overrides = await readClientModConfigOverrides(m.id).catch(() => [])
+      for (const ov of overrides) {
+        const dest = join(modsDir, folders[0], ov.relWithin)
+        await mkdir(dirname(dest), { recursive: true })
+        await cp(ov.absPath, dest)
+        configOverrides++
+      }
     }
 
     // Authoritative pak/LogicMods counts — walk the actual output dirs (the per-mod
@@ -427,6 +509,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       mods,
       skipped,
       totalKept: kept.length,
+      configOverrides,
       sizeBytes: 0,
       generatedAt,
     }

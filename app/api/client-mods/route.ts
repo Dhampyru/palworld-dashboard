@@ -15,6 +15,7 @@ import {
   setClientModKeep,
   type ClientMod,
 } from '@/lib/client-mods'
+import { clearClientModConfig, listClientModConfigs, saveClientModConfig } from '@/lib/client-mod-config'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -112,7 +113,16 @@ async function _POST(request: NextRequest) {
   }
 
   // ── JSON: add-by-URL, keep toggle, remove ───────────────────────────────────
-  let body: { action?: string; url?: string; urls?: string[]; source?: string; id?: string; keep?: boolean }
+  let body: {
+    action?: string
+    url?: string
+    urls?: string[]
+    source?: string
+    id?: string
+    keep?: boolean
+    cfg?: string
+    content?: string
+  }
   try {
     body = (await request.json()) as typeof body
   } catch {
@@ -134,6 +144,26 @@ async function _POST(request: NextRequest) {
         if (typeof body.id !== 'string') return NextResponse.json({ error: 'id required' }, { status: 400 })
         await removeClientMod(body.id)
         return NextResponse.json({ removed: body.id })
+      }
+      // ── Per-mod config editing (shipped into the loadout) ──────────────────
+      case 'configList': {
+        if (typeof body.id !== 'string') return NextResponse.json({ error: 'id required' }, { status: 400 })
+        const configs = await listClientModConfigs(body.id)
+        return NextResponse.json({ configs })
+      }
+      case 'configSave': {
+        if (typeof body.id !== 'string' || typeof body.cfg !== 'string' || typeof body.content !== 'string') {
+          return NextResponse.json({ error: 'id, cfg and content required' }, { status: 400 })
+        }
+        await saveClientModConfig(body.id, body.cfg, body.content)
+        return NextResponse.json({ saved: body.cfg })
+      }
+      case 'configClear': {
+        if (typeof body.id !== 'string' || typeof body.cfg !== 'string') {
+          return NextResponse.json({ error: 'id and cfg required' }, { status: 400 })
+        }
+        await clearClientModConfig(body.id, body.cfg)
+        return NextResponse.json({ cleared: body.cfg })
       }
       case 'addNexus': {
         const mod = await addClientModFromNexus(String(body.url ?? ''))

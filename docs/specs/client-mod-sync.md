@@ -214,6 +214,24 @@ them, and this area turns that into a one-click friend loadout + human-readable 
      **NOT verifiable here:** whether a friend's game actually LOADS them (no game client on this
      box) — that's the real-client test. Output today is the **extract-a-zip bundle**; the
      **sync-script** delivery variant (§5) is the remaining follow-up.
+     **PLACEMENT HARDENED 2026-08-06:** `findLuaModRoots` now searches for mod dirs at ANY
+     depth (recovers archives that ship the full `Pal/Binaries/Win64/ue4ss/Mods/<name>/` game
+     path — a common Nexus packaging), and paks are routed by path (`…/LogicMods/*.pak` →
+     `Content/Paks/LogicMods`, else `~mods`). A staged DUPLICATE (same mod from Nexus AND
+     Steam) is reported "already in loadout" rather than a phantom failure; Engine.ini-only
+     text "mods" get an explicit skip reason. On the live set this lifted Lua 34→43 and
+     LogicMods 3→11, leaving 7 genuine skips (5 server-side PalSchema + 2 Engine.ini-text).
+  2a. **Client-mod CONFIG editing — BUILT + tested 2026-08-06.** Many client mods ship a
+     config (`Scripts/config.lua`, `config.ini`, …; 29 of the owner's 74). `lib/client-mod-
+     config.ts` discovers them inside each staged payload (extract via `unar`, find files
+     under a mod root), lets the admin edit with **format validation** (json/jsonc/ini/lua via
+     the server editor's `validateConfigContent`; `.txt` passes through), and stores the edit
+     as an **override** under `data/client-mods/<id>/config-override/<relWithin>` — the staged
+     payload is never mutated. The loadout **overlays** each override onto the placed mod so
+     EVERY client ships the host's config (only when a mod produced exactly one folder). API
+     actions `configList`/`configSave`/`configClear` on `/api/client-mods`; a **Config** button
+     + editor Sheet per staged mod row (non-pak). Verified: edited FOV Control's `config.lua`
+     → the marker appeared in the generated bundle (`manifest.json configOverrides:1`).
   3. **Delivery** — keep §5b's dual client (FSA browser happy-path + standalone script
      fallback) for the *pak-sync* subset, and add the loadout bundle/script for the full
      client-only set. A **Steam Workshop Collection** link covers the Workshop-only subset.

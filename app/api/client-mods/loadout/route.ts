@@ -64,6 +64,7 @@ async function _GET(request: NextRequest) {
         'X-Loadout-Mods': String(summary.mods.length),
         'X-Loadout-Skipped': String(summary.skipped.length),
         'X-Loadout-Total': String(summary.totalKept),
+        'X-Loadout-Config': String(summary.configOverrides),
         'X-Loadout-Size': String(summary.sizeBytes),
       },
     })
