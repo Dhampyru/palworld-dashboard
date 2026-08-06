@@ -147,6 +147,12 @@ no regime change, no server-stop.
     `dirIsMod` requires a DIRECT `Scripts/`/`dlls/`/`enabled.txt`/`main.dll`/bare-`.lua`
     (a nested `.lua` no longer qualifies an outer wrapper). Synthetic-verified against the
     wrapper + single-mod + guts-at-root + multi-mod layouts.
+  - **Clean mod names (BUILT 2026-08-06, `cleanModName`).** Every installed UE4SS mod name
+    is stripped of a trailing Nexus file-name suffix `-<modid>-<version…>-<unix timestamp>`
+    (`LessRestrictiveBuilding-98-1-2-1734970943` → `LessRestrictiveBuilding`), only when the
+    result stays a safe non-empty name. Applied in `installUe4ssModArchive` step 3 so
+    folders/mods.txt/associations are clean going forward; existing ugly names are a one-off
+    rename (folder + mods.txt + mod-groups + nexus/steam keys).
 - **Update detection + one-click update (BUILT 2026-08-06).** Workshop exposes an update
   TIMESTAMP, not a version. The installed baseline is already on disk — SteamCMD records
   each item's `timeupdated` in `steamapps/workshop/appworkshop_1623730.acf` — so no

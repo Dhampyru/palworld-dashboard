@@ -892,6 +892,15 @@ export async function installPakArchive(buffer: Buffer): Promise<string[]> {
 //    use backslash paths); else fall back to a single bare top folder,
 //  - extract each mod folder to Mods/<name> and register it in mods.txt.
 // Returns the installed mod name(s) + any pak filenames split out.
+// Strip a Nexus file-name suffix from a derived mod folder name — a trailing
+// `-<modid>-<version…>-<unix timestamp>` (e.g. "LessRestrictiveBuilding-98-1-2-1734970943"
+// → "LessRestrictiveBuilding"), only when the result is still a safe, non-empty name.
+// Applied to every UE4SS mod name at install so folders/mods.txt/associations stay clean.
+export function cleanModName(name: string): string {
+  const cleaned = name.replace(/-\d+(?:[-.]\d+)*-\d{9,}$/, '')
+  return cleaned && cleaned !== name && isSafeModFolderName(cleaned) ? cleaned : name
+}
+
 // A config-looking file we preserve across an update (config*/settings* data files),
 // excluding *.default.*/*.example.* templates (those are seeds, safe to refresh).
 function isConfigLikeRel(rel: string): boolean {
@@ -1059,9 +1068,11 @@ export async function installUe4ssModArchive(
     }
   }
 
-  // 3. Validate + install each mod folder.
+  // 3. Validate + install each mod folder (under a cleaned name — strips Nexus
+  //    file-name suffixes so e.g. LessRestrictiveBuilding-98-1-2-… → LessRestrictiveBuilding).
   const names: string[] = []
-  for (const [name, entries] of mods) {
+  for (const [rawName, entries] of mods) {
+    const name = cleanModName(rawName)
     if (!isSafeModFolderName(name) || name.toLowerCase() === 'shared') {
       throw new Error(`Unsafe UE4SS mod name: "${name}"`)
     }
