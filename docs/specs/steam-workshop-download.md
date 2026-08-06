@@ -86,8 +86,27 @@ no regime change, no server-stop.
   `Lua` → `Win64/ue4ss/Mods/<PackageName>/` (+ `mods.txt`);
   `PalSchema` → `…/PalSchema/mods/<PackageName>/`;
   `Paks` → `~mods`; `LogicMods` → `Paks/LogicMods`; `UE4SS` skipped (already have it).
-  Path-traversal guarded; targets deduped per Type. Placement validated against
-  synthetic Lua/PalSchema/pak packages and live (QualityOfLife: Lua→Mods, 2 paks→~mods).
+  Path-traversal guarded; targets deduped per Type.
+  - **PalSchema-target placement (fix, 2026-08-06, `87ac2a6`).** The two mod kinds
+    place their Targets differently, and this bit the FIRST PalSchema-type Workshop
+    mod on the box (Super Stacks No Lag, id `3770035710`). A **Lua** mod's Targets
+    (`./Scripts`, `./enabled.txt`) name folders that belong verbatim under
+    `Mods/<pkg>/` — the folder name is kept. A **PalSchema** mod's Target is a
+    `./PalSchema/` **wrapper** whose *contents* map to `PalSchema/mods/<pkg>/` (the
+    real layout is `<pkg>/blueprints|raw/…`, cf. `AncientCoreDrops/raw/…`). Copying
+    the wrapper verbatim (`copyTargets` default) landed the payload a level too deep
+    (`<pkg>/PalSchema/blueprints/…`) and PalSchema loaded nothing. `copyTargets` now
+    takes a `flatten` flag — the PalSchema branch strips the wrapper (copies the
+    target's contents into dest); Lua/pak keep the old preserve-name behavior. (Paks
+    were always flattened into `~mods` by `copyPaksFlat`, so unaffected.) The earlier
+    "validated against synthetic PalSchema packages" claim was optimistic — the
+    synthetic didn't use the real `./PalSchema/` wrapper convention.
+  - **Live-verified 2026-08-06** against a 5-mod bulk add: 3 Lua (Alpha&Lucky Pal
+    Surgery, Base Radius Improved, Smart Pal Feeding) → `ue4ss/Mods` + enabled; 1 pak
+    (Pal Surgery Table Unlocker) → `~mods`; 1 PalSchema (Super Stacks No Lag) → now
+    `<pkg>/blueprints/…`, `[PalSchema] Loading mod: SuperStacksNoLag` on restart with
+    no "empty mod" warning. A full scan of all 17 PalSchema mod folders found no other
+    wrapper-nested casualty; the pre-existing QualityOfLife (Lua+pak) was unaffected.
 - `app/api/steam/workshop` (POST, admin + connected): download → install-to-proxy.
   `game-mods-panel`: "Install from Steam Workshop URL" box (shown when connected).
   Restart to load.
@@ -102,7 +121,14 @@ no regime change, no server-stop.
   (`data/steam-mods.json`; `readSteamMods`/`setSteamMod`/`removeFromSteamMods`). The
   mod row shows a **"Steam Workshop ↗"** link (the parallel of the Nexus link) and
   the **Nexus chip is suppressed** for Steam-linked mods. GET /api/game-mods returns
-  `steamLinks`; DELETE cleans them up.
+  `steamLinks`; DELETE cleans them up. Keyed `ue4ss:<pkg>` (Lua parent, paks nest
+  under it) or `pak:<file>` for pak-only.
+  - **PalSchema-only Workshop mods** (no Lua row, no pak row) are now recorded under
+    `palschema:<pkg>` (fix `87ac2a6` — previously they installed **untracked**).
+    Caveat: PalSchema submods aren't listed as their own rows in the Mods tab (they're
+    managed under the PalSchema framework, like every other PalSchema mod), so this
+    key has no visible row to attach a link to yet — it's recorded for association
+    integrity, not UI. A dedicated PalSchema-submod row/link is a possible follow-up.
 - **Hybrid nesting:** a mod that drops both a UE4SS part and pak(s) records a
   mod-group so its paks nest (collapsed) under the UE4SS row — same as Nexus hybrids.
 
