@@ -86,6 +86,18 @@ mod descriptions (`lib/mod-catalog.ts`):
 Residual: a mod whose description names no config still relies on the heuristic (e.g.
 BlueprintsdDropBoost — `config.lua` is editable, but its generated `*.json` also lists).
 
+**Per-mod override map (BUILT 2026-08-06)** — the manual cure for that residual.
+`data/mod-config-overrides.json` (operator config in the data volume — writable,
+UI-editable, NOT shipped) maps `<modFolder> → [config basename]`. An override **wins over
+the description parse** in `getDeclaration`, so pinning `config.lua` for
+BlueprintsdDropBoost makes discovery show only it and drop the generated `*.json`.
+Managed from the Mods-tab config sheet: in heuristic mode (>1 candidate, nothing
+declared) each file offers **★ set as config** (writes the override → re-discovers to
+just that file); an overridden mod offers **clear override** (back to
+description/heuristic). API: `POST {action:'setOverride'|'clearOverride'}`; `GET` returns
+`overridden`. Discovery also now sorts config-NAMED files (`config*`/`settings*`) ahead of
+incidental data, so the likely-real config auto-opens even before any override.
+
 ## 3. Discovery (`lib/mod-config.ts`, new)
 `listModConfigs(modName)` → the editable config file(s) for one UE4SS mod. Search, in
 priority order, and classify each hit:

@@ -122,6 +122,8 @@ export function GameModsPanel() {
   const [configText, setConfigText] = useState('')
   const [configDirty, setConfigDirty] = useState(false)
   const [configBusy, setConfigBusy] = useState(false)
+  const [configOverridden, setConfigOverridden] = useState(false)
+  const [configDeclared, setConfigDeclared] = useState(false)
 
   const [installKind, setInstallKind] = useState<InstallKind>('ue4ss')
   const [installModName, setInstallModName] = useState('')
@@ -735,6 +737,8 @@ export function GameModsPanel() {
         if (!res.ok) throw new Error(data.error ?? res.statusText)
         const files: ModConfigFileMeta[] = data.files ?? []
         setConfigFiles(files)
+        setConfigOverridden(data.overridden === true)
+        setConfigDeclared(data.declared === true)
         // Auto-open the first editable file so the common case is one click.
         const first = files.find((f) => f.editable && f.exists) ?? files[0]
         if (first) await loadConfigFile(mod.name, first)
@@ -782,6 +786,29 @@ export function GameModsPanel() {
         await openConfig(configMod) // re-discover so it's now editable
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Create failed')
+      } finally {
+        setConfigBusy(false)
+      }
+    },
+    [config, configMod, openConfig],
+  )
+
+  const setConfigOverrideFor = useCallback(
+    async (action: 'setOverride' | 'clearOverride', fileId?: string) => {
+      if (!config || !configMod) return
+      setConfigBusy(true)
+      try {
+        const res = await fetch('/api/mod-config', {
+          method: 'POST',
+          headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mod: configMod.name, action, file: fileId ?? '' }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? res.statusText)
+        toast.success(action === 'setOverride' ? 'Set as this mod’s config.' : 'Override cleared.')
+        await openConfig(configMod) // re-discover with the new override
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed')
       } finally {
         setConfigBusy(false)
       }
@@ -1921,10 +1948,35 @@ export function GameModsPanel() {
                       className="min-h-0 flex-1 rounded-md border bg-muted/20 p-3 font-mono text-xs"
                     />
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                        {active.format}
-                        {!active.editable && ' · read-only'}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                          {active.format}
+                        </span>
+                        {/* Override map: when this mod isn't declared (heuristic — usually
+                            several candidates), let the admin pin the real config file;
+                            when it IS an override, let them clear it back to auto. */}
+                        {configOverridden ? (
+                          <button
+                            onClick={() => setConfigOverrideFor('clearOverride')}
+                            disabled={configBusy}
+                            className="text-[11px] text-muted-foreground hover:text-primary disabled:opacity-40"
+                          >
+                            clear override
+                          </button>
+                        ) : (
+                          !configDeclared &&
+                          configFiles.length > 1 && (
+                            <button
+                              onClick={() => setConfigOverrideFor('setOverride', active.id)}
+                              disabled={configBusy}
+                              className="text-[11px] text-muted-foreground hover:text-primary disabled:opacity-40"
+                              title="Mark this file as this mod's config (hides the others)"
+                            >
+                              ★ set as config
+                            </button>
+                          )
+                        )}
+                      </div>
                       {active.editable && (
                         <Button size="sm" onClick={saveConfig} disabled={configBusy || !configDirty}>
                           {configBusy ? <Spinner className="size-4" /> : 'Save'}

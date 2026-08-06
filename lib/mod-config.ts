@@ -137,11 +137,14 @@ export async function listModConfigs(modName: string): Promise<ModConfigFile[]> 
   for (const f of out) f.declared = declared.has(basename(f.id).toLowerCase())
   const authoritative = out.some((f) => f.declared)
   const list = authoritative ? out.filter((f) => f.declared) : out
-  // Declared first, then data-before-Lua, then stable by label.
+  // Declared first; then config-NAMED files (config*/settings*) before incidental data
+  // (so the likely-real config is what auto-opens, e.g. config.lua over a generated
+  // <Mod>.json); then stable by label.
+  const named = (f: ModConfigFile) => /config|settings/i.test(basename(f.id))
   return list.sort(
     (a, b) =>
       Number(!!b.declared) - Number(!!a.declared) ||
-      Number(a.format === 'lua') - Number(b.format === 'lua') ||
+      Number(named(b)) - Number(named(a)) ||
       a.label.localeCompare(b.label),
   )
 }
