@@ -1002,9 +1002,22 @@ export function SavesPanel() {
 
           {/* Dashboard config backups (the dashboard's own /app/data, not the world) */}
           <section className="flex flex-col gap-2">
-            <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <DatabaseIcon className="size-3.5" /> Dashboard config backups ({data?.dashboardBackups?.length ?? 0})
-            </h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <DatabaseIcon className="size-3.5" /> Dashboard config backups ({data?.dashboardBackups?.length ?? 0})
+              </h3>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => runAction('backupDash', { action: 'backupDashboardData' }, () => {})}
+                disabled={busy !== null}
+                className="gap-1.5"
+                title="Snapshot the dashboard's current config now (bypasses the ~daily schedule)"
+              >
+                {busy === 'backupDash' ? <Spinner className="size-3.5" /> : <SaveIcon className="size-3.5" />}
+                Back up now
+              </Button>
+            </div>
             <p className="text-[11px] text-muted-foreground">
               Automatic ~daily snapshots of the dashboard&apos;s own settings (mod config overrides, mod links,
               schedules) — separate from the game world. Restoring recovers those settings;{' '}

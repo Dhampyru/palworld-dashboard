@@ -16,6 +16,7 @@ import {
   editPlayerBasics,
   type PlayerEdit,
   isGameServerUp,
+  backupDashboardData,
   listBackups,
   listDashboardDataBackups,
   listPlayerSaves,
@@ -119,6 +120,7 @@ async function _POST(request: NextRequest) {
     action !== 'deleteWorld' &&
     action !== 'restore' &&
     action !== 'restoreDashboardData' &&
+    action !== 'backupDashboardData' &&
     action !== 'deletePlayerSave' &&
     action !== 'resetPlayer' &&
     action !== 'editPlayer'
@@ -144,6 +146,14 @@ async function _POST(request: NextRequest) {
       }
       const backup = await createBackup()
       return NextResponse.json({ success: true, backup, note: 'Backup created.' })
+    }
+
+    if (action === 'backupDashboardData') {
+      // Force an immediate snapshot of /app/data (overrides, links, schedules, groups)
+      // to the game-backups volume — bypasses the scheduler's ~daily freshness gate so a
+      // config change is captured now rather than at the next tick.
+      const r = await backupDashboardData({ force: true, keep: 14 })
+      return NextResponse.json({ success: true, file: r.file, note: `Backed up dashboard config to ${r.file}.` })
     }
 
     if (action === 'restoreDashboardData') {

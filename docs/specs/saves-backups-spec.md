@@ -69,8 +69,10 @@ operational JSONs and none of the excluded secrets.
 in the archive). **No server-down guard** (it's dashboard config, not the world). GET
 `/api/saves` returns `dashboardBackups`; POST `{action:'restoreDashboardData', file}`.
 UI: a **Dashboard config backups** card in the Maintenance tab (`saves-panel.tsx`) —
-Download + Restore per snapshot + a distinct confirm ("does NOT touch the world or
-credentials"). Download via the shared `/api/saves/download` route, which now resolves
+a **Back up now** header button (`POST {action:'backupDashboardData'}` → `backupDashboard
+Data({force:true})`, bypasses the ~daily freshness gate so a config change is captured
+immediately) + Download + Restore per snapshot + a distinct confirm ("does NOT touch the
+world or credentials"). Download via the shared `/api/saves/download` route, which now resolves
 `dashboard-data-*` too through `resolveDashboardBackupPath` (a separate basename guard so
 a dashboard snapshot can never reach a WORLD restore). No Delete (retention self-prunes). Verified live (API round-trip: clear an override → restore → all 3
 back, 7 files, prerestore snapshot created) and browser (7/7: card, confirm, toast).
