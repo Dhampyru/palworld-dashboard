@@ -136,6 +136,17 @@ export async function getModInfo(modId: number): Promise<NexusModInfo | null> {
 
 export type NexusFile = { fileId: number; name: string; version: string | null; category: string | null }
 
+// The version of the newest MAIN file — the correct thing to compare an installed
+// mod against. Nexus has TWO version fields: the mod page's headline `version` AND each
+// file's `version`, and for some mods they DIFFER. `baselineVersion` is the installed
+// FILE's version, so update-detection must compare it to the latest FILE version (not the
+// mod headline), or a divergent mod perpetually shows a phantom update. Newest = last.
+export function latestMainFileVersion(files: NexusFile[]): string | null {
+  const main = files.filter((f) => (f.category ?? '').toUpperCase() === 'MAIN')
+  const pool = main.length ? main : files
+  return pool.length ? (pool[pool.length - 1].version ?? null) : null
+}
+
 // Downloadable files for a mod — MAIN + OPTIONAL only (skip ARCHIVED/OLD_VERSION).
 export async function getModFiles(modId: number): Promise<NexusFile[]> {
   const found = await readNexusKey()
@@ -353,8 +364,11 @@ export async function getNexusMods(): Promise<Record<string, NexusModRow>> {
     let author: string | null
     let available: boolean
     if (mustRefetch) {
-      const info = await getModInfo(assoc.modId)
-      latest = info?.version ?? null
+      const [info, files] = await Promise.all([getModInfo(assoc.modId), getModFiles(assoc.modId)])
+      // Compare the installed FILE version (baseline) to the latest FILE version — NOT
+      // the mod's headline `version`, which is a different field and diverges for some
+      // mods (that mismatch was flagging phantom updates on up-to-date mods).
+      latest = latestMainFileVersion(files) ?? info?.version ?? null
       name = info?.name ?? `Mod ${assoc.modId}`
       author = info?.author ?? null
       available = info?.available ?? true

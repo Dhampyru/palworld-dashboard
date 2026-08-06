@@ -892,9 +892,18 @@ export async function installPakArchive(buffer: Buffer): Promise<string[]> {
 //    use backslash paths); else fall back to a single bare top folder,
 //  - extract each mod folder to Mods/<name> and register it in mods.txt.
 // Returns the installed mod name(s) + any pak filenames split out.
+// A config-looking file we preserve across an update (config*/settings* data files),
+// excluding *.default.*/*.example.* templates (those are seeds, safe to refresh).
+function isConfigLikeRel(rel: string): boolean {
+  const b = basename(rel.replace(/\\/g, '/')).toLowerCase()
+  if (/\.(default|example)\./.test(b)) return false
+  return /(config|settings)[\w.-]*\.(lua|jsonc?|ini)$/.test(b)
+}
+
 export async function installUe4ssModArchive(
   buffer: Buffer,
   nameHint?: string,
+  replace = false, // update path: overwrite an existing mod folder in place instead of refusing
 ): Promise<{ name: string; pakFiles: string[] }> {
   const modsDir = await resolveUe4ssModsDir()
   if (!modsDir) throw new Error('UE4SS Mods directory not found')
@@ -1032,11 +1041,18 @@ export async function installUe4ssModArchive(
       throw new Error(`Unsafe UE4SS mod name: "${name}"`)
     }
     const targetDir = join(modsDir, name)
-    try {
-      await stat(targetDir)
-      throw new Error(`A UE4SS mod named "${name}" already exists — remove it first to replace it.`)
-    } catch (e) {
-      if (e instanceof Error && e.message.includes('already exists')) throw e
+    // On a fresh install, refuse to clobber an existing mod. On an UPDATE (replace),
+    // overwrite in place — the write loop below replaces the archive's files and leaves
+    // anything else (e.g. a runtime config the mod keeps in its folder) untouched, which
+    // is the "manual re-upload" semantics we want. Config kept in Pal/Saved/<mod>/ (e.g.
+    // BaseRadiusImproved) is outside the folder and never affected.
+    if (!replace) {
+      try {
+        await stat(targetDir)
+        throw new Error(`A UE4SS mod named "${name}" already exists — remove it first to replace it.`)
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('already exists')) throw e
+      }
     }
     for (const { rel } of entries) {
       const dest = join(targetDir, rel)
@@ -1047,6 +1063,13 @@ export async function installUe4ssModArchive(
     await mkdir(targetDir, { recursive: true })
     for (const { rel, entry } of entries) {
       const dest = join(targetDir, rel)
+      // On an UPDATE, preserve the user's in-folder config: skip overwriting an existing
+      // config-looking file (config*/settings* .lua/.json/.ini, not a *.default/*.example
+      // template). Code/data files are still replaced. Config kept in Pal/Saved/<mod>/ is
+      // outside the folder and untouched regardless.
+      if (replace && isConfigLikeRel(rel) && (await stat(dest).then(() => true).catch(() => false))) {
+        continue
+      }
       await mkdir(dirname(dest), { recursive: true })
       await writeFile(dest, entry.getData())
     }

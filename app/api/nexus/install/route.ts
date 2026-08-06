@@ -80,6 +80,7 @@ function pickUpdateFile(files: NexusFile[], latestVersion: string | null): Nexus
 async function installModFile(
   modId: number,
   fileId: number,
+  replace = false, // update flow: overwrite the existing mod in place instead of erroring
 ): Promise<{ kind: 'palschema' | 'pak' | 'ue4ss'; name: string; version: string | null; assocKey: string | null }> {
   const download = await downloadNexusFile(modId, fileId)
   // Nexus authors often ship .rar/.7z — normalize those to a zip so the rest of
@@ -109,15 +110,15 @@ async function installModFile(
   let assocKey: string | null = null
   let installedName = ''
   if (kind === 'palschema') {
-    const r = await installPalSchemaSubmod(buffer)
+    const r = await installPalSchemaSubmod(buffer, replace)
     installedName = r.name
     if (r.pakFiles.length) assocKey = `pak:${r.pakFiles[0]}` // the client-facing row
   } else if (kind === 'pak') {
-    const paks = await installPakArchive(buffer)
+    const paks = await installPakArchive(buffer) // paks overwrite by filename already
     installedName = paks.join(', ')
     assocKey = `pak:${paks[0]}`
   } else {
-    const r = await installUe4ssModArchive(buffer, nameHint)
+    const r = await installUe4ssModArchive(buffer, nameHint, replace)
     installedName = r.name
     assocKey = `ue4ss:${r.name}` // the UE4SS mod row (its pak, if any, split to ~mods)
     // Hybrid: nest the split-out pak(s) under the UE4SS mod in the list.
@@ -229,7 +230,7 @@ async function _POST(request: NextRequest) {
       const file = pickUpdateFile(files, info?.version ?? null)
       if (!file) return NextResponse.json({ error: 'No downloadable file found on Nexus.' }, { status: 400 })
 
-      const r = await installModFile(linked.modId, file.fileId)
+      const r = await installModFile(linked.modId, file.fileId, true) // update = replace in place
       // A reinstall usually resolves to the same key; if a rename changed it, drop
       // the stale association so the row doesn't show a phantom link.
       if (r.assocKey && r.assocKey !== modKey) await unlinkNexusMod(modKey)

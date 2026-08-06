@@ -221,7 +221,7 @@ export type SubmodInstallResult = {
 //     (The old code treated the shared `Pal/` prefix as the mod folder, so a mod
 //     installed as "Pal" with its JSON buried at a wrong nested path.)
 //   - BARE MOD FOLDER: <Name>/<rel> at the zip root (with Mod/Mod flattening).
-export async function installPalSchemaSubmod(buffer: Buffer): Promise<SubmodInstallResult> {
+export async function installPalSchemaSubmod(buffer: Buffer, replace = false): Promise<SubmodInstallResult> {
   const modsDir = await resolvePalSchemaModsDir()
   if (!modsDir) {
     throw new Error('PalSchema is not installed — install PalSchema first, then add mods to it.')
@@ -294,11 +294,13 @@ export async function installPalSchemaSubmod(buffer: Buffer): Promise<SubmodInst
       throw new Error(`"${name}" has no JSON/JSONC content — a PalSchema mod's data files are .json/.jsonc.`)
     }
     const targetDir = join(modsDir, name)
-    try {
-      await stat(targetDir)
-      throw new Error(`A PalSchema mod named "${name}" already exists — remove it first to replace it.`)
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('already exists')) throw err
+    if (!replace) {
+      try {
+        await stat(targetDir)
+        throw new Error(`A PalSchema mod named "${name}" already exists — remove it first to replace it.`)
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('already exists')) throw err
+      }
     }
     for (const { rel } of entries) {
       const dest = join(targetDir, rel)

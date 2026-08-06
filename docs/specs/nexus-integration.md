@@ -142,9 +142,23 @@ Our installed mods don't carry Nexus IDs, so each needs a link to its Nexus mod:
     an `↑ update now` action — resolve the newest MAIN file → reinstall through the
     Phase 2 pipeline → bump baseline. Refactored install route into a shared
     `installModFile()`; `update` action + `pickUpdateFile()`; `getLinkedModId()`.
-    Free accounts unchanged (mark seen + link only). *Caveat:* update reinstalls
-    over existing files (like a manual re-upload) — files dropped between versions
-    would linger; matches normal mod-update behavior.
+    Free accounts unchanged (mark seen + link only).
+  - **Two update bugs fixed (2026-08-06).** (1) **False "update available":**
+    `updateAvailable` compared the installed FILE version (`baselineVersion`) against the
+    mod's HEADLINE `version` (`info.version`) — two different Nexus fields that diverge
+    for some mods, so up-to-date mods showed a phantom update forever (3 of the live set:
+    ChestOrganizer, PalworldBaseAutomation, Multi Party Pals Summon). Now compares the
+    installed file version to the latest MAIN **file** version (`latestMainFileVersion` in
+    `lib/nexus.ts`, fetched in `getNexusMods`'s refetch). (2) **Update never applied to an
+    installed mod:** `installUe4ssModArchive`/`installPalSchemaSubmod` threw "already
+    exists", so `↑ update now` (and Update-all's Nexus half) errored for every installed
+    UE4SS/PalSchema mod. Added a `replace` flag threaded from `installModFile` (the
+    `update` action passes `true`) → **overwrite in place**, AND **preserve in-folder
+    config** (`isConfigLikeRel` skips overwriting an existing `config*/settings*`
+    `.lua/.json/.ini`, not templates), so code/data update but the user's config survives.
+    Config kept in `Pal/Saved/<mod>/` is outside the folder and untouched regardless.
+    Verified live: 3 phantom updates cleared; a simulated real update replaced in place and
+    a user marker in `config.lua` survived.
   - **MD5 auto-association** (`57b1b86`): the manual upload path
     (`app/api/game-mods/install`) computes the archive MD5 and calls `md5_search`; a
     hit auto-links the mod (`lib/nexus.ts md5AutoAssociate`). Best-effort — silent
