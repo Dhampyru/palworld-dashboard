@@ -1,18 +1,20 @@
 # Spec: Mod Config Editor
 
-Status: **BUILT — backend live-verified, UI browser-unverified (2026-08-06).** MVP
-shipped: `lib/mod-config.ts` (discovery/read/validate/write/create-from-template) +
-`app/api/mod-config` (GET list/content, POST save/create; admin-only, instance-scoped)
-+ a **Config** (sliders) button on each UE4SS mod row in the Mods tab opening a
-right-side editor Sheet (`components/game-mods-panel.tsx`). Verified live via the API:
-discovery on BaseRadiusImproved/SmartPalFeeding/PalworldBaseAutomation (Lua filtered to
+Status: **BUILT + browser-verified (2026-08-06).** MVP shipped: `lib/mod-config.ts`
+(discovery/read/validate/write/create-from-template) + `app/api/mod-config` (GET
+list/content, POST save/create; admin-only, instance-scoped) + a **Config** (sliders)
+button on each UE4SS mod row in the Mods tab opening a right-side editor Sheet
+(`components/game-mods-panel.tsx`). Verified live via the API: discovery on
+BaseRadiusImproved/SmartPalFeeding/PalworldBaseAutomation (Lua filtered to
 config-looking only, sorted last, read-only); a save round-trip (edit → `.bak` snapshot
 + atomic write → restore); and rejection of invalid JSON, read-only-Lua writes, and
 path traversal. Create-from-template exercised on PalworldBaseAutomation's
-`recipe-toggles`. **Not browser-verified** (no Chrome in-session) — the UI follows the
-established Sheet/fetch/toast patterns; a browser QA pass is the one open item.
-Prompted by BaseRadiusImproved (config-file-only, edited by hand). The config-landscape
-survey below is from the live box.
+`recipe-toggles`. **Browser-verified via Playwright headless** (no Chrome extension this
+session; same method as the other QA passes): 10/10 checks — Mods-tab nav, Config button
+on the row, sheet opens with the file picker, the JSON config loads its full content, a
+save round-trip (edit → Save enabled → "Saved" toast → restore), and the Lua tab renders
+read-only with no Save button. Prompted by BaseRadiusImproved (config-file-only, edited
+by hand). The config-landscape survey below is from the live box.
 
 Deltas from the proposal, worth noting:
 - **Lua is filtered to config-looking names** (`config.lua`/`settings*.lua`), not every
