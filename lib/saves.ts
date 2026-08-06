@@ -256,7 +256,7 @@ async function listDashboardBackups(): Promise<{ file: string; mtimeMs: number }
 // skips when the newest snapshot is younger than that (so the scheduler can call it
 // every tick but only actually back up ~daily). Prunes to the newest `keep`.
 export async function backupDashboardData(
-  opts: { keep?: number; maxAgeMs?: number; force?: boolean } = {},
+  opts: { keep?: number; maxAgeMs?: number; force?: boolean; label?: string } = {},
 ): Promise<{ file: string | null; skipped?: boolean }> {
   const keep = opts.keep ?? 14
   await mkdir(backupsDir(), { recursive: true })
@@ -265,7 +265,7 @@ export async function backupDashboardData(
     return { file: null, skipped: true }
   }
   const dataDir = dashboardDataDir()
-  const file = `dashboard-data-${backupStamp()}.tar.gz`
+  const file = `dashboard-data-${opts.label ? `${opts.label}-` : ''}${backupStamp()}.tar.gz`
   const dest = join(backupsDir(), file)
   try {
     await execFileP('tar', [
@@ -294,6 +294,43 @@ export async function backupDashboardData(
     await rm(join(backupsDir(), b.file), { force: true }).catch(() => {})
   }
   return { file }
+}
+
+// Public list for the UI: dashboard-data snapshots, newest first, with size + mtime.
+export async function listDashboardDataBackups(): Promise<BackupInfo[]> {
+  const items = await listDashboardBackups()
+  return Promise.all(
+    items.map(async ({ file }) => {
+      const s = await stat(join(backupsDir(), file))
+      return { file, sizeBytes: s.size, modifiedAt: s.mtime.toISOString() }
+    }),
+  )
+}
+
+// Restore a dashboard-data snapshot over /app/data. Takes a pre-restore safety snapshot
+// first (so the restore itself is reversible), then extracts the archive's data/ tree.
+// The archive holds only the operational JSONs (secrets were excluded at backup), so
+// on-disk credentials (panel-auth/nexus/steam) are left untouched. Unlike a WORLD
+// restore this needs no server-down guard — it's dashboard config, not the live world.
+export async function restoreDashboardData(file: string): Promise<{ restored: string[]; preRestore: string | null }> {
+  if (!DASHBOARD_BACKUP_RE.test(file) || file.includes('/') || file.includes('\\') || file.includes('..')) {
+    throw new Error('Invalid dashboard backup file')
+  }
+  const src = join(backupsDir(), file)
+  await stat(src) // 404 if it's gone
+  const pre = await backupDashboardData({ force: true, label: 'prerestore', keep: 14 })
+  const dataDir = dashboardDataDir()
+  await mkdir(dataDir, { recursive: true })
+  // Trusted archive we authored; members are relative `data/…`, no traversal.
+  await execFileP('tar', ['-xzf', src, '-C', dirname(dataDir)])
+  let restored: string[] = []
+  try {
+    const { stdout } = await execFileP('tar', ['-tzf', src])
+    restored = stdout.split('\n').filter((l) => l && !l.endsWith('/')).map((l) => l.replace(/^data\//, ''))
+  } catch {
+    /* listing is cosmetic */
+  }
+  return { restored, preRestore: pre.file }
 }
 
 export async function deleteBackup(fullPath: string): Promise<void> {

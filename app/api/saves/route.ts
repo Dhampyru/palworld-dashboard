@@ -17,6 +17,7 @@ import {
   type PlayerEdit,
   isGameServerUp,
   listBackups,
+  listDashboardDataBackups,
   listPlayerSaves,
   getSavesDisk,
   listWorlds,
@@ -24,6 +25,7 @@ import {
   resolveBackupPath,
   resolvePlayerSavePath,
   restoreBackup,
+  restoreDashboardData,
   setActiveWorld,
   worldExists,
 } from '@/lib/saves'
@@ -63,13 +65,14 @@ async function _GET(request: NextRequest) {
   }
 
   const activeWorldId = await readActiveWorldId()
-  const [worlds, backups, playerSaves, disk] = await Promise.all([
+  const [worlds, backups, playerSaves, disk, dashboardBackups] = await Promise.all([
     listWorlds(activeWorldId),
     listBackups(),
     activeWorldId ? listPlayerSaves(activeWorldId) : Promise.resolve([]),
     getSavesDisk(),
+    listDashboardDataBackups(),
   ])
-  return NextResponse.json({ worlds, backups, playerSaves, activeWorldId, disk })
+  return NextResponse.json({ worlds, backups, playerSaves, activeWorldId, disk, dashboardBackups })
 }
 
 // Mutating actions (spec §2/§3). Admin-tier only; rate-limited like the other
@@ -115,6 +118,7 @@ async function _POST(request: NextRequest) {
     action !== 'newWorld' &&
     action !== 'deleteWorld' &&
     action !== 'restore' &&
+    action !== 'restoreDashboardData' &&
     action !== 'deletePlayerSave' &&
     action !== 'resetPlayer' &&
     action !== 'editPlayer'
@@ -140,6 +144,21 @@ async function _POST(request: NextRequest) {
       }
       const backup = await createBackup()
       return NextResponse.json({ success: true, backup, note: 'Backup created.' })
+    }
+
+    if (action === 'restoreDashboardData') {
+      // Restore the dashboard's OWN config (/app/data) from a snapshot. No server-down
+      // guard — this is dashboard config, not the live world. Takes a pre-restore
+      // safety snapshot first. Most restored settings apply immediately (config
+      // discovery, links); schedules re-read on the next tick.
+      const file = typeof body.file === 'string' ? body.file : ''
+      if (!file) return NextResponse.json({ error: 'file required' }, { status: 400 })
+      const r = await restoreDashboardData(file)
+      return NextResponse.json({
+        success: true,
+        ...r,
+        note: `Restored ${r.restored.length} config file(s) from ${file}. A pre-restore snapshot was saved.`,
+      })
     }
 
     if (action === 'delete') {

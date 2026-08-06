@@ -63,6 +63,17 @@ saves restore list nor get touched by the world-backup pruners. **Secrets exclud
 session — re-login); `*.tmp` too. Verified live: first snapshot (2 KB) contains the 7
 operational JSONs and none of the excluded secrets.
 
+**Restore (BUILT 2026-08-06).** `restoreDashboardData(file)` (`lib/saves.ts`) takes a
+`prerestore`-labelled safety snapshot, then `tar -x`'s the archive's `data/` tree over
+`/app/data` — recovering the operational config; on-disk credentials are untouched (not
+in the archive). **No server-down guard** (it's dashboard config, not the world). GET
+`/api/saves` returns `dashboardBackups`; POST `{action:'restoreDashboardData', file}`.
+UI: a **Dashboard config backups** card in the Maintenance tab (`saves-panel.tsx`) —
+Restore per snapshot + a distinct confirm ("does NOT touch the world or credentials").
+No Download/Delete (the download route's `resolveBackupPath` only serves
+`palworld-save-*`). Verified live (API round-trip: clear an override → restore → all 3
+back, 7 files, prerestore snapshot created) and browser (7/7: card, confirm, toast).
+
 ### GET (BUILT — read-only)
 Returns `{ worlds: WorldInfo[], backups: BackupInfo[], activeWorldId }`.
 - `WorldInfo = { id, active, sizeBytes, modifiedAt, playerCount }`

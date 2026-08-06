@@ -131,6 +131,7 @@ type SavesData = {
   playerSaves: PlayerSaveInfo[]
   activeWorldId: string | null
   disk: { totalBytes: number; freeBytes: number; usedBytes: number } | null
+  dashboardBackups?: BackupInfo[]
 }
 
 // A player save's filename is the Palworld PlayerUId (8 significant hex chars +
@@ -206,6 +207,7 @@ export function SavesPanel() {
   const [confirmNewWorld, setConfirmNewWorld] = useState(false)
   const [confirmDeleteWorld, setConfirmDeleteWorld] = useState<WorldInfo | null>(null)
   const [confirmRestore, setConfirmRestore] = useState<BackupInfo | null>(null)
+  const [confirmRestoreDash, setConfirmRestoreDash] = useState<BackupInfo | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<BackupInfo | null>(null)
   const [confirmDeletePlayer, setConfirmDeletePlayer] = useState<PlayerSaveInfo | null>(null)
   const [worldData, setWorldData] = useState<WorldData | null>(null)
@@ -998,6 +1000,43 @@ export function SavesPanel() {
             )}
           </section>
 
+          {/* Dashboard config backups (the dashboard's own /app/data, not the world) */}
+          <section className="flex flex-col gap-2">
+            <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <DatabaseIcon className="size-3.5" /> Dashboard config backups ({data?.dashboardBackups?.length ?? 0})
+            </h3>
+            <p className="text-[11px] text-muted-foreground">
+              Automatic ~daily snapshots of the dashboard&apos;s own settings (mod config overrides, mod links,
+              schedules) — separate from the game world. Restoring recovers those settings;{' '}
+              <span className="font-medium">credentials aren&apos;t included</span> (panel password, Nexus key, Steam
+              login are re-entered). A pre-restore snapshot is taken automatically.
+            </p>
+            {data?.dashboardBackups?.length ? (
+              data.dashboardBackups.map((b) => (
+                <div key={b.file} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
+                  <div className="flex min-w-0 flex-col">
+                    <code className="truncate font-mono text-xs">{b.file}</code>
+                    <span className="text-[11px] text-muted-foreground">
+                      {fmtBytes(b.sizeBytes)} · {fmtDate(b.modifiedAt)}
+                    </span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setConfirmRestoreDash(b)}
+                    disabled={busy !== null}
+                    className="shrink-0 gap-1.5"
+                  >
+                    <RotateCcwIcon className="size-3.5" />
+                    <span className="hidden sm:inline">Restore</span>
+                  </Button>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">{loading ? 'Loading…' : 'No dashboard config backups yet.'}</p>
+            )}
+          </section>
+
           {/* Player saves (active world) */}
           <section className="flex flex-col gap-2">
             <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1167,6 +1206,40 @@ export function SavesPanel() {
               onClick={() => {
                 if (confirmRestore) runAction('restore', { action: 'restore', file: confirmRestore.file }, () => {})
                 setConfirmRestore(null)
+              }}
+            >
+              Restore
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Dashboard config restore confirm */}
+      <AlertDialog open={confirmRestoreDash !== null} onOpenChange={(o) => !o && setConfirmRestoreDash(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <TriangleAlertIcon className="size-4 text-amber-500" /> Restore dashboard settings?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This overwrites the dashboard&apos;s current settings (mod config overrides, mod links, schedules) with{' '}
+              <code className="font-mono text-xs">{confirmRestoreDash?.file}</code>. It does{' '}
+              <span className="font-semibold">not</span> touch the game world or your credentials, and a pre-restore
+              snapshot is taken first, so it&apos;s reversible. Most settings apply immediately.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-600 hover:bg-amber-600/90"
+              onClick={() => {
+                if (confirmRestoreDash)
+                  runAction(
+                    'restoreDashboardData',
+                    { action: 'restoreDashboardData', file: confirmRestoreDash.file },
+                    () => {},
+                  )
+                setConfirmRestoreDash(null)
               }}
             >
               Restore
