@@ -131,6 +131,20 @@ no regime change, no server-stop.
     integrity, not UI. A dedicated PalSchema-submod row/link is a possible follow-up.
 - **Hybrid nesting:** a mod that drops both a UE4SS part and pak(s) records a
   mod-group so its paks nest (collapsed) under the UE4SS row — same as Nexus hybrids.
+- **Update detection + one-click update (BUILT 2026-08-06).** Workshop exposes an update
+  TIMESTAMP, not a version. The installed baseline is already on disk — SteamCMD records
+  each item's `timeupdated` in `steamapps/workshop/appworkshop_1623730.acf` — so no
+  install-time bookkeeping. `lib/steam.ts`: `readInstalledWorkshopTimes()` (line-scan the
+  acf VDF), `fetchWorkshopUpdateTimes()` (Steam's PUBLIC `GetPublishedFileDetails`, no
+  key), `getSteamModUpdates()` → `updateAvailable` when live `time_updated` > installed.
+  `GET /api/steam/workshop` returns `{updates}` keyed by itemId (works with NO connected
+  account — public API; only the update itself needs a session). Panel: `loadSteam` also
+  fetches updates; a Steam-linked row shows **`↑ update`** (amber, dated tooltip
+  "Workshop updated YYYY-MM-DD; you installed …") + **`↑ update now`** when connected —
+  which just re-POSTs the item to the install path (SteamCMD pulls latest → re-convert →
+  acf heals). Mirrors the Nexus update chips. **No version string** (Workshop limitation);
+  the chip shows dates. Verified live: aged an item's acf time → chip + `↑ update now` →
+  re-download → `updateAvailable` cleared; browser 3/3.
 
 ## 8. Public release
 - Ships **opt-in and dormant**. Documented that Workshop download needs the operator's

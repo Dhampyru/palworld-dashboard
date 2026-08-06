@@ -100,6 +100,9 @@ type NexusModRow = {
 }
 type NexusFile = { fileId: number; name: string; version: string | null; category: string | null }
 
+// Steam Workshop exposes an update timestamp, not a version — render it as a date.
+const fmtEpoch = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 10)
+
 // PATCH (not upstream): this panel talks to /api/game-mods directly (NOT
 // through useServer().apiCall, which is hardwired to proxy the Palworld REST
 // API) since mod listing is filesystem-backed, not something the game's REST
@@ -136,6 +139,10 @@ export function GameModsPanel() {
   const [nexusConnected, setNexusConnected] = useState(false)
   const [nexusMods, setNexusMods] = useState<Record<string, NexusModRow>>({})
   const [nexusBusy, setNexusBusy] = useState<string | null>(null)
+  const [steamUpdates, setSteamUpdates] = useState<
+    Record<string, { installedAt: number | null; latestAt: number; updateAvailable: boolean; title: string }>
+  >({})
+  const [steamBusy, setSteamBusy] = useState<string | null>(null)
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
   const [linkUrl, setLinkUrl] = useState('')
   const [linkHaveVersion, setLinkHaveVersion] = useState('')
@@ -186,6 +193,16 @@ export function GameModsPanel() {
       if (res.ok) setSteamConnected(Boolean(json.status?.connected))
     } catch {
       /* leave dormant */
+    }
+    // Workshop update state (installed acf time vs Steam's live time). Uses Steam's
+    // public API, so it works even with no connected account (only the one-click
+    // update needs a session). Best-effort — no chips if the check fails.
+    try {
+      const res = await fetch('/api/steam/workshop', { headers: buildPalworldProxyHeaders(config), cache: 'no-store' })
+      const json = await res.json()
+      if (res.ok) setSteamUpdates(json.updates ?? {})
+    } catch {
+      /* no update chips */
     }
   }, [config])
 
@@ -517,6 +534,34 @@ export function GameModsPanel() {
       setSteamInstalling(false)
     }
   }, [config, steamUrl, load])
+
+  // One-click update: re-download the item (SteamCMD pulls the latest) and re-convert
+  // to the proxy layout — same path as install. Needs a connected account. Restart to
+  // apply. Mirrors the Nexus "update now".
+  const updateSteamMod = useCallback(
+    async (itemId: string) => {
+      if (!config) return
+      setSteamBusy(`update:${itemId}`)
+      const toastId = toast.loading('Updating from Steam Workshop…')
+      try {
+        const res = await fetch('/api/steam/workshop', {
+          method: 'POST',
+          headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: itemId }),
+        })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.error ?? 'Update failed')
+        toast.success('Updated to the latest — restart the server to apply.', { id: toastId })
+        await load()
+        await loadSteam()
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Update failed', { id: toastId })
+      } finally {
+        setSteamBusy(null)
+      }
+    },
+    [config, load, loadSteam],
+  )
 
   // Bulk: paste many Workshop URLs/ids; the server installs each sequentially and
   // returns a per-item result. Mirrors the Nexus bulk flow.
@@ -1000,6 +1045,28 @@ export function GameModsPanel() {
               >
                 Steam Workshop ↗
               </a>
+              {steamUpdates[steamLink.itemId]?.updateAvailable && (
+                <>
+                  <span
+                    className="rounded bg-amber-500/20 px-1 font-medium text-amber-700 dark:text-amber-300"
+                    title={`Workshop updated ${fmtEpoch(steamUpdates[steamLink.itemId].latestAt)}; you installed ${
+                      steamUpdates[steamLink.itemId].installedAt ? fmtEpoch(steamUpdates[steamLink.itemId].installedAt!) : '?'
+                    }`}
+                  >
+                    ↑ update
+                  </span>
+                  {steamConnected && (
+                    <button
+                      onClick={() => updateSteamMod(steamLink.itemId)}
+                      disabled={steamBusy === `update:${steamLink.itemId}`}
+                      title="Re-download the latest from Steam Workshop (restart to apply)"
+                      className="rounded bg-primary/15 px-1 font-medium text-primary hover:bg-primary/25 disabled:opacity-40"
+                    >
+                      {steamBusy === `update:${steamLink.itemId}` ? 'updating…' : '↑ update now'}
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           )}
           {showNexus &&

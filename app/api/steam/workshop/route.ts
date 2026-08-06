@@ -4,8 +4,8 @@ import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { DEMO_MODE } from '@/lib/demo-mode'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { runWithInstance } from '@/lib/instances'
-import { downloadWorkshopItem, getSteamStatus, isFrameworkWorkshopId, parseWorkshopId } from '@/lib/steam'
-import { installWorkshopPackageToProxy } from '@/lib/game-mods'
+import { downloadWorkshopItem, getSteamModUpdates, getSteamStatus, isFrameworkWorkshopId, parseWorkshopId } from '@/lib/steam'
+import { installWorkshopPackageToProxy, readSteamMods } from '@/lib/game-mods'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -31,6 +31,21 @@ function requireAdmin(request: NextRequest): NextResponse | null {
     return NextResponse.json({ error: 'Forbidden: Workshop install is admin-only' }, { status: 403 })
   }
   return null
+}
+
+// Update state for the installed Steam-linked mods (installed acf time vs Steam's live
+// time). No session needed — the check uses Steam's PUBLIC API — so it works even when
+// the account is disconnected (only the one-click UPDATE via POST needs a session).
+// Keyed by workshop itemId; the panel maps rows via their steam link's itemId.
+export async function GET(request: NextRequest) {
+  return runWithInstance(request.headers.get(PALWORLD_PROXY_HEADERS.instance), () => _GET(request))
+}
+async function _GET(request: NextRequest) {
+  const denied = requireAdmin(request)
+  if (denied) return denied
+  const itemIds = Object.values(await readSteamMods()).map((l) => l.itemId).filter(Boolean)
+  const updates = await getSteamModUpdates(itemIds)
+  return NextResponse.json({ updates })
 }
 
 export async function POST(request: NextRequest) {

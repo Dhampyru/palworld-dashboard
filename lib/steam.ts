@@ -203,3 +203,82 @@ export async function downloadWorkshopItem(
   }
   return { contentDir, packageName, modName }
 }
+
+// ── Workshop update detection (docs/specs/steam-workshop-download.md §7) ──────
+// Steam Workshop exposes an update TIMESTAMP, not a version string. The installed
+// baseline is already on disk — SteamCMD records each item's `timeupdated` in
+// `steamapps/workshop/appworkshop_<appid>.acf` — so no install-time bookkeeping is
+// needed. Compare it to the item's live `time_updated` from Steam's public API.
+
+// Parse the acf (a Valve VDF) for `timeupdated` per workshop id. Line-scan: an id is a
+// line that is just "<digits>"; the following `"timeupdated" "<n>"` is its value. Both
+// WorkshopItemsInstalled and WorkshopItemDetails list it (same value) — last wins.
+export async function readInstalledWorkshopTimes(): Promise<Record<string, number>> {
+  const acf = join(currentGameDir(), 'steamapps', 'workshop', `appworkshop_${PALWORLD_APPID}.acf`)
+  let text: string
+  try {
+    text = await readFile(acf, 'utf8')
+  } catch {
+    return {} // no acf → nothing installed via SteamCMD here
+  }
+  const out: Record<string, number> = {}
+  let id: string | null = null
+  for (const line of text.split(/\r?\n/)) {
+    const idm = line.match(/^\s*"(\d{6,})"\s*$/)
+    if (idm) {
+      id = idm[1]
+      continue
+    }
+    const tm = line.match(/"timeupdated"\s*"(\d+)"/i)
+    if (tm && id) out[id] = Number(tm[1])
+  }
+  return out
+}
+
+// Live last-update time (+ title) per workshop id, via the public GetPublishedFileDetails
+// (no API key). Best-effort: a failed call yields {} (→ no update chips), never throws.
+export async function fetchWorkshopUpdateTimes(
+  ids: string[],
+): Promise<Record<string, { timeUpdated: number; title: string }>> {
+  const uniq = [...new Set(ids.filter(Boolean))]
+  if (!uniq.length) return {}
+  const body = new URLSearchParams()
+  body.set('itemcount', String(uniq.length))
+  uniq.forEach((id, i) => body.set(`publishedfileids[${i}]`, id))
+  try {
+    const res = await fetch('https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+    if (!res.ok) return {}
+    const j = (await res.json()) as {
+      response?: { publishedfiledetails?: { publishedfileid: string; time_updated?: number; title?: string; result?: number }[] }
+    }
+    const out: Record<string, { timeUpdated: number; title: string }> = {}
+    for (const d of j.response?.publishedfiledetails ?? []) {
+      if (d.result === 1 && d.time_updated) out[d.publishedfileid] = { timeUpdated: d.time_updated, title: d.title ?? '' }
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+export type SteamModUpdate = { installedAt: number | null; latestAt: number; updateAvailable: boolean; title: string }
+
+// Update state per workshop id: installed (acf) vs live (Steam). updateAvailable only
+// when we know both and live is strictly newer. Items we can't fetch are omitted.
+export async function getSteamModUpdates(itemIds: string[]): Promise<Record<string, SteamModUpdate>> {
+  const uniq = [...new Set(itemIds.filter(Boolean))]
+  if (!uniq.length) return {}
+  const [installed, latest] = await Promise.all([readInstalledWorkshopTimes(), fetchWorkshopUpdateTimes(uniq)])
+  const out: Record<string, SteamModUpdate> = {}
+  for (const id of uniq) {
+    const l = latest[id]
+    if (!l) continue
+    const inst = installed[id] ?? null
+    out[id] = { installedAt: inst, latestAt: l.timeUpdated, updateAvailable: inst != null && l.timeUpdated > inst, title: l.title }
+  }
+  return out
+}
