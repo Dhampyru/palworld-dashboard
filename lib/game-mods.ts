@@ -1427,7 +1427,15 @@ async function walkFilesAbs(dir: string): Promise<string[]> {
 
 // Copy each Target (relative to src) into dest, preserving the target's subpath.
 // Target "." / "" copies the whole package. Path-traversal guarded.
-async function copyTargets(src: string, targets: string[], dest: string): Promise<void> {
+// Copy a Workshop item's InstallRule Targets into a proxy dest. Two placement modes,
+// because the Workshop convention differs by mod type:
+//   - Lua targets are `./Scripts`, `./enabled.txt` — the folder name IS the layout
+//     (`ue4ss/Mods/<pkg>/Scripts/…`), so preserve it: `<src>/Scripts` → `<dest>/Scripts`.
+//   - PalSchema targets are `./PalSchema/` — a WRAPPER whose CONTENTS map to
+//     `PalSchema/mods/<pkg>/…` (like `AncientCoreDrops/raw/…`). Preserving the wrapper
+//     lands the payload one level too deep (`<pkg>/PalSchema/blueprints/…`) and
+//     PalSchema loads nothing — so `flatten` strips it: `<src>/PalSchema` → `<dest>`.
+async function copyTargets(src: string, targets: string[], dest: string, flatten = false): Promise<void> {
   await mkdir(dest, { recursive: true })
   for (const raw of targets) {
     const t = raw.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '')
@@ -1436,7 +1444,7 @@ async function copyTargets(src: string, targets: string[], dest: string): Promis
     } else {
       const from = join(src, t)
       if (from !== src && !from.startsWith(src + sep)) continue
-      await cp(from, join(dest, t), { recursive: true })
+      await cp(from, flatten ? dest : join(dest, t), { recursive: true })
     }
   }
 }
@@ -1518,6 +1526,7 @@ export async function installWorkshopPackageToProxy(
   const installed: { type: string; where: string }[] = []
   const skipped: string[] = []
   let luaInstalled = false
+  let palSchemaInstalled = false
   const pakRowFiles: string[] = [] // ~mods .pak files, for hybrid nesting
   for (const [type, targetSet] of byType) {
     const targets = [...targetSet]
@@ -1534,7 +1543,10 @@ export async function installWorkshopPackageToProxy(
       luaInstalled = true
       installed.push({ type, where: `ue4ss/Mods/${packageName}` })
     } else if (type === 'PalSchema') {
-      await copyTargets(contentDir, targets, join(proxy.palSchemaModsDir, packageName))
+      // flatten: strip the `./PalSchema/` wrapper so the payload lands directly under
+      // PalSchema/mods/<pkg>/ (else it's a level too deep and PalSchema loads nothing).
+      await copyTargets(contentDir, targets, join(proxy.palSchemaModsDir, packageName), true)
+      palSchemaInstalled = true
       installed.push({ type, where: `PalSchema/mods/${packageName}` })
     } else if (type === 'Paks') {
       pakRowFiles.push(...(await copyPaksFlat(contentDir, targets, proxy.pakModsDir)))
@@ -1567,8 +1579,12 @@ export async function installWorkshopPackageToProxy(
   const linkName = typeof info.ModName === 'string' ? info.ModName : packageName
   if (luaInstalled) {
     await setSteamMod(`ue4ss:${packageName}`, { itemId, name: linkName })
-  } else {
+  } else if (pakRowFiles.length) {
     for (const p of pakRowFiles) await setSteamMod(`pak:${p}`, { itemId, name: linkName })
+  } else if (palSchemaInstalled) {
+    // A PalSchema-only Workshop mod (no Lua row, no pak row). Record the source so
+    // the association isn't silently lost; keyed like a PalSchema submod.
+    await setSteamMod(`palschema:${packageName}`, { itemId, name: linkName })
   }
 
   return { packageName, modName: typeof info.ModName === 'string' ? info.ModName : null, installed, skipped }
