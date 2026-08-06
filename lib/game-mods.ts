@@ -919,6 +919,34 @@ export async function installUe4ssModArchive(
     }
   }
 
+  // 1b. PalSchema companion of a combined Lua+PalSchema mod. Such a mod ships its
+  //     PalSchema half under …/PalSchema/mods/<name>/… — sometimes real .json data,
+  //     sometimes just a `raw/keep.txt` placeholder whose only job is to create the
+  //     directory the Lua half writes generated JSON into at runtime (mod 3546). We
+  //     must NOT install it as a UE4SS mod (it's skipped in the anchor loop below),
+  //     but dropping it makes the Lua mod load and then fail on io.open. So extract
+  //     the whole subtree verbatim into the PalSchema mods dir — but only when
+  //     PalSchema itself is installed (otherwise there's no loader for it anyway).
+  const psAnchor = /(?:^|\/)PalSchema\/mods\/([^/]+)\/(.+)$/i
+  const psEntries = nonPak
+    .map((e) => ({ e, m: norm(e.entryName).match(psAnchor) }))
+    .filter((x): x is { e: AdmZip.IZipEntry; m: RegExpMatchArray } => x.m !== null)
+  if (psEntries.length) {
+    const psModsDir = join(modsDir, 'PalSchema', 'mods')
+    const psPresent = await stat(join(modsDir, 'PalSchema')).then(() => true).catch(() => false)
+    if (psPresent) {
+      for (const { e, m } of psEntries) {
+        const [, name, rel] = m
+        if (!isSafeModFolderName(name)) continue
+        const modRoot = join(psModsDir, name)
+        const dest = join(modRoot, rel)
+        if (dest !== modRoot && !dest.startsWith(modRoot + sep)) continue // path escape
+        await mkdir(dirname(dest), { recursive: true })
+        await writeFile(dest, e.getData())
+      }
+    }
+  }
+
   // 2. Group the mod content by folder. Anchored (…/ue4ss/Mods/<name>/…) first;
   //    else a single bare top-level folder.
   const mods = new Map<string, { rel: string; entry: AdmZip.IZipEntry }[]>()

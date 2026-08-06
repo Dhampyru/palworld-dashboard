@@ -15,7 +15,7 @@ import {
   unlinkNexusMod,
   type NexusFile,
 } from '@/lib/nexus'
-import { archiveHasPalSchemaData, detectModKind, installPakArchive, installUe4ssModArchive, setModGroup } from '@/lib/game-mods'
+import { detectModKind, installPakArchive, installUe4ssModArchive, setModGroup } from '@/lib/game-mods'
 import { installPalSchemaSubmod } from '@/lib/palschema'
 import { normalizeArchiveToZip } from '@/lib/archive'
 
@@ -122,15 +122,8 @@ async function installModFile(
     assocKey = `ue4ss:${r.name}` // the UE4SS mod row (its pak, if any, split to ~mods)
     // Hybrid: nest the split-out pak(s) under the UE4SS mod in the list.
     if (r.pakFiles.length) await setModGroup(assocKey, r.pakFiles.map((p) => `pak:${p}`))
-    // Combined Lua + PalSchema mod: install the PalSchema half too (best-effort;
-    // the Lua part is already in). An empty PalSchema placeholder is a no-op.
-    if (archiveHasPalSchemaData(buffer)) {
-      try {
-        await installPalSchemaSubmod(buffer)
-      } catch {
-        /* Lua part installed; PalSchema half optional */
-      }
-    }
+    // A combined Lua + PalSchema mod's PalSchema companion (real data OR a
+    // runtime-write placeholder) is now extracted by installUe4ssModArchive itself.
   }
 
   // Link it for update-watching (baseline = the installed version).
