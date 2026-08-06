@@ -71,9 +71,11 @@ Our installed mods don't carry Nexus IDs, so each needs a link to its Nexus mod:
 - Respect rate limits (~2500/day, 100/hour per key) — batch + cache, don't poll hot.
 
 ## 6. Install / update flow
-- **Premium:** `download_link.json` → fetch the archive server-side → run the
-  existing install pipeline (auto-detects pak / UE4SS / PalSchema; hybrid split;
-  game-root drop-in anchor). Record the archive MD5 for future auto-ID. One-click
+- **Premium:** `download_link.json` → fetch the archive server-side → normalize it
+  to a zip if needed (`.rar`/`.7z` via `unar` — `lib/archive.ts`) → run the existing
+  install pipeline (auto-detects pak / UE4SS / PalSchema; hybrid pak split; game-root
+  drop-in anchor; root-level and guts-at-root layouts; combined-mod PalSchema
+  companion — see §10 Phase 4). Record the archive MD5 for future auto-ID. One-click
   install AND update.
 - **Free:** show the mod + files + a deep link; the admin downloads it and uses the
   **existing upload** in "Install a Mod" (already handles all three types). Update =
@@ -164,6 +166,44 @@ Our installed mods don't carry Nexus IDs, so each needs a link to its Nexus mod:
     isn't connected (§9), and Panel Settings → Nexus gained the free-vs-Premium copy
     + the API-keys guide link.
   - **client-mod-sync manifest integration:** deferred (optional; not built).
+- **Phase 4 — BUILT + live-verified (2026-08-06):** robustness for the
+  unconventional archive layouts real Nexus authors ship, surfaced by a bulk
+  install where 5 mods failed. All fixes live in the shared install pipeline
+  (`lib/game-mods.ts`, `lib/archive.ts`), so they help the manual upload path too —
+  not just Nexus.
+  - **`.rar`/`.7z` support** (`d8c1029`): `lib/archive.ts normalizeArchiveToZip()`
+    sniffs the format by magic bytes and, for `.rar`/`.7z`, shells out to `unar`
+    (The Unarchiver, GPL — added to the runner image) to extract to a temp dir and
+    re-pack to an in-memory zip, so `detectModKind` + the installers stay
+    format-agnostic. `.zip` passes through untouched. `unar -D` (no-directory) is
+    required — lowercase `-d` FORCES a wrapper dir and corrupts the layout. A truly
+    unreadable download now gives an actionable "couldn't open" message instead of
+    the old "not a .zip" dead-end.
+  - **Detection + install-layout robustness** (`19fd011`): `detectModKind` now
+    requires REAL PalSchema data (a `.json` under `PalSchema/mods/`) — an empty
+    placeholder no longer hijacks a Lua mod into the PalSchema installer — and Lua
+    wins the tie, so a combined mod classifies as `ue4ss`. `installUe4ssModArchive`
+    recognizes root-level mod folders (one OR many — Nexus 4178 ships two) and
+    guts-at-root (`Scripts/main.lua` + `enabled.txt` with no wrapper, Nexus 4547)
+    named from a folder-name **hint** the route derives from the mod's Nexus name;
+    the internal `Scripts`/`dlls` dirs and the PalSchema framework are excluded from
+    mod-folder grouping.
+  - **Combined Lua+PalSchema companion** (`2697ede`): a combined mod (Nexus 3546)
+    ships both a UE4SS Lua mod AND a PalSchema companion under
+    `…/PalSchema/mods/<name>/` — sometimes real `.json`, sometimes just a
+    `raw/keep.txt` placeholder whose only job is to create the dir the Lua half
+    writes generated JSON into at runtime. The installer refused to treat PalSchema
+    as a UE4SS mod but was **dropping that subtree entirely**, so the Lua mod loaded
+    then errored on `io.open`. Now `installUe4ssModArchive` extracts any
+    `…/PalSchema/mods/<name>/…` subtree verbatim into the PalSchema mods dir
+    (path-escape checked, only when PalSchema is installed), covering real-data AND
+    placeholder companions. Replaced the earlier best-effort `installPalSchemaSubmod`
+    fallback in the route (which only fired on real `.json`).
+  - **Live-verified** against all five failing mods: 4178 (two Lua mods at root →
+    both installed), 3546 (combined — Lua + PalSchema companion, later confirmed
+    generating + PalSchema applying 2891 drop-table rows), 4547 (guts-at-root, named
+    from hint), 4647 (standard Lua), 481 (pure PalSchema, spaced folder name). Bulk
+    reinstall of the batch installed 5/5; game container untouched by the deploys.
 
 ## 11. Public-release notes
 - Ship inert without a key; document how any admin adds their own key
@@ -171,6 +211,9 @@ Our installed mods don't carry Nexus IDs, so each needs a link to its Nexus mod:
 - Be explicit in the UI/docs that **auto-download requires a Nexus Premium account**;
   free accounts get identify + update-notify + guided upload. Never imply the
   project circumvents the Premium gate.
+- `.rar`/`.7z` extraction needs `unar` in the image (Dockerfile runner stage). It's
+  in Debian main (GPL) and redistributable; without it the installer degrades to
+  zip-only and gives a clear "repack as .zip" message rather than failing opaquely.
 
 ## 12. Out of scope
 - Bypassing the Premium download gate / `nxm://` handling (desktop-only, ToS).
