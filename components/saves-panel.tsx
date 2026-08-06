@@ -1020,16 +1020,28 @@ export function SavesPanel() {
                       {fmtBytes(b.sizeBytes)} · {fmtDate(b.modifiedAt)}
                     </span>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setConfirmRestoreDash(b)}
-                    disabled={busy !== null}
-                    className="shrink-0 gap-1.5"
-                  >
-                    <RotateCcwIcon className="size-3.5" />
-                    <span className="hidden sm:inline">Restore</span>
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => download(b.file)}
+                      disabled={busy !== null}
+                      className="gap-1.5"
+                    >
+                      {busy === `dl:${b.file}` ? <Spinner className="size-3.5" /> : <DownloadIcon className="size-3.5" />}
+                      <span className="hidden sm:inline">Download</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setConfirmRestoreDash(b)}
+                      disabled={busy !== null}
+                      className="gap-1.5"
+                    >
+                      <RotateCcwIcon className="size-3.5" />
+                      <span className="hidden sm:inline">Restore</span>
+                    </Button>
+                  </div>
                 </div>
               ))
             ) : (

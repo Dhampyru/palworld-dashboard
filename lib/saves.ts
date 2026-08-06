@@ -312,11 +312,19 @@ export async function listDashboardDataBackups(): Promise<BackupInfo[]> {
 // The archive holds only the operational JSONs (secrets were excluded at backup), so
 // on-disk credentials (panel-auth/nexus/steam) are left untouched. Unlike a WORLD
 // restore this needs no server-down guard — it's dashboard config, not the live world.
+// Basename-only guard for a dashboard-data backup, strictly inside backupsDir().
+// Mirrors resolveBackupPath but for the dashboard-data-*.tar.gz family (download +
+// restore) — kept separate so a dashboard snapshot can never be fed to a WORLD restore.
+export function resolveDashboardBackupPath(file: unknown): string | null {
+  if (typeof file !== 'string' || !DASHBOARD_BACKUP_RE.test(file)) return null
+  if (file.includes('/') || file.includes('\\') || file.includes('..')) return null
+  if (file !== basename(file)) return null
+  return join(backupsDir(), file)
+}
+
 export async function restoreDashboardData(file: string): Promise<{ restored: string[]; preRestore: string | null }> {
-  if (!DASHBOARD_BACKUP_RE.test(file) || file.includes('/') || file.includes('\\') || file.includes('..')) {
-    throw new Error('Invalid dashboard backup file')
-  }
-  const src = join(backupsDir(), file)
+  const src = resolveDashboardBackupPath(file)
+  if (!src) throw new Error('Invalid dashboard backup file')
   await stat(src) // 404 if it's gone
   const pre = await backupDashboardData({ force: true, label: 'prerestore', keep: 14 })
   const dataDir = dashboardDataDir()

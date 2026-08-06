@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { classifyPassword, tierForClass } from '@/lib/access-tier'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { runWithInstance } from '@/lib/instances'
-import { resolveBackupPath } from '@/lib/saves'
+import { resolveBackupPath, resolveDashboardBackupPath } from '@/lib/saves'
 import { DEMO_MODE } from '@/lib/demo-mode'
 
 export const runtime = 'nodejs'
@@ -26,7 +26,9 @@ async function _GET(request: NextRequest) {
   }
 
   const file = request.nextUrl.searchParams.get('file')
-  const full = resolveBackupPath(file)
+  // World backups (palworld-save-*) and dashboard-data snapshots both live in the
+  // backups dir; either is downloadable, resolved with the same strict basename guard.
+  const full = resolveBackupPath(file) ?? resolveDashboardBackupPath(file)
   if (!full) return NextResponse.json({ error: 'Invalid backup file' }, { status: 400 })
 
   try {
