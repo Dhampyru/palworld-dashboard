@@ -57,6 +57,7 @@ type ModConfigFileMeta = {
   editable: boolean
   exists: boolean
   isTemplate: boolean
+  declared?: boolean
 }
 
 type Ue4ssSource = 'official' | 'experimental-palworld' | 'beta' | 'unknown'
@@ -1863,8 +1864,9 @@ export function GameModsPanel() {
             <SheetTitle>Configure {configMod?.name}</SheetTitle>
           </SheetHeader>
           <p className="text-xs text-muted-foreground">
-            Edit this mod&apos;s own config files. Changes take effect on the next server restart. Lua
-            configs are code and shown read-only.
+            Edit this mod&apos;s own config files. Changes take effect on the next server restart.
+            Edits are validated (JSON/INI/Lua) before saving. A ★ marks the file the mod&apos;s
+            own description names as its config.
           </p>
           {configFiles === null ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -1886,7 +1888,7 @@ export function GameModsPanel() {
                     }`}
                   >
                     {f.label}
-                    {!f.editable && f.exists && <span className="ml-1 opacity-60">(read-only)</span>}
+                    {f.declared && <span className="ml-1 opacity-60" title="Named as the config by the mod's description">★</span>}
                     {f.isTemplate && <span className="ml-1 opacity-60">(not created)</span>}
                   </button>
                 ))}
@@ -1929,9 +1931,9 @@ export function GameModsPanel() {
                         </Button>
                       )}
                     </div>
-                    {!active.editable && (
+                    {active.format === 'lua' && (
                       <p className="text-[11px] text-muted-foreground">
-                        Lua config — edit on disk; too risky to edit as text here.
+                        Lua config — syntax-checked on save (a broken edit is refused).
                       </p>
                     )}
                   </>

@@ -55,3 +55,4 @@ game-server/mods/
 
 # Local-only preview harness (never commit)
 docker-compose.preview.yml
+mod_data/

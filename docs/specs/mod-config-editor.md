@@ -1,6 +1,11 @@
 # Spec: Mod Config Editor
 
-Status: **BUILT + browser-verified (2026-08-06).** MVP shipped: `lib/mod-config.ts`
+Status: **BUILT + browser-verified (2026-08-06).** MVP + the description-driven **mod
+catalog** (§2a) + **editable, syntax-validated Lua** (§4). Catalog + Lua editing
+browser-verified via Playwright (7/7: ChestOrganizer's `config.lua` now editable with a
+★ declared marker; BaseRadiusImproved filtered to just its declared `Saved/config.json`)
+and API-verified (Lua save accepts valid, rejects broken syntax, file intact). Original
+MVP notes below. `lib/mod-config.ts`
 (discovery/read/validate/write/create-from-template) + `app/api/mod-config` (GET
 list/content, POST save/create; admin-only, instance-scoped) + a **Config** (sliders)
 button on each UE4SS mod row in the Mods tab opening a right-side editor Sheet
@@ -57,16 +62,29 @@ Two wrinkles that shape discovery:
   seed, not the live config — edit the live one; the template is a "reset to defaults"
   source.
 
-## 2a. Known limitation — discovery is heuristic, not description-driven
-Discovery scans **fixed locations for config-looking file extensions**; it does NOT read
-each mod's Nexus/Workshop description or its `README.md` to learn where that author
-actually put the config or which file is *settings* vs incidental *data*. Consequences
-seen live: (1) **false negatives** — a `config.lua`-only mod (AntiWaste, ChestOrganizer,
-Multi Party Pals Summon, ProgressiveCaptureMastery) has its real config in Lua, which is
-read-only here, so `hasConfig` is false and it shows no button; (2) **false positives** —
-BlueprintsdDropBoost ships generated `*.json` data at its root that reads as an "editable
-config." A future accuracy pass could parse the shipped `README.md`/description (several
-mods include one) to locate and label the real config. Not built.
+## 2a. Description-driven accuracy — the mod catalog (BUILT 2026-08-06)
+Heuristic-only discovery can't tell *settings* from incidental *data*, or know a mod's
+config is its `config.lua`. Fixed with an **optional operator-supplied mod catalog** of
+mod descriptions (`lib/mod-catalog.ts`):
+- **Join, no fuzzy matching.** The catalog is keyed `<source>_<id>` (`nexus_3546`,
+  `workshop_3765…`) — the same ids the dashboard already stores in `data/steam-mods.json`
+  / `data/nexus-mods.json`. An installed mod → its association id → its description.
+- **Parse.** `parseDeclaredConfigBasenames` pulls the config filenames a description
+  mentions (`config*`/`settings*`/`*config*` `.lua|.json|.ini`) — basenames, so we don't
+  parse the author's inconsistent path notation; matched against discovered files.
+- **Authoritative when it declares.** If the catalog names config file(s) that match a
+  discovered file, discovery shows **only** those (★-marked) — dropping the noise
+  (BaseRadiusImproved → just `Saved/config.json`, not the `Scripts/*.lua`; a mod's
+  generated `*.json` hidden). No catalog entry / no declaration / no match → the full
+  heuristic list, unchanged. Verified live: BaseRadiusImproved (only the Saved config),
+  ChestOrganizer (`config.lua` declared + editable), BlueprintsdDropBoost (its description
+  names no config → correct heuristic fallback).
+- **Clean-room.** Only the *reader* ships. The dataset is the operator's own mod list
+  (`mod_data/`, gitignored) mounted read-only at `MOD_DATA_DIR` (`docker-compose.yml`,
+  default `./mod_data`); absent/empty → catalog inactive, discovery stays heuristic. A
+  public build ships no data and each operator supplies their own to regain the accuracy.
+Residual: a mod whose description names no config still relies on the heuristic (e.g.
+BlueprintsdDropBoost — `config.lua` is editable, but its generated `*.json` also lists).
 
 ## 3. Discovery (`lib/mod-config.ts`, new)
 `listModConfigs(modName)` → the editable config file(s) for one UE4SS mod. Search, in
@@ -84,9 +102,11 @@ resolved path must stay under the mod dir or `Pal/Saved/<mod>/`.
 - **JSON / JSONC / INI → editable.** Validate on save: `JSON.parse` (JSON), a tolerant
   JSONC strip-then-parse (JSONC), and an INI round-trip (ini parse). **Reject an
   invalid edit with the parser error — never write a config that would break the mod.**
-- **Lua → read-only.** Show it (so the admin can see the defaults/logic) but do not
-  offer to save; editing executable Lua as text is how you brick a mod. A future phase
-  could allow it behind a scary confirm, but MVP does not.
+- **Lua → editable, syntax-validated (updated 2026-08-06).** Config-looking Lua
+  (`config.lua`/`settings*.lua`) is editable; on save it's parsed with `luaparse`
+  (PARSE-only, never executed — safe on an arbitrary config file) and a syntax error is
+  refused with its line/col, so a broken edit can't brick the mod. Non-config Lua source
+  is still never listed. (Was read-only in the first MVP; owner opted into editing.)
 - **Missing runtime config → offer "Create default".** For a known runtime location
   (`Pal/Saved/<mod>/`) that doesn't exist, create the dir (the volume's `Pal/Saved` is
   `0777`, so the dashboard uid 2001 can) and seed from the mod's `*.default.*`/

@@ -1,8 +1,10 @@
 import { readdir, readFile, stat, mkdir, copyFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
+import luaparse from 'luaparse'
 import { currentGameDir } from '@/lib/instances'
 import { isSafeModFolderName, resolveUe4ssModsDir } from '@/lib/game-mods'
 import { writeConfigFileWithBackup } from '@/lib/config-write'
+import { getDeclaredConfigBasenames } from '@/lib/mod-catalog'
 
 // Mod Config Editor (docs/specs/mod-config-editor.md). Discover an installed UE4SS
 // mod's OWN config file(s) and let an admin edit the data ones (JSON/JSONC/INI)
@@ -14,9 +16,10 @@ export type ModConfigFile = {
   id: string // stable label, also the client-facing handle (a relative path)
   label: string // shown in the UI
   format: ModConfigFormat
-  editable: boolean // false for Lua (code) and for not-yet-created templates
+  editable: boolean // false only for not-yet-created templates
   exists: boolean
   isTemplate: boolean // a *.default.* / *.example.* seed with no live sibling
+  declared?: boolean // named as the config by the operator's mod catalog (§2a)
   // server-only:
   absPath: string
   seedFrom?: string // for a template placeholder: the absolute template path to copy
@@ -119,15 +122,28 @@ export async function listModConfigs(modName: string): Promise<ModConfigFile[]> 
         id,
         label: id,
         format: fmt,
-        editable: fmt !== 'lua', // Lua is code — read-only
+        editable: true, // Lua config is editable too, but syntax-validated on save
         exists: true,
         isTemplate: false,
         absPath: join(dir, name),
       })
     }
   }
-  // Data configs first, Lua last; stable by label within each.
-  return out.sort((a, b) => Number(a.format === 'lua') - Number(b.format === 'lua') || a.label.localeCompare(b.label))
+  // Catalog (optional, §2a): when the operator's dataset names this mod's config file,
+  // trust it — flag the declared file(s) and, if any matched, show ONLY those (drops the
+  // heuristic noise: a mod's generated *.json, or an internal config.lua that isn't the
+  // one to edit). No dataset / no match → the full heuristic list, unchanged.
+  const declared = await getDeclaredConfigBasenames(modName)
+  for (const f of out) f.declared = declared.has(basename(f.id).toLowerCase())
+  const authoritative = out.some((f) => f.declared)
+  const list = authoritative ? out.filter((f) => f.declared) : out
+  // Declared first, then data-before-Lua, then stable by label.
+  return list.sort(
+    (a, b) =>
+      Number(!!b.declared) - Number(!!a.declared) ||
+      Number(a.format === 'lua') - Number(b.format === 'lua') ||
+      a.label.localeCompare(b.label),
+  )
 }
 
 // Whether a mod has anything worth showing the Config button for: an editable data
@@ -181,8 +197,14 @@ export function validateConfigContent(format: ModConfigFormat, content: string):
       if (t.includes('=')) continue
       throw new Error(`Invalid INI at line ${i + 1}: "${lines[i]}" (expected a [section] or key=value)`)
     }
-  } else {
-    throw new Error('This config is Lua code and is read-only here — edit it on disk.')
+  } else if (format === 'lua') {
+    // Editable, but syntax-checked so a broken edit can't brick the mod. luaparse only
+    // PARSES (never runs) the Lua, so an arbitrary config file is safe to validate.
+    try {
+      luaparse.parse(content, { comments: false })
+    } catch (e) {
+      throw new Error(`Invalid Lua: ${e instanceof Error ? e.message : 'syntax error'}`)
+    }
   }
   return content
 }

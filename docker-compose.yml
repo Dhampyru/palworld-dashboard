@@ -50,11 +50,19 @@ services:
       # Multi-instance (#7): the registry the resolver reads. A missing/unreadable
       # file cleanly yields the single env-derived `default` instance.
       PALWORLD_REGISTRY_PATH: ${PALWORLD_REGISTRY_PATH:-/srv/palworld/registry.json}
+      # OPTIONAL operator-supplied mod catalog (mod descriptions) for description-driven
+      # config discovery (docs/specs/mod-config-editor.md §2a). Absent/empty → discovery
+      # falls back to heuristics. NOT shipped — supply your own via the volume below.
+      MOD_DATA_DIR: /app/mod-data
     volumes:
       # Persist the panel credential store across container recreation.
       - palworld-dashboard-data:/app/data
       # Read-only view of the FPS ring maintained by the sampler sidecar.
       - palworld-fps-metrics:/metrics:ro
+      # OPTIONAL mod catalog (see MOD_DATA_DIR above). Default ./mod_data is the
+      # operator's own dataset (gitignored, not shipped); absent → Docker mounts an
+      # empty dir and the catalog is simply inactive.
+      - ${PALWORLD_MOD_DATA_HOST:-./mod_data}:/app/mod-data:ro
       # HOST path to the game server's data dir → the container's game dir. Set
       # PALWORLD_GAME_DIR_HOST in .env to your game dir; the default (./game) is
       # an empty placeholder so a fresh clone still starts.
