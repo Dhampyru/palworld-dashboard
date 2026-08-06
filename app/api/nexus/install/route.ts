@@ -15,7 +15,7 @@ import {
   unlinkNexusMod,
   type NexusFile,
 } from '@/lib/nexus'
-import { detectModKind, installPakArchive, installUe4ssModArchive, setModGroup } from '@/lib/game-mods'
+import { archiveHasPalSchemaData, detectModKind, installPakArchive, installUe4ssModArchive, setModGroup } from '@/lib/game-mods'
 import { installPalSchemaSubmod } from '@/lib/palschema'
 
 export const runtime = 'nodejs'
@@ -83,12 +83,21 @@ async function installModFile(
   const buffer = await downloadNexusFile(modId, fileId)
   const kind = detectModKind(buffer)
   if (!kind) {
-    throw new Error("Couldn't tell this mod's type — install it via the manual upload with the right tab.")
+    // A valid zip whose content we can't classify vs. a non-zip download are
+    // different problems — Nexus authors sometimes ship .rar/.7z, which we can't open.
+    const isZip = buffer.length > 4 && buffer[0] === 0x50 && buffer[1] === 0x4b
+    throw new Error(
+      isZip
+        ? "Couldn't identify this mod's type from its contents — install it via manual upload, choosing the right tab."
+        : "This download isn't a .zip (likely .rar or .7z, which the dashboard can't open). Repack it as a .zip, or install it via manual upload.",
+    )
   }
 
-  // Baseline = the version of the file we just installed.
+  // Baseline = the version of the file we just installed. Mod name → a folder-name
+  // hint so bare "guts at the root" Lua mods (no wrapper folder) can be named.
   const files = await getModFiles(modId)
   const version = files.find((f) => f.fileId === fileId)?.version ?? null
+  const nameHint = ((await getModInfo(modId))?.name ?? '').replace(/[^A-Za-z0-9_-]/g, '') || undefined
 
   let assocKey: string | null = null
   let installedName = ''
@@ -101,11 +110,20 @@ async function installModFile(
     installedName = paks.join(', ')
     assocKey = `pak:${paks[0]}`
   } else {
-    const r = await installUe4ssModArchive(buffer)
+    const r = await installUe4ssModArchive(buffer, nameHint)
     installedName = r.name
     assocKey = `ue4ss:${r.name}` // the UE4SS mod row (its pak, if any, split to ~mods)
     // Hybrid: nest the split-out pak(s) under the UE4SS mod in the list.
     if (r.pakFiles.length) await setModGroup(assocKey, r.pakFiles.map((p) => `pak:${p}`))
+    // Combined Lua + PalSchema mod: install the PalSchema half too (best-effort;
+    // the Lua part is already in). An empty PalSchema placeholder is a no-op.
+    if (archiveHasPalSchemaData(buffer)) {
+      try {
+        await installPalSchemaSubmod(buffer)
+      } catch {
+        /* Lua part installed; PalSchema half optional */
+      }
+    }
   }
 
   // Link it for update-watching (baseline = the installed version).

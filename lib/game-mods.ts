@@ -833,17 +833,37 @@ export function detectModKind(buffer: Buffer): DetectedKind {
     .getEntries()
     .filter((e) => !e.isDirectory)
     .map((e) => e.entryName.replace(/\\/g, '/'))
-  const hasPalSchemaPath = names.some((n) => /(^|\/)PalSchema\/mods\//i.test(n))
+  // PalSchema counts only when there's REAL data (a .json/.jsonc UNDER PalSchema/
+  // mods/), not just a placeholder folder. Some Lua mods ship an empty
+  // PalSchema/mods/<name>/raw/keep.txt scaffold; that must NOT hijack the Lua mod
+  // into the PalSchema installer (which then errors "no JSON content"). (mod 3546)
+  const hasPalSchemaData = names.some((n) => /(^|\/)PalSchema\/mods\/.+\.jsonc?$/i.test(n))
   const hasJson = names.some((n) => /\.jsonc?$/i.test(n))
   const hasLua = names.some((n) => {
     const l = n.toLowerCase()
     return l.includes('/scripts/') || l.startsWith('scripts/') || l.includes('/dlls/') || l.startsWith('dlls/') || l.endsWith('.lua') || l.endsWith('/main.dll')
   })
   const hasPak = names.some((n) => /\.(pak|utoc|ucas)$/i.test(n))
-  if (hasPalSchemaPath || (hasJson && !hasLua)) return 'palschema'
+  // Lua wins over a bare-json heuristic: a Lua mod may carry config.json/Json.lua at
+  // its root (mods 4547/3546). A zip that ALSO has real PalSchema data (a genuine
+  // combined mod) gets its PalSchema part installed too — see installModFile.
   if (hasLua) return 'ue4ss'
+  if (hasPalSchemaData || hasJson) return 'palschema'
   if (hasPak) return 'pak'
   return null
+}
+
+// Does this archive carry real PalSchema data (a .json/.jsonc under PalSchema/mods/)?
+// Lets the install pipeline place the PalSchema half of a combined Lua+PalSchema mod
+// even when detectModKind classified it 'ue4ss'.
+export function archiveHasPalSchemaData(buffer: Buffer): boolean {
+  try {
+    return new AdmZip(buffer)
+      .getEntries()
+      .some((e) => !e.isDirectory && /(^|\/)PalSchema\/mods\/.+\.jsonc?$/i.test(e.entryName.replace(/\\/g, '/')))
+  } catch {
+    return false
+  }
 }
 
 // Extract pak-family assets from a zip into ~mods (a plain pak mod delivered as a zip).
@@ -906,29 +926,74 @@ export async function installUe4ssModArchive(
   for (const e of nonPak) {
     const m = norm(e.entryName).match(anchor)
     if (!m) continue
+    // Skip the PalSchema framework dir (…/ue4ss/Mods/PalSchema/mods/…) and UE4SS's
+    // reserved `shared`: PalSchema DATA is installed by installPalSchemaSubmod, not
+    // as a UE4SS mod — otherwise a combined mod's PalSchema half becomes a junk
+    // "PalSchema" mod folder (mod 3546).
+    if (/^(palschema|shared)$/i.test(m[1])) continue
     const list = mods.get(m[1]) ?? []
     list.push({ rel: m[2], entry: e })
     mods.set(m[1], list)
   }
   if (mods.size === 0) {
-    const topSegs = new Set(nonPak.map((e) => norm(e.entryName).split('/')[0]))
-    if (topSegs.size === 1 && nonPak.some((e) => norm(e.entryName).includes('/'))) {
-      const top = [...topSegs][0]
-      const prefix = `${top}/`
-      const list: { rel: string; entry: AdmZip.IZipEntry }[] = []
-      for (const e of nonPak) {
-        const rel = norm(e.entryName).slice(prefix.length)
-        if (rel) list.push({ rel, entry: e })
+    // No `…/ue4ss/Mods/<name>/` anchor. Handle the common "dropped at the zip root"
+    // layouts Nexus authors ship:
+    const topFolders = [...new Set(nonPak.map((e) => norm(e.entryName).split('/')[0]))].filter((f) =>
+      nonPak.some((e) => norm(e.entryName).startsWith(`${f}/`)),
+    )
+    // A top-level folder is a UE4SS mod if it holds a Scripts/ dir, an enabled.txt,
+    // or a .lua / main.dll.
+    const looksLikeMod = (folder: string): boolean =>
+      nonPak.some((e) => {
+        const n = norm(e.entryName)
+        if (!n.startsWith(`${folder}/`)) return false
+        const rest = n.slice(folder.length + 1).toLowerCase()
+        return rest.startsWith('scripts/') || rest === 'enabled.txt' || rest.endsWith('.lua') || rest === 'main.dll' || rest.endsWith('/main.dll')
+      })
+    // `Scripts`/`dlls` are a mod's INTERNAL dirs, never a mod name — a top-level
+    // one means the mod's guts sit at the root (handled by gutsAtRoot below).
+    const modFolders = topFolders.filter((f) => !/^(scripts|dlls)$/i.test(f) && looksLikeMod(f))
+    // Guts-at-root: Scripts/ or enabled.txt or a bare .lua sit at the zip root with
+    // NO wrapper folder — the whole archive is one mod (named from the hint).
+    const gutsAtRoot = nonPak.some((e) => {
+      const l = norm(e.entryName).toLowerCase()
+      return l.startsWith('scripts/') || l === 'enabled.txt' || (!l.includes('/') && l.endsWith('.lua'))
+    })
+
+    if (modFolders.length) {
+      // One OR MANY mods at the root (mod 4178 ships two) — install each folder.
+      for (const folder of modFolders) {
+        const prefix = `${folder}/`
+        mods.set(
+          folder,
+          nonPak
+            .filter((e) => norm(e.entryName).startsWith(prefix))
+            .map((e) => ({ rel: norm(e.entryName).slice(prefix.length), entry: e }))
+            .filter((x) => x.rel),
+        )
       }
-      mods.set(top, list)
+    } else if (gutsAtRoot && nameHint) {
+      // Mod 4547: Scripts/main.lua + enabled.txt with no folder — name it from the hint.
+      mods.set(nameHint, nonPak.map((e) => ({ rel: norm(e.entryName), entry: e })))
+    } else if (topFolders.length === 1) {
+      // A single wrapper folder that isn't obviously a mod — use it as the mod name.
+      const top = topFolders[0]
+      const prefix = `${top}/`
+      mods.set(
+        top,
+        nonPak
+          .filter((e) => norm(e.entryName).startsWith(prefix))
+          .map((e) => ({ rel: norm(e.entryName).slice(prefix.length), entry: e }))
+          .filter((x) => x.rel),
+      )
     } else if (nameHint) {
-      const list: { rel: string; entry: AdmZip.IZipEntry }[] = []
-      for (const e of nonPak) list.push({ rel: norm(e.entryName), entry: e })
-      mods.set(nameHint, list)
+      mods.set(nameHint, nonPak.map((e) => ({ rel: norm(e.entryName), entry: e })))
     } else if (pakFiles.length) {
       return { name: pakFiles[0], pakFiles } // pak-only after all
     } else {
-      throw new Error('Could not find a UE4SS mod folder in the archive')
+      throw new Error(
+        'No UE4SS mod folder found in the archive. Expected a Mods/<name>/ or <name>/Scripts/ layout — if this is a bare mod (Scripts/main.lua at the root), install it via manual upload so it can be named.',
+      )
     }
   }
 
