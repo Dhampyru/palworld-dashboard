@@ -1,9 +1,13 @@
 # Spec: Client Mod-Sync & Onboarding
 
-Status: **proposed, not started.** A standalone feature — related to the mod
-management already built, but self-contained. Needs an explicit "start" before any
-code (per the repo's working style). Sibling to the numbered roadmap; slot after #7
-or whenever the owner chooses.
+Status: **Phase 1 BUILT (2026-07-27); Phase 2 RE-SCOPED 2026-08-06, not started.**
+The manifest + Invite tab ship (server info + per-pak client download + copy-invite).
+Phase 2 (the "let friends install it easily" automation) was re-scoped after the Steam
+Workshop feature, the Nexus/Steam compatibility work, and the mod catalog all landed —
+they change what a client actually needs (see §2a–§2c and the rewritten §7). Public-
+release goal (owner, 2026-08-06): *any* admin installs the dashboard, loads the mods
+they want (Nexus **or** Steam), and gets a one-click way to align their friends — the
+same ability the owner has. Still needs an explicit "start" before any code.
 
 ## 1. Goal
 Help the people joining a modded server get their client into a matching state with
@@ -26,6 +30,48 @@ makes the feature tractable:
 So the actual sync target is: *"make the client's `Pal/Content/Paks/~mods/` pak set
 match the server's client-required paks."* UE4SS/PalSchema/game versions are shown
 for **information/diagnosis**, not installed on the client.
+
+## 2a. Correction — the CLIENT-ONLY mod category (added 2026-08-06)
+§2's "clients almost only need paks" holds for mods the **server** runs (a gameplay
+mod's Lua/JSON stays server-side; the client just needs the matching pak). But it MISSES
+a second, large category the owner's real mod set surfaced: **client-only mods** — the
+cosmetic / UI / FOV / QoL mods that run **entirely on the client** and are **not on the
+server at all.** In the owner's `mod_data` catalog, **51 of 121 are "Client only,"** and
+**~78 need to be on a friend's client** once the "BOTH — server AND every client" mods
+are counted. Many are **UE4SS Lua** mods, so the client needs **UE4SS itself + the
+Lua/pak files**, not just paks. So the sync target is bigger than §2 assumed:
+- **Server-parity paks** (the "BOTH" set): match the server's `~mods` — Phase 1's list.
+- **Client-only mods** (the 51): the client runs them; needs a client UE4SS runtime +
+  the mod files. Never installed on the server (some are explicitly "DISABLED on servers"
+  / "author does NOT support servers" — putting them server-side would be wrong).
+
+## 2b. The client runtime problem (added 2026-08-06)
+A client has **two mutually-exclusive UE4SS runtimes** — the same conflict the server's
+`ModRegime` handles (only ONE is ever live):
+- **Steam Workshop UE4SS** — subscribe to the `UE4SSExperimentalPW` (`3625223587`) +
+  `PalSchema` (`3625280368`) framework Workshop items + each mod; Steam downloads to
+  `steamapps/workshop/content/1623730/` and the game's Workshop loader reads
+  `Info.json`/`InstallRule` (Pocketpair's PalworldModUploader format). Easiest onboarding
+  (subscribe, no directory work) — but ONLY for mods that are **on** the Workshop, so it
+  strands Nexus-only mods.
+- **Classic UE4SS** — `dwmapi.dll` proxy + `ue4ss/Mods/` + `mods.txt` + `~mods` paks:
+  manual, but **universal** (Nexus, Workshop, loose paks) and self-contained.
+
+**Clients don't have the dashboard's Steam/Nexus compatibility system**, so they must
+pick ONE runtime and can't mix. That's the friction the owner flagged.
+
+## 2c. Resolution — the DASHBOARD generates the client loadout (added 2026-08-06)
+The dashboard already reconciles Nexus + Steam mods into the classic proxy layout for
+the **server**; a "client loadout" is that same machinery packaged for a friend: **UE4SS
+(classic) + the selected client mods laid out in `ue4ss/Mods/` + `~mods`.** Delivered as
+a run-a-script OR extract-a-zip, so the friend drops it into their Palworld install —
+**no runtime choice, no Workshop subscription, no directory work**, and it covers Nexus +
+Workshop mods uniformly. Version parity is free (built from the same mods the server runs).
+This answers "who builds the directory loadout" — **the dashboard does**, because it's the
+only side with the compatibility knowledge. Classic (not Workshop) is the target: it's
+universal (handles Nexus-only mods) and self-contained (the loader ships in the loadout).
+A **Steam Workshop Collection** link is a nice secondary path for the Workshop-only subset
+(friend hits "subscribe all"), but can't be primary — it strands Nexus mods.
 
 ## 3. Server-side manifest
 The dashboard already reads everything needed (game REST `/v1/api/info`,
@@ -96,16 +142,20 @@ unsupported, points the user straight at the script — progressive enhancement,
 dead-ends. Building both is mostly additive; there's no real downside to shipping
 the pair.
 
-## 6. "Invite & align your friends" onboarding area
-A dashboard section that produces a **shareable setup packet** for the admin to send
-friends:
+## 6. "Invite & align your friends" onboarding area — the admin-facing control
+The dashboard section (extends the built Invite tab) is where the admin **curates what
+friends get** and hands out the packet:
+- **Client-mod selection**, seeded from the mod catalog (§2a): the ~78 client-relevant
+  mods (Client-only + BOTH) are auto-suggested from the catalog's `Install On` flags with
+  a keep/skip toggle, so the admin isn't hand-listing them. Server-only mods are excluded.
 - Server address + name + current game version (with "update via Steam if mismatched").
-- The client-required mod list + where/how to get them.
-- Plain-language install steps (drop paks into `…\Pal\Content\Paks\~mods\`).
-- The generated sync-script (or a link to it) + how to run it.
-- Copy-to-clipboard / shareable text so the admin can paste it into Discord.
+- **The generated client loadout** (§2c): a friend-facing **Classic UE4SS bundle**
+  (extract-a-zip) and/or the **sync-script**, plus a **Steam Workshop Collection** link for
+  the Workshop-only subset (secondary).
+- Plain-language steps + copy-to-clipboard shareable text for Discord.
 
-Essentially: turn the manifest into human-friendly onboarding the admin hands out.
+Essentially: the admin loads mods (Nexus/Steam) as they do today, the dashboard reconciles
+them, and this area turns that into a one-click friend loadout + human-readable onboarding.
 
 ## 7. Phasing
 - **Phase 1 — BUILT + browser-verified (2026-07-27):** `GET /api/manifest` (admin-only: server name +
@@ -116,10 +166,26 @@ Essentially: turn the manifest into human-friendly onboarding the admin hands ou
   copy-paste invite packet. No client automation yet — players see exactly what
   they need. (Owner browser-verified the tab render, connect-address field, per-pak
   download, and copy-invite.)
-- **Phase 2 (automation):** build the "check & install" flow driven by the manifest.
-  Per §5b, ship BOTH the FSA browser flow (happy path) and the standalone script
-  (fallback) over one shared backend. Prereqs: a curated non-admin manifest+pak
-  path (§8), and — for the FSA path — the dashboard reachable over public HTTPS.
+- **Phase 2 (RE-SCOPED 2026-08-06 — the client loadout):** deliver the owner's public-
+  release goal — any admin loads Nexus/Steam mods and gets a one-click friend loadout.
+  Concretely:
+  1. **Manifest v2** — extend §3's manifest beyond `~mods` paks to the full **client-only**
+     set (§2a): per mod, `{ name, kind (ue4ss|pak|palschema-pak), source (nexus|steam),
+     files[] with sha256, link }`, seeded from the catalog's client flags with admin
+     keep/skip curation (§6). Server-only mods excluded.
+  2. **Client-loadout generator** (§2c) — the dashboard assembles a **Classic UE4SS**
+     loadout for the selected mods: UE4SS (classic build) + `ue4ss/Mods/<mod>/` + `~mods`
+     paks, reusing the SERVER's already-built proxy-layout code. Output: an **extract-a-zip
+     bundle** (owner/private — redistributes files, so opt-in per §4) AND/OR a **sync-script**
+     that pulls from sources / admin hosting (public-safe default per §4).
+  3. **Delivery** — keep §5b's dual client (FSA browser happy-path + standalone script
+     fallback) for the *pak-sync* subset, and add the loadout bundle/script for the full
+     client-only set. A **Steam Workshop Collection** link covers the Workshop-only subset.
+  Prereqs: the curated non-admin manifest path (§8), and — for the FSA/bundle-from-dashboard
+  paths — the dashboard reachable over public HTTPS (or admin-hosted files).
+  **Test plan (owner, deferred):** once the owner adds their client-only mods to the box,
+  follow up to actually exercise the invite flow end-to-end (curate → generate loadout →
+  a friend installs from it → joins).
 
 ## 8. Security / access
 - Players aren't admins, so the manifest + any client-file access need a **separate,
@@ -137,7 +203,12 @@ Essentially: turn the manifest into human-friendly onboarding the admin hands ou
 - How curation is expressed (mark paks client-required in the Mods tab; default all).
 
 ## 10. Out of scope
-- Installing/patching the game itself (Steam's job).
-- Client-side UE4SS/PalSchema/Lua/JSON (server-side only unless a specific mod
-  demands client UE4SS — an advanced edge case, deferred).
-- Auto-updating from Nexus (auth-gated; same verdict as elsewhere).
+- Installing/patching the **game** itself (Steam's job).
+- ~~Client-side UE4SS/Lua~~ — **now IN scope** (§2a–§2c): client-only mods are commonly
+  UE4SS Lua, so the client loadout ships a client UE4SS runtime. (PalSchema stays
+  server-side — only its pak parts reach the client.)
+- Touching the friend's machine remotely — the deliverable is a bundle/script the friend
+  runs, not automation of their PC.
+- Reconciling a client that wants to ALSO run Steam Workshop mods alongside the Classic
+  bundle — pick one runtime (§2b); the bundle is meant to be their single mod source.
+- Auto-updating a friend's client from Nexus (auth-gated; same verdict as elsewhere).
