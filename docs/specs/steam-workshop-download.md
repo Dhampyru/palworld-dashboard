@@ -131,6 +131,22 @@ no regime change, no server-stop.
     integrity, not UI. A dedicated PalSchema-submod row/link is a possible follow-up.
 - **Hybrid nesting:** a mod that drops both a UE4SS part and pak(s) records a
   mod-group so its paks nest (collapsed) under the UE4SS row — same as Nexus hybrids.
+  - **Manual nest / un-nest (BUILT 2026-08-06).** Some mods ship their Lua and paks as
+    SEPARATE Nexus downloads (e.g. mod 98 "Less Restrictive Building"), so auto-grouping
+    can't associate them and the paks float with a redundant Nexus chip. A Mods-tab
+    affordance fixes it: a floating pak gets **"↳ nest under a mod"** (a parent picker); a
+    bundled child gets **"un-nest"**. `nestModUnder(child,parent|null)` +
+    `POST /api/game-mods/group` (admin) — display-only (`data/mod-groups.json`), no files
+    move. Nested rows already hide the Nexus chip, so nesting also drops the redundant
+    link. Browser-verified round-trip (un-nest → float → re-nest).
+  - **Wrapper-peel on install (BUILT 2026-08-06, `installUe4ssModArchive`).** A Nexus zip
+    whose top folder is a file-name WRAPPER around the real mod (mod 98:
+    `LessRestrictiveBuilding-98…/LessRestrictiveBuilding/Scripts/…`) used to install
+    double-nested (Scripts one level too deep → UE4SS never loaded the Lua). The no-anchor
+    detector now PEELS single non-mod wrapper dirs until it reaches the real mod folder;
+    `dirIsMod` requires a DIRECT `Scripts/`/`dlls/`/`enabled.txt`/`main.dll`/bare-`.lua`
+    (a nested `.lua` no longer qualifies an outer wrapper). Synthetic-verified against the
+    wrapper + single-mod + guts-at-root + multi-mod layouts.
 - **Update detection + one-click update (BUILT 2026-08-06).** Workshop exposes an update
   TIMESTAMP, not a version. The installed baseline is already on disk — SteamCMD records
   each item's `timeupdated` in `steamapps/workshop/appworkshop_1623730.acf` — so no

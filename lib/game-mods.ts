@@ -973,27 +973,52 @@ export async function installUe4ssModArchive(
     mods.set(m[1], list)
   }
   if (mods.size === 0) {
-    // No `…/ue4ss/Mods/<name>/` anchor. Handle the common "dropped at the zip root"
-    // layouts Nexus authors ship:
-    const topFolders = [...new Set(nonPak.map((e) => norm(e.entryName).split('/')[0]))].filter((f) =>
-      nonPak.some((e) => norm(e.entryName).startsWith(`${f}/`)),
-    )
-    // A top-level folder is a UE4SS mod if it holds a Scripts/ dir, an enabled.txt,
-    // or a .lua / main.dll.
-    const looksLikeMod = (folder: string): boolean =>
+    // `eff(e)` is the entry path with any peeled wrapper prefix removed (see the peel
+    // loop below); all detection runs against it. A top folder is a UE4SS mod if it holds
+    // a Scripts/ dir, an enabled.txt, or a .lua / main.dll.
+    let peel = ''
+    const eff = (e: AdmZip.IZipEntry) => norm(e.entryName).slice(peel.length)
+    // `folder` IS a UE4SS mod when it DIRECTLY holds the mod-defining pieces: a Scripts/
+    // (Lua) or dlls/ (C++) subdir, an enabled.txt, a main.dll, or a bare .lua at its root.
+    // The check must be DIRECT — a `.lua` deep inside a nested mod folder must NOT qualify
+    // the outer wrapper (that's what left mod 98 double-nested).
+    const dirIsMod = (folder: string): boolean =>
       nonPak.some((e) => {
-        const n = norm(e.entryName)
-        if (!n.startsWith(`${folder}/`)) return false
-        const rest = n.slice(folder.length + 1).toLowerCase()
-        return rest.startsWith('scripts/') || rest === 'enabled.txt' || rest.endsWith('.lua') || rest === 'main.dll' || rest.endsWith('/main.dll')
+        const r = eff(e)
+        if (!r.startsWith(`${folder}/`)) return false
+        const rest = r.slice(folder.length + 1).toLowerCase()
+        return (
+          rest.startsWith('scripts/') ||
+          rest.startsWith('dlls/') ||
+          rest === 'enabled.txt' ||
+          rest === 'main.dll' ||
+          (!rest.includes('/') && rest.endsWith('.lua'))
+        )
       })
-    // `Scripts`/`dlls` are a mod's INTERNAL dirs, never a mod name — a top-level
-    // one means the mod's guts sit at the root (handled by gutsAtRoot below).
-    const modFolders = topFolders.filter((f) => !/^(scripts|dlls)$/i.test(f) && looksLikeMod(f))
-    // Guts-at-root: Scripts/ or enabled.txt or a bare .lua sit at the zip root with
-    // NO wrapper folder — the whole archive is one mod (named from the hint).
+    // PEEL redundant wrapper folders: a single top-level dir that isn't itself a mod but
+    // holds the mod one level down — a Nexus file-name wrapper (mod 98 shipped
+    // `LessRestrictiveBuilding-98…/LessRestrictiveBuilding/Scripts/…`). Without this the
+    // wrapper became the mod name and the real mod was double-nested (Scripts one level
+    // too deep → UE4SS never loaded it). Stops as soon as the top IS the mod folder.
+    for (let guard = 0; guard < 8; guard++) {
+      const tops = [...new Set(nonPak.map((e) => eff(e).split('/')[0]).filter(Boolean))]
+      if (tops.length !== 1) break
+      const top = tops[0]
+      if (/^(scripts|dlls)$/i.test(top)) break // guts under this prefix — don't peel
+      if (dirIsMod(top)) break // `top` IS the mod folder — let detection name it
+      if (!nonPak.some((e) => eff(e).startsWith(`${top}/`))) break // nothing deeper
+      peel += `${top}/`
+    }
+
+    // Detection on the peeled paths — the common "dropped at the root" layouts.
+    const topFolders = [...new Set(nonPak.map((e) => eff(e).split('/')[0]))].filter(
+      (f) => f && nonPak.some((e) => eff(e).startsWith(`${f}/`)),
+    )
+    // `Scripts`/`dlls` are a mod's INTERNAL dirs, never a mod name.
+    const modFolders = topFolders.filter((f) => !/^(scripts|dlls)$/i.test(f) && dirIsMod(f))
+    // Guts-at-root: Scripts/ or enabled.txt or a bare .lua at the (peeled) root, no wrapper.
     const gutsAtRoot = nonPak.some((e) => {
-      const l = norm(e.entryName).toLowerCase()
+      const l = eff(e).toLowerCase()
       return l.startsWith('scripts/') || l === 'enabled.txt' || (!l.includes('/') && l.endsWith('.lua'))
     })
 
@@ -1004,14 +1029,14 @@ export async function installUe4ssModArchive(
         mods.set(
           folder,
           nonPak
-            .filter((e) => norm(e.entryName).startsWith(prefix))
-            .map((e) => ({ rel: norm(e.entryName).slice(prefix.length), entry: e }))
+            .filter((e) => eff(e).startsWith(prefix))
+            .map((e) => ({ rel: eff(e).slice(prefix.length), entry: e }))
             .filter((x) => x.rel),
         )
       }
     } else if (gutsAtRoot && nameHint) {
       // Mod 4547: Scripts/main.lua + enabled.txt with no folder — name it from the hint.
-      mods.set(nameHint, nonPak.map((e) => ({ rel: norm(e.entryName), entry: e })))
+      mods.set(nameHint, nonPak.map((e) => ({ rel: eff(e), entry: e })).filter((x) => x.rel))
     } else if (topFolders.length === 1) {
       // A single wrapper folder that isn't obviously a mod — use it as the mod name.
       const top = topFolders[0]
@@ -1019,12 +1044,12 @@ export async function installUe4ssModArchive(
       mods.set(
         top,
         nonPak
-          .filter((e) => norm(e.entryName).startsWith(prefix))
-          .map((e) => ({ rel: norm(e.entryName).slice(prefix.length), entry: e }))
+          .filter((e) => eff(e).startsWith(prefix))
+          .map((e) => ({ rel: eff(e).slice(prefix.length), entry: e }))
           .filter((x) => x.rel),
       )
     } else if (nameHint) {
-      mods.set(nameHint, nonPak.map((e) => ({ rel: norm(e.entryName), entry: e })))
+      mods.set(nameHint, nonPak.map((e) => ({ rel: eff(e), entry: e })).filter((x) => x.rel))
     } else if (pakFiles.length) {
       return { name: pakFiles[0], pakFiles } // pak-only after all
     } else {
@@ -1116,6 +1141,20 @@ export async function setModGroup(parent: string, children: string[]): Promise<v
 
 // Remove a modKey from the group map, whether it's a parent or a child (called on
 // mod removal so the map never points at a deleted mod).
+// Manually (re)parent a mod: detach it from any current group, then nest it under
+// `parentKey` (null/empty = just un-nest, back to a top-level row). Used by the Mods-tab
+// "nest under…" affordance for mods whose paks/Lua arrived as separate downloads and so
+// weren't auto-grouped.
+export async function nestModUnder(childKey: string, parentKey: string | null): Promise<void> {
+  await removeFromModGroups(childKey)
+  if (parentKey && parentKey !== childKey) {
+    const g = await readModGroups()
+    const children = g[parentKey] ?? []
+    if (!children.includes(childKey)) children.push(childKey)
+    await setModGroup(parentKey, children)
+  }
+}
+
 export async function removeFromModGroups(modKey: string): Promise<void> {
   const g = await readModGroups()
   let changed = false

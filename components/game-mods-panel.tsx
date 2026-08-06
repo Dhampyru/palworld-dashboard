@@ -144,6 +144,8 @@ export function GameModsPanel() {
   >({})
   const [steamBusy, setSteamBusy] = useState<string | null>(null)
   const [updatingAll, setUpdatingAll] = useState(false)
+  const [nestPickerFor, setNestPickerFor] = useState<string | null>(null)
+  const [nestBusy, setNestBusy] = useState<string | null>(null)
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
   const [linkUrl, setLinkUrl] = useState('')
   const [linkHaveVersion, setLinkHaveVersion] = useState('')
@@ -914,6 +916,31 @@ export function GameModsPanel() {
     [config, configMod, openConfig],
   )
 
+  // Manually (re)parent a mod: nest a floating pak under a chosen mod, or un-nest.
+  // Display-only grouping (data/mod-groups.json) — no files move, no restart needed.
+  const nestUnder = useCallback(
+    async (child: string, parent: string | null) => {
+      if (!config) return
+      setNestBusy(child)
+      try {
+        const res = await fetch('/api/game-mods/group', {
+          method: 'POST',
+          headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ child, parent }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? res.statusText)
+        toast.success(parent ? 'Nested under the parent mod.' : 'Un-nested.')
+        await load()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to group')
+      } finally {
+        setNestBusy(null)
+      }
+    },
+    [config, load],
+  )
+
   const confirmRemove = useCallback(async () => {
     if (!config || !removeTarget) return
     const target = removeTarget
@@ -1060,6 +1087,16 @@ export function GameModsPanel() {
     opts: { nested?: boolean; childrenNode?: React.ReactNode } = {},
   ) => {
     const { nested = false, childrenNode = null } = opts
+    // Candidate parents to nest a floating pak under (other top-level mods).
+    const nestCandidates =
+      !nested && mod.kind === 'pak'
+        ? (mods ?? []).filter(
+            (m) =>
+              m.id !== mod.id &&
+              (m.kind === 'ue4ss' || m.kind === 'pak') &&
+              !new Set(Object.values(modGroups).flat()).has(m.id),
+          )
+        : []
     const isDefault = isFrameworkDefault(mod.kind, mod.name)
     const description = frameworkDefaultDescription(mod.kind, mod.name)
     const inert = ue4ssDisabled && mod.kind === 'ue4ss' // can't load while the loader is off
@@ -1181,6 +1218,51 @@ export function GameModsPanel() {
                 + Link to Nexus
               </button>
             ))}
+          {/* Nest under a parent — un-nest a bundled child, or nest a floating pak under
+              a chosen mod (for mods whose paks arrived as a separate download). */}
+          {nested ? (
+            <button
+              onClick={() => nestUnder(mod.id, null)}
+              disabled={nestBusy === mod.id}
+              className="w-fit pl-0.5 text-[11px] text-muted-foreground hover:text-primary disabled:opacity-40"
+            >
+              un-nest
+            </button>
+          ) : (
+            mod.kind === 'pak' &&
+            nestCandidates.length > 0 &&
+            (nestPickerFor === mod.id ? (
+              <select
+                autoFocus
+                defaultValue=""
+                disabled={nestBusy === mod.id}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setNestPickerFor(null)
+                  if (v) nestUnder(mod.id, v)
+                }}
+                onBlur={() => setNestPickerFor(null)}
+                className="w-fit rounded border bg-background px-1 py-0.5 text-[11px]"
+              >
+                <option value="" disabled>
+                  nest under…
+                </option>
+                {nestCandidates.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <button
+                onClick={() => setNestPickerFor(mod.id)}
+                title="Group this pak under its parent mod (paks that came as a separate download)"
+                className="w-fit pl-0.5 text-[11px] text-muted-foreground hover:text-primary"
+              >
+                ↳ nest under a mod
+              </button>
+            ))
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-3">
           {mod.kind === 'ue4ss' && mod.hasConfig && (
