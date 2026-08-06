@@ -6,7 +6,7 @@
 
 import { mkdir, readFile, readdir, rm, stat, unlink } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -223,6 +223,77 @@ export async function createBackup(label?: string): Promise<BackupInfo> {
   }
   const s = await stat(dest) // confirm the archive exists before reporting success
   return { file, sizeBytes: s.size, modifiedAt: s.mtime.toISOString() }
+}
+
+// ── Dashboard-data backup ────────────────────────────────────────────────────
+// The dashboard's OWN state volume (/app/data: mod-config overrides, mod↔Nexus/
+// Steam links, backup/auto-restart schedules) is a NAMED docker volume — durable
+// across recreation but not backed up off itself. Snapshot it into the game-backups
+// dir, which lives on a DIFFERENT volume, so a lost data volume is recoverable.
+// SECRETS ARE EXCLUDED (repo rule: no secrets in plaintext backups): panel-auth.json
+// (password hash — re-seeded from PANEL_INITIAL_ADMIN_PASSWORD), nexus.json (API key
+// — re-enter), and steam/ (SteamCMD session token — re-login). Those are env-derived
+// or re-enterable; the operational config here is the hard-to-recreate part.
+const dashboardDataDir = () => resolve(process.env.DASHBOARD_DATA_DIR ?? './data')
+const DASHBOARD_BACKUP_RE = /^dashboard-data-.*\.tar\.gz$/
+
+async function listDashboardBackups(): Promise<{ file: string; mtimeMs: number }[]> {
+  let names: string[] = []
+  try {
+    names = (await readdir(backupsDir(), { withFileTypes: true }))
+      .filter((d) => d.isFile() && DASHBOARD_BACKUP_RE.test(d.name))
+      .map((d) => d.name)
+  } catch {
+    return []
+  }
+  const out = await Promise.all(
+    names.map(async (file) => ({ file, mtimeMs: (await stat(join(backupsDir(), file))).mtimeMs })),
+  )
+  return out.sort((a, b) => b.mtimeMs - a.mtimeMs) // newest first
+}
+
+// Snapshot /app/data (minus secrets). `force` bypasses the freshness gate; `maxAgeMs`
+// skips when the newest snapshot is younger than that (so the scheduler can call it
+// every tick but only actually back up ~daily). Prunes to the newest `keep`.
+export async function backupDashboardData(
+  opts: { keep?: number; maxAgeMs?: number; force?: boolean } = {},
+): Promise<{ file: string | null; skipped?: boolean }> {
+  const keep = opts.keep ?? 14
+  await mkdir(backupsDir(), { recursive: true })
+  const existing = await listDashboardBackups()
+  if (!opts.force && opts.maxAgeMs && existing[0] && Date.now() - existing[0].mtimeMs < opts.maxAgeMs) {
+    return { file: null, skipped: true }
+  }
+  const dataDir = dashboardDataDir()
+  const file = `dashboard-data-${backupStamp()}.tar.gz`
+  const dest = join(backupsDir(), file)
+  try {
+    await execFileP('tar', [
+      '--warning=no-file-changed',
+      '--warning=no-file-removed',
+      '--exclude',
+      'panel-auth.json', // password hash
+      '--exclude',
+      'nexus.json', // Nexus API key
+      '--exclude',
+      'steam', // SteamCMD session token
+      '--exclude',
+      '*.tmp', // half-written atomic temps
+      '-czf',
+      dest,
+      '-C',
+      dirname(dataDir),
+      basename(dataDir),
+    ])
+  } catch (err) {
+    if ((err as { code?: number }).code !== 1) throw err // tolerate "file changed" (1), fail on worse
+  }
+  // Prune old dashboard-data snapshots (these never appear in listBackups(), so the
+  // world-backup pruners never touch them — keep them trimmed here).
+  for (const b of (await listDashboardBackups()).slice(keep)) {
+    await rm(join(backupsDir(), b.file), { force: true }).catch(() => {})
+  }
+  return { file }
 }
 
 export async function deleteBackup(fullPath: string): Promise<void> {

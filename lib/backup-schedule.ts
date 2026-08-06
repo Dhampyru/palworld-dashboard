@@ -12,6 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import {
+  backupDashboardData,
   createBackup,
   deleteBackup,
   getServerMetrics,
@@ -228,6 +229,17 @@ export async function runSnapshotCleanup(
 let started = false
 
 async function tick(): Promise<void> {
+  // Global (not per-instance): snapshot the dashboard's own /app/data ~daily onto the
+  // durable game-backups volume, so a lost data volume is recoverable. Best-effort, and
+  // the first tick creates one immediately (no prior snapshot → not gated). Runs even
+  // when world auto-backup is disabled — it's the operator's config, not a world.
+  try {
+    await runWithInstance(DEFAULT_INSTANCE_ID, () =>
+      backupDashboardData({ maxAgeMs: 24 * 60 * 60_000, keep: 14 }),
+    )
+  } catch {
+    /* never let the dashboard-data backup break the tick */
+  }
   for (const inst of listInstances()) {
     const s = readSchedule(inst.id)
     // Retention for pre*/manual snapshots runs every tick, INDEPENDENT of the

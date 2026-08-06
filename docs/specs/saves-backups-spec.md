@@ -47,6 +47,22 @@ destructive and wants owner review before wiring.
 - `BACKUPS_DIR   = <game>/backups`
 - `GUS_INI       = <game>/Pal/Saved/Config/WindowsServer/GameUserSettings.ini`
 
+### Dashboard-data backup (BUILT 2026-08-06)
+The dashboard's OWN state (`/app/data`: mod-config overrides, mod↔Nexus/Steam links,
+backup + auto-restart schedules, mod-groups) is a named docker volume — durable across
+recreation, but nothing backs up the volume itself. `backupDashboardData()`
+(`lib/saves.ts`) tars it to `BACKUPS_DIR/dashboard-data-<stamp>.tar.gz` — a **different
+volume** (game), so a lost data volume is recoverable. Runs from the backup-scheduler
+`tick()` (global, once/tick), freshness-gated to ~daily (`maxAgeMs 24h`); the first tick
+after boot creates one immediately (no prior snapshot). Independent of the world
+auto-backup toggle — it's operator config, not a world. Own retention (`keep` newest 14);
+its `dashboard-data-*` files don't match `BACKUP_FILE_RE` so they never appear in the
+saves restore list nor get touched by the world-backup pruners. **Secrets excluded**
+(repo rule — no secrets in plaintext backups): `panel-auth.json` (re-seeded from
+`PANEL_INITIAL_ADMIN_PASSWORD`), `nexus.json` (API key — re-enter), `steam/` (SteamCMD
+session — re-login); `*.tmp` too. Verified live: first snapshot (2 KB) contains the 7
+operational JSONs and none of the excluded secrets.
+
 ### GET (BUILT — read-only)
 Returns `{ worlds: WorldInfo[], backups: BackupInfo[], activeWorldId }`.
 - `WorldInfo = { id, active, sizeBytes, modifiedAt, playerCount }`
