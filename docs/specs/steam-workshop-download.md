@@ -145,6 +145,12 @@ no regime change, no server-stop.
   acf heals). Mirrors the Nexus update chips. **No version string** (Workshop limitation);
   the chip shows dates. Verified live: aged an item's acf time → chip + `↑ update now` →
   re-download → `updateAvailable` cleared; browser 3/3.
+- **Update all (BUILT 2026-08-06).** A header **`↑ Update all (N)`** button (shown when
+  N>0) updates every mod with an update available — **both** Nexus (Premium) and Steam
+  (connected) — sequentially with one progress toast + a single refresh. It reuses the
+  per-mod update paths (`/api/nexus/install` update / `/api/steam/workshop` re-install),
+  so Steam IS covered, not just Nexus. Verified live: aged two items' acf → button reads
+  `(2)` → click → both re-downloaded → count cleared.
 
 ## 8. Public release
 - Ships **opt-in and dormant**. Documented that Workshop download needs the operator's

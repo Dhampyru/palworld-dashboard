@@ -143,6 +143,7 @@ export function GameModsPanel() {
     Record<string, { installedAt: number | null; latestAt: number; updateAvailable: boolean; title: string }>
   >({})
   const [steamBusy, setSteamBusy] = useState<string | null>(null)
+  const [updatingAll, setUpdatingAll] = useState(false)
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
   const [linkUrl, setLinkUrl] = useState('')
   const [linkHaveVersion, setLinkHaveVersion] = useState('')
@@ -619,6 +620,58 @@ export function GameModsPanel() {
     },
     [config, load, loadNexus],
   )
+
+  // Update every mod that has an update available — Nexus (Premium) and Steam Workshop
+  // (connected) both, sequentially (avoid races + rate limits), with one progress toast
+  // and a single refresh at the end. Restart to apply, like any mod change.
+  const updateAllMods = useCallback(async () => {
+    if (!config) return
+    const nexusKeys = nexusPremium
+      ? Object.entries(nexusMods).filter(([, v]) => v.updateAvailable).map(([k]) => k)
+      : []
+    const steamIds = steamConnected
+      ? Object.entries(steamUpdates).filter(([, v]) => v.updateAvailable).map(([id]) => id)
+      : []
+    const total = nexusKeys.length + steamIds.length
+    if (!total) return
+    setUpdatingAll(true)
+    let done = 0
+    let failed = 0
+    const toastId = toast.loading(`Updating 0/${total} mods…`)
+    const post = async (url: string, body: unknown) => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText)
+    }
+    for (const modKey of nexusKeys) {
+      try {
+        await post('/api/nexus/install', { action: 'update', modKey })
+        done++
+      } catch {
+        failed++
+      }
+      toast.loading(`Updating ${done + failed}/${total} mods…`, { id: toastId })
+    }
+    for (const itemId of steamIds) {
+      try {
+        await post('/api/steam/workshop', { url: itemId })
+        done++
+      } catch {
+        failed++
+      }
+      toast.loading(`Updating ${done + failed}/${total} mods…`, { id: toastId })
+    }
+    const msg = `Updated ${done}/${total}${failed ? `, ${failed} failed` : ''} — restart the server to apply.`
+    if (done) toast.success(msg, { id: toastId })
+    else toast.error(msg, { id: toastId })
+    await load()
+    await loadNexus()
+    await loadSteam()
+    setUpdatingAll(false)
+  }, [config, nexusMods, nexusPremium, steamUpdates, steamConnected, load, loadNexus, loadSteam])
 
   // Bulk install: paste many Nexus URLs; the server installs each sequentially,
   // auto-picking its MAIN file and returning a per-line result.
@@ -1195,6 +1248,11 @@ export function GameModsPanel() {
     return renderModRow(mod, { childrenNode })
   }
 
+  // Count of mods with an actionable update (Nexus needs Premium; Steam needs a session).
+  const updateCount =
+    (nexusPremium ? Object.values(nexusMods).filter((v) => v.updateAvailable).length : 0) +
+    (steamConnected ? Object.values(steamUpdates).filter((v) => v.updateAvailable).length : 0)
+
   return (
     <div className="flex flex-col gap-4 p-4">
       <div className="flex items-center justify-between">
@@ -1202,14 +1260,27 @@ export function GameModsPanel() {
           <PackageIcon className="size-5" />
           <h2 className="text-lg font-semibold">Mods</h2>
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm hover:bg-muted disabled:opacity-50"
-        >
-          <RefreshCwIcon className={loading ? 'size-3.5 animate-spin' : 'size-3.5'} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {updateCount > 0 && (
+            <button
+              onClick={updateAllMods}
+              disabled={updatingAll}
+              title="Update every Nexus/Workshop mod with an update available"
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/50 px-2 py-1 text-sm font-medium text-amber-600 hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
+            >
+              {updatingAll ? <Spinner className="size-3.5" /> : <span aria-hidden>↑</span>}
+              Update all ({updateCount})
+            </button>
+          )}
+          <button
+            onClick={load}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm hover:bg-muted disabled:opacity-50"
+          >
+            <RefreshCwIcon className={loading ? 'size-3.5 animate-spin' : 'size-3.5'} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       <p className="text-muted-foreground text-sm">
