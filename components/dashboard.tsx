@@ -8,7 +8,7 @@ import { ConsolePanel } from '@/components/console-panel'
 import { ChatPanel } from '@/components/chat-panel'
 import { HUDCornerFrame } from '@/components/hud-corner-frame'
 import { LiveMap } from '@/components/live-map'
-import { GameModsPanel } from '@/components/game-mods-panel'
+import { ModsWorkspace } from '@/components/mods-workspace'
 import { EnabledModsCard } from '@/components/enabled-mods-card'
 import { RestartAutomationChip } from '@/components/restart-automation-chip'
 import { WorldSettingsPanel } from '@/components/world-settings-panel'
@@ -169,11 +169,7 @@ export function Dashboard() {
                 <HUDCornerFrame position="bottom-right" size={44} className="hidden lg:block" />
 
                 <main className="flex min-h-0 flex-1 flex-col lg:overflow-hidden">
-                  <div className="flex-1 overflow-y-auto lg:overflow-hidden">
-                    <ScrollArea className="h-full lg:h-auto lg:flex-1">
-                      <GameModsPanel />
-                    </ScrollArea>
-                  </div>
+                  <ModsWorkspace />
                 </main>
               </div>
             </div>

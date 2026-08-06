@@ -180,8 +180,12 @@ them, and this area turns that into a one-click friend loadout + human-readable 
      catalog.ts readCatalog()` reads the operator dataset's `Install On` flag → `is
      ClientRelevant()` (74/121 on the owner's box) seeds keep/skip SUGGESTIONS.
      `app/api/client-mods` (admin-only: GET list+suggestions, POST addNexus/addSteam/
-     addCatalog/upload/setKeep/remove) + a **Client-only mods** section in the Invite tab
-     (`components/invite-panel.tsx`). The dashboard-data backup excludes the payload dir
+     addCatalog/**bulk**/upload/setKeep/remove) + a **Client mods** sub-tab of the Mods page
+     (`components/mods-workspace.tsx` splits Mods into **Server mods** = the original
+     `game-mods-panel` and **Client mods** = `components/client-mods-panel.tsx`; the main
+     `mods` tab is unchanged). The panel mirrors the server Mods tab's **single + bulk +
+     upload** install, shows Nexus-Premium / Steam-connected status hints, and the Invite
+     tab points at it. The dashboard-data backup excludes the payload dir
      (re-downloadable, large) but keeps the small index. Verified live: authenticated GET
      (74 suggestions) + upload→list→setKeep→remove round-trip, store self-cleans. **The
      loadout generator (below) that consumes this is the remaining piece — deferred until

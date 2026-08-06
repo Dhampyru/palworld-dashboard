@@ -228,6 +228,39 @@ export async function addClientModUpload(fileName: string, buffer: Buffer): Prom
   return rec
 }
 
+// Detect a URL's source by host. A bare id is ambiguous between Nexus and Steam, so bulk
+// requires real URLs (the single-add box handles a bare id via an explicit source).
+export function detectSource(input: string): 'nexus' | 'steam' | null {
+  const s = input.trim()
+  if (/nexusmods\.com/i.test(s)) return 'nexus'
+  if (/steamcommunity\.com|[?&]id=/i.test(s)) return 'steam'
+  return null
+}
+
+export type BulkResult = { input: string; ok: boolean; name?: string; kind?: string; error?: string }
+
+// Stage many mods from pasted Nexus/Steam URLs. Sequential — each is a CDN download +
+// disk write mutating the shared store; serial avoids races and is gentle on the Nexus
+// rate limit. One bad URL never aborts the rest.
+export async function addClientModsBulk(inputs: string[]): Promise<BulkResult[]> {
+  const clean = inputs.map((u) => u.trim()).filter(Boolean)
+  const results: BulkResult[] = []
+  for (const input of clean.slice(0, 50)) {
+    const src = detectSource(input)
+    if (!src) {
+      results.push({ input, ok: false, error: 'Not a recognized Nexus or Steam Workshop URL' })
+      continue
+    }
+    try {
+      const mod = src === 'nexus' ? await addClientModFromNexus(input) : await addClientModFromSteam(input)
+      results.push({ input, ok: true, name: mod.name, kind: mod.kind })
+    } catch (e) {
+      results.push({ input, ok: false, error: e instanceof Error ? e.message : 'Failed' })
+    }
+  }
+  return results
+}
+
 export async function setClientModKeep(id: string, keep: boolean): Promise<ClientMod> {
   const idx = await readIndex()
   const rec = idx[id]

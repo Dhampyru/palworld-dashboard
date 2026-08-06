@@ -8,6 +8,7 @@ import { readCatalog } from '@/lib/mod-catalog'
 import {
   addClientModFromNexus,
   addClientModFromSteam,
+  addClientModsBulk,
   addClientModUpload,
   listClientMods,
   removeClientMod,
@@ -111,7 +112,7 @@ async function _POST(request: NextRequest) {
   }
 
   // ── JSON: add-by-URL, keep toggle, remove ───────────────────────────────────
-  let body: { action?: string; url?: string; source?: string; id?: string; keep?: boolean }
+  let body: { action?: string; url?: string; urls?: string[]; source?: string; id?: string; keep?: boolean }
   try {
     body = (await request.json()) as typeof body
   } catch {
@@ -141,6 +142,18 @@ async function _POST(request: NextRequest) {
       case 'addSteam': {
         const mod = await addClientModFromSteam(String(body.url ?? ''))
         return NextResponse.json({ mod, note: `Staged ${mod.name} for clients.` })
+      }
+      case 'bulk': {
+        const urls = Array.isArray(body.urls) ? body.urls.map((u) => String(u)) : []
+        if (!urls.length) return NextResponse.json({ error: 'Paste at least one Nexus or Steam URL' }, { status: 400 })
+        if (urls.length > 50) return NextResponse.json({ error: 'Too many at once (limit 50)' }, { status: 400 })
+        const results = await addClientModsBulk(urls)
+        const staged = results.filter((r) => r.ok).length
+        return NextResponse.json({
+          results,
+          staged,
+          note: staged ? `Staged ${staged} client mod(s).` : 'Nothing staged.',
+        })
       }
       // Convenience for the catalog suggestion rows — route by the entry's source.
       case 'addCatalog': {
