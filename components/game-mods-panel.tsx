@@ -47,6 +47,7 @@ interface GameModEntry {
   kind: 'ue4ss' | 'pak' | 'paldefender'
   name: string
   enabled: boolean
+  hasConfig?: boolean
 }
 
 type ModConfigFileMeta = {
@@ -1034,7 +1035,7 @@ export function GameModsPanel() {
             ))}
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          {mod.kind === 'ue4ss' && (
+          {mod.kind === 'ue4ss' && mod.hasConfig && (
             <button
               onClick={() => openConfig(mod)}
               title={`Edit ${mod.name} config`}

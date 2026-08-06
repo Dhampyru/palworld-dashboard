@@ -57,6 +57,17 @@ Two wrinkles that shape discovery:
   seed, not the live config — edit the live one; the template is a "reset to defaults"
   source.
 
+## 2a. Known limitation — discovery is heuristic, not description-driven
+Discovery scans **fixed locations for config-looking file extensions**; it does NOT read
+each mod's Nexus/Workshop description or its `README.md` to learn where that author
+actually put the config or which file is *settings* vs incidental *data*. Consequences
+seen live: (1) **false negatives** — a `config.lua`-only mod (AntiWaste, ChestOrganizer,
+Multi Party Pals Summon, ProgressiveCaptureMastery) has its real config in Lua, which is
+read-only here, so `hasConfig` is false and it shows no button; (2) **false positives** —
+BlueprintsdDropBoost ships generated `*.json` data at its root that reads as an "editable
+config." A future accuracy pass could parse the shipped `README.md`/description (several
+mods include one) to locate and label the real config. Not built.
+
 ## 3. Discovery (`lib/mod-config.ts`, new)
 `listModConfigs(modName)` → the editable config file(s) for one UE4SS mod. Search, in
 priority order, and classify each hit:
@@ -97,8 +108,11 @@ says so and never implies a live reload.
   - `POST { mod, path, content }` → validate for the file's format → `writeConfigFile
     WithBackup`. `POST { mod, action: 'create', path }` → seed a missing runtime config.
   - Reject any `path` that escapes the mod dir / `Pal/Saved/<mod>/`.
-- **Mods tab:** a **Config** affordance on a UE4SS mod row when it has any discovered
-  config; opens a sheet/dialog listing its file(s). Editable files get a textarea +
+- **Mods tab:** a **Config** affordance on a UE4SS mod row **only when it has something
+  editable** — the mod-list route (`GET /api/game-mods`) computes `hasConfig` per ue4ss
+  mod via `modHasEditableConfig` (an editable data file OR a creatable template; read-only
+  Lua alone doesn't count) and the row hides the button when false, so it never opens an
+  empty sheet. Opens a sheet/dialog listing its file(s). Editable files get a textarea +
   format-validated **Save** (inline parser-error on failure) + a "restart to apply"
   note; Lua files render read-only with a "config is code — edit on disk" note; a
   missing runtime config shows **Create default**. Reuse `dropdown`/`sheet`/`alert-

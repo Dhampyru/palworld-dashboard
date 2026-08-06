@@ -18,6 +18,7 @@ import {
   readSteamMods,
   removeFromSteamMods,
 } from '@/lib/game-mods'
+import { modHasEditableConfig } from '@/lib/mod-config'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -44,6 +45,7 @@ interface ModEntry {
   kind: 'ue4ss' | 'pak' | 'paldefender'
   name: string
   enabled: boolean
+  hasConfig?: boolean // ue4ss: has an editable config file (drives the Config button)
 }
 
 // PalDefender as a built-in mod row: only when it's actually installed. Toggled
@@ -68,18 +70,23 @@ async function listUe4ssMods(): Promise<ModEntry[]> {
 
   const active = await readModsTxt(modsDir)
 
-  return entries
+  const names = entries
     // 'shared' is UE4SS's own shared runtime folder, not a mod. 'PalSchema' IS a
     // UE4SS mod, but it's managed by its dedicated PalSchema section (which owns
     // remove-with-backup + sub-mod semantics) — surfacing it here too would be a
     // confusing duplicate with a toggle/remove that bypass that section.
     .filter((name) => name.toLowerCase() !== 'shared' && name.toLowerCase() !== 'palschema')
-    .map((name) => ({
+  // hasConfig gates the Mods-tab Config button so it never appears for a mod with
+  // nothing editable. Discovery-only (readdir), so cheap per mod.
+  return Promise.all(
+    names.map(async (name) => ({
       id: `ue4ss:${name}`,
       kind: 'ue4ss' as const,
       name,
       enabled: active.get(name) ?? true, // present on disk, no explicit "0" → UE4SS treats as enabled
-    }))
+      hasConfig: await modHasEditableConfig(name),
+    })),
+  )
 }
 
 async function listPakMods(): Promise<ModEntry[]> {

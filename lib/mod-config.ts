@@ -130,6 +130,13 @@ export async function listModConfigs(modName: string): Promise<ModConfigFile[]> 
   return out.sort((a, b) => Number(a.format === 'lua') - Number(b.format === 'lua') || a.label.localeCompare(b.label))
 }
 
+// Whether a mod has anything worth showing the Config button for: an editable data
+// config (JSON/INI) or a creatable template. Read-only Lua alone doesn't count — there
+// is nothing to *edit*, so the button stays hidden (only pure discovery, no file reads).
+export async function modHasEditableConfig(modName: string): Promise<boolean> {
+  return (await listModConfigs(modName)).some((f) => f.editable || f.isTemplate)
+}
+
 // Look up one discovered file by its client handle. Re-discovering and matching by id
 // is the path guard — the client can only ever name a file discovery produced, so no
 // traversal outside the mod's own config roots is possible.
