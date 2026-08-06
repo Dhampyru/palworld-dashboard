@@ -9,8 +9,10 @@ import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
 import {
   ChevronDownIcon,
+  DownloadIcon,
   ExternalLinkIcon,
   MonitorIcon,
+  PackageIcon,
   PlusIcon,
   RefreshCwIcon,
   Trash2Icon,
@@ -76,6 +78,11 @@ export function ClientModsPanel() {
   // Account status — which auto-download sources are available (for the hints).
   const [nexus, setNexus] = useState<{ premium: boolean; name: string | null } | null>(null)
   const [steam, setSteam] = useState<{ connected: boolean; username: string | null } | null>(null)
+
+  // Loadout generation.
+  const [includeUe4ss, setIncludeUe4ss] = useState(true)
+  const [generating, setGenerating] = useState(false)
+  const [lastLoadout, setLastLoadout] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!config) return
@@ -240,6 +247,43 @@ export function ClientModsPanel() {
     [postJson, load],
   )
 
+  const generateLoadout = useCallback(async () => {
+    if (!config) return
+    setGenerating(true)
+    setLastLoadout(null)
+    try {
+      const res = await fetch(`/api/client-mods/loadout?ue4ss=${includeUe4ss ? '1' : '0'}`, {
+        headers: buildPalworldProxyHeaders(config),
+        cache: 'no-store',
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText)
+      const h = res.headers
+      const lua = h.get('X-Loadout-Lua') ?? '?'
+      const pak = h.get('X-Loadout-Pak') ?? '?'
+      const skipped = Number(h.get('X-Loadout-Skipped') ?? '0')
+      const sizeMb = (Number(h.get('X-Loadout-Size') ?? '0') / 1024 / 1024).toFixed(0)
+      const withUe4ss = h.get('X-Loadout-Ue4ss') === '1'
+      // Stream to a file. Large bundles (~1GB) buffer in the browser here — acceptable for
+      // an admin action; the download starts once the server finishes zipping.
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = res.headers.get('Content-Disposition')?.match(/filename="(.+?)"/)?.[1] ?? 'palworld-client-loadout.zip'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      const summary = `${lua} Lua + ${pak} pak · ${sizeMb} MB · UE4SS ${withUe4ss ? 'included' : 'excluded'}${skipped ? ` · ${skipped} skipped (see manifest.json)` : ''}`
+      setLastLoadout(summary)
+      toast.success(`Loadout built — ${summary}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Loadout generation failed')
+    } finally {
+      setGenerating(false)
+    }
+  }, [config, includeUe4ss])
+
   const filteredSuggestions = useMemo(() => {
     const f = filter.trim().toLowerCase()
     return f ? suggestions.filter((s) => s.name.toLowerCase().includes(f)) : suggestions
@@ -278,6 +322,45 @@ export function ClientModsPanel() {
           <span className="font-medium text-foreground">onboarding packet and client loadout</span> (Invite tab). The
           server&apos;s own mods live under the <span className="font-medium text-foreground">Server mods</span> tab.
         </p>
+      </div>
+
+      {/* Build friend loadout — the payoff action */}
+      <div className="flex flex-col gap-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+        <div className="flex items-center gap-2">
+          <PackageIcon className="size-4 text-primary" />
+          <span className="text-sm font-semibold">Build friend loadout</span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Packages the <span className="font-medium text-foreground">{keptCount}</span> kept mod{keptCount === 1 ? '' : 's'} into
+          a Classic-UE4SS bundle your friend extracts over their Palworld install — no Steam Workshop or Nexus needed on
+          their end. Includes an <span className="font-mono">INSTALL.txt</span> + <span className="font-mono">install.ps1</span>.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            size="sm"
+            className="h-9 gap-1.5 text-xs"
+            onClick={generateLoadout}
+            disabled={generating || keptCount === 0}
+          >
+            {generating ? <Spinner className="size-3.5" /> : <DownloadIcon className="size-3.5" />}
+            {generating ? 'Building…' : 'Generate & download'}
+          </Button>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={includeUe4ss}
+              onChange={(e) => setIncludeUe4ss(e.target.checked)}
+              className="size-4 accent-primary"
+            />
+            Include UE4SS loader (self-contained)
+          </label>
+        </div>
+        {generating && (
+          <p className="text-[11px] text-muted-foreground">
+            Assembling on the server — a large set can take a minute and download as a big .zip.
+          </p>
+        )}
+        {lastLoadout && <p className="text-[11px] text-emerald-600 dark:text-emerald-400">Last build: {lastLoadout}</p>}
       </div>
 
       {/* Account status hints */}

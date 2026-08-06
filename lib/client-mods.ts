@@ -100,6 +100,12 @@ export async function listClientMods(): Promise<ClientMod[]> {
   return Object.values(idx).sort((a, b) => a.name.localeCompare(b.name) || b.addedAt - a.addedAt)
 }
 
+// Absolute path to a staged mod's on-disk directory (holds payload.zip / payload.pak /
+// content/). For the loadout generator, which reads payloads to assemble a client bundle.
+export function clientModStorePath(id: string): string {
+  return join(STORE_DIR, id)
+}
+
 // Stage a Nexus mod for clients. Premium-gated (downloadNexusFile throws otherwise);
 // the route surfaces that. Downloads the newest MAIN file, normalizes it to a zip, and
 // records the detected kind — but never touches the server's mod dirs.

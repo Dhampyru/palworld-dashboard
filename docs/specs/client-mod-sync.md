@@ -1,7 +1,8 @@
 # Spec: Client Mod-Sync & Onboarding
 
-Status: **Phase 1 BUILT (2026-07-27); Phase 2 RE-SCOPED 2026-08-06 — client-mod INTAKE
-built, loadout generator deferred (see §7).**
+Status: **Phase 1 BUILT (2026-07-27); Phase 2 RE-SCOPED 2026-08-06 — client-mod INTAKE +
+LOADOUT GENERATOR built & tested (see §7). Remaining: manifest-v2 delivery variants
+(sync-script / FSA) + real in-game client verification.**
 The manifest + Invite tab ship (server info + per-pak client download + copy-invite).
 Phase 2 (the "let friends install it easily" automation) was re-scoped after the Steam
 Workshop feature, the Nexus/Steam compatibility work, and the mod catalog all landed —
@@ -194,11 +195,25 @@ them, and this area turns that into a one-click friend loadout + human-readable 
      set (§2a): per mod, `{ name, kind (ue4ss|pak|palschema-pak), source (nexus|steam),
      files[] with sha256, link }`, seeded from the catalog's client flags with admin
      keep/skip curation (§6). Server-only mods excluded.
-  2. **Client-loadout generator** (§2c) — the dashboard assembles a **Classic UE4SS**
-     loadout for the selected mods: UE4SS (classic build) + `ue4ss/Mods/<mod>/` + `~mods`
-     paks, reusing the SERVER's already-built proxy-layout code. Output: an **extract-a-zip
-     bundle** (owner/private — redistributes files, so opt-in per §4) AND/OR a **sync-script**
-     that pulls from sources / admin hosting (public-safe default per §4).
+  2. **Client-loadout generator (§2c) — BUILT + tested 2026-08-06.** `lib/client-loadout.ts`
+     `buildClientLoadout()` assembles a self-contained **Classic UE4SS** bundle from the KEPT
+     client mods: UE4SS loader + framework (`dwmapi.dll` + `ue4ss/` core + framework-default
+     Mods incl `shared`, copied from the live install) + each mod placed by kind — Lua →
+     `ue4ss/Mods/<name>` (+ generated `mods.txt`), pak → `~mods`, LogicMods → `LogicMods`,
+     PalSchema → client pak parts only (JSON is server-side), Steam Workshop → its `Info.json`
+     `InstallRule` (client rules). Plus `INSTALL.txt` + `install.ps1` (best-effort Palworld
+     locator/installer) + `manifest.json` (placed + skipped, with reasons). Assembled ON DISK
+     and zipped via the `zip` CLI (added to the image); archive payloads unpacked with `unar`
+     — so the ~1GB set never sits in a Node buffer; mod-folder names are collision-safe.
+     `GET /api/client-mods/loadout?ue4ss=0|1` streams the .zip (admin-only, counts in
+     headers); a **Build friend loadout** card in the Client-mods tab downloads it.
+     **Verified 2026-08-06 on the live 72-mod set:** a 954 MB bundle in ~34s — correct Classic
+     layout (dwmapi.dll, ue4ss core, `mods.txt` = enabled framework + 34 client Lua, 29 `~mods`
+     paks, 3 LogicMods), 61 placed / 11 skipped (5 server-side PalSchema, 2 unclassified, 4
+     needing a manual look — all recorded, none mis-placed), no path escapes, temp self-cleans.
+     **NOT verifiable here:** whether a friend's game actually LOADS them (no game client on this
+     box) — that's the real-client test. Output today is the **extract-a-zip bundle**; the
+     **sync-script** delivery variant (§5) is the remaining follow-up.
   3. **Delivery** — keep §5b's dual client (FSA browser happy-path + standalone script
      fallback) for the *pak-sync* subset, and add the loadout bundle/script for the full
      client-only set. A **Steam Workshop Collection** link covers the Workshop-only subset.
