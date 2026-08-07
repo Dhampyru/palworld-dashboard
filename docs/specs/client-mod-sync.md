@@ -201,7 +201,12 @@ them, and this area turns that into a one-click friend loadout + human-readable 
      Mods incl `shared`, copied from the live install) + each mod placed by kind — Lua →
      `ue4ss/Mods/<name>` (+ generated `mods.txt`), pak → `~mods`, LogicMods → `LogicMods`,
      PalSchema → client pak parts only (JSON is server-side), Steam Workshop → its `Info.json`
-     `InstallRule` (client rules). Plus `INSTALL.txt` + `install.ps1` (best-effort Palworld
+     `InstallRule` (client rules). **Server-parity paks folded in (2026-08-07):** the bundle
+     ALSO copies the server's live `~mods` + `LogicMods` paks (deduped against the staged
+     client paks; `.pak.disabled` auto-skipped) so a friend matches the server's content —
+     making the loadout the SINGLE complete download. The Invite tab's old per-pak
+     "Client-required mods" list (Phase 1, manifest `clientMods`) was REMOVED as redundant;
+     the invite text now points at the one bundle. Plus `INSTALL.txt` + `install.ps1` (best-effort Palworld
      locator/installer) + `manifest.json` (placed + skipped, with reasons). Assembled ON DISK
      and zipped via the `zip` CLI (added to the image); archive payloads unpacked with `unar`
      — so the ~1GB set never sits in a Node buffer; mod-folder names are collision-safe.

@@ -27,19 +27,12 @@ type Manifest = {
 
 const HOST_KEY = 'inviteConnectHost'
 
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / 1024 / 1024).toFixed(1)} MB`
-}
-
 export function InvitePanel() {
   const { config } = useServer()
   const [manifest, setManifest] = useState<Manifest | null>(null)
   const [loading, setLoading] = useState(false)
   const [host, setHost] = useState('')
   const [copied, setCopied] = useState(false)
-  const [downloading, setDownloading] = useState<string | null>(null)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Client-mod loadout builder (moved here from the Client-mods tab — this is the
@@ -96,33 +89,6 @@ export function InvitePanel() {
     }
   }
 
-  const downloadPak = useCallback(
-    async (file: string) => {
-      if (!config) return
-      setDownloading(file)
-      try {
-        const res = await fetch(`/api/game-mods/pak?name=${encodeURIComponent(file)}`, {
-          headers: buildPalworldProxyHeaders(config),
-          cache: 'no-store',
-        })
-        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText)
-        const url = URL.createObjectURL(await res.blob())
-        const a = document.createElement('a')
-        a.href = url
-        a.download = file
-        document.body.appendChild(a)
-        a.click()
-        a.remove()
-        URL.revokeObjectURL(url)
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Download failed')
-      } finally {
-        setDownloading(null)
-      }
-    },
-    [config],
-  )
-
   const generateLoadout = useCallback(async () => {
     if (!config) return
     setGenerating(true)
@@ -166,15 +132,9 @@ export function InvitePanel() {
       lines.push(`Palworld version: ${manifest.gameVersion} — update via Steam if yours differs (you can't join otherwise).`)
     }
     lines.push('')
-    if (manifest.clientMods.length === 0) {
-      lines.push('No client-side mods required — just connect.')
-    } else {
-      lines.push('Required mods — drop these .pak files into:')
-      lines.push('  …\\Steam\\steamapps\\common\\Palworld\\Pal\\Content\\Paks\\~mods\\')
-      for (const m of manifest.clientMods) lines.push(`  • ${m.file} (${formatBytes(m.sizeBytes)})`)
-      lines.push('')
-      lines.push('Ask me for the mod files (or the download links) — then relaunch Palworld.')
-    }
+    lines.push('Mods: ask me for the mod bundle (a single .zip). Close Palworld, extract it')
+    lines.push('into your Palworld install folder (…\\Steam\\steamapps\\common\\Palworld\\),')
+    lines.push('merging when asked, then relaunch. That’s everything you need to match the server.')
     return lines.join('\n')
   }, [manifest, host])
 
@@ -208,8 +168,9 @@ export function InvitePanel() {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        What a friend needs to join this modded server. Clients only need the game (matching version)
-        and the <span className="font-medium">pak</span> files below — UE4SS/PalSchema run server-side.
+        What a friend needs to join this modded server: the game (matching version) and the mod bundle you
+        generate below — one <span className="font-medium">.zip</span> with everything (client mods + the
+        server&apos;s paks + UE4SS + config).
       </p>
 
       {!manifest ? (
@@ -259,41 +220,6 @@ export function InvitePanel() {
             </div>
             <p className="text-xs text-muted-foreground">
               The dashboard can&apos;t detect your public IP — enter what friends use to connect. Saved locally.
-            </p>
-          </div>
-
-          {/* Client-required mods */}
-          <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium">Client-required mods ({manifest.clientMods.length})</span>
-            {manifest.clientMods.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                None — no pak mods installed. Friends just need the matching game version.
-              </p>
-            ) : (
-              <ul className="flex flex-col divide-y rounded-md border">
-                {manifest.clientMods.map((m) => (
-                  <li key={m.file} className="flex items-center justify-between gap-2 px-3 py-2">
-                    <div className="min-w-0">
-                      <div className="truncate font-mono text-sm">{m.file}</div>
-                      <div className="truncate text-xs text-muted-foreground">
-                        {formatBytes(m.sizeBytes)} · sha256 {m.sha256.slice(0, 12)}…
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => downloadPak(m.file)}
-                      disabled={downloading === m.file}
-                      title={`Download ${m.file} to hand out`}
-                      className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs hover:bg-primary/10 hover:text-primary disabled:opacity-40"
-                    >
-                      {downloading === m.file ? <Spinner className="size-3.5" /> : <DownloadIcon className="size-3.5" />}
-                      Download
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
-              Hybrid/pak mods must be on each player&apos;s client too — download them here and share the files.
             </p>
           </div>
 

@@ -38,6 +38,7 @@ export type LoadoutSummary = {
   skipped: LoadoutSkip[]
   totalKept: number
   configOverrides: number // admin config edits shipped into the bundle
+  parityPaks: number // server ~mods/LogicMods paks folded in for client-server parity
   sizeBytes: number
   generatedAt: string
 }
@@ -276,6 +277,7 @@ function installTxt(s: LoadoutSummary, includedUe4ss: boolean): string {
     '================================',
     `Generated: ${s.generatedAt}`,
     `Mods: ${s.mods.length} (${s.luaMods.length} UE4SS/Lua, ${s.pakFiles.length} pak, ${s.logicMods.length} LogicMods)`,
+    s.parityPaks ? `Includes ${s.parityPaks} server-parity pak(s) so your content matches the server.` : '',
     '',
     'WHAT THIS IS',
     '  The client-side mods for this server, laid out the way Palworld expects.',
@@ -489,8 +491,19 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       }
     }
 
+    // Server-parity paks: what the SERVER actually runs in ~mods / LogicMods. A joining
+    // client needs these to match the server's content, regardless of what was staged as a
+    // client mod — so fold them into the bundle (deduped against the staged client paks via
+    // seenPaks; `.pak.disabled` auto-skips since it fails PAK_RE). This makes the loadout the
+    // single complete download (replaces the Invite tab's per-pak list).
+    const liveMods = join(currentGameDir(), 'Pal', 'Content', 'Paks', '~mods')
+    const liveLogic = join(currentGameDir(), 'Pal', 'Content', 'Paks', 'LogicMods')
+    const parityMain = await collectPaks([liveMods], pakDir, seenPaks)
+    const parityLogic = await collectPaks([liveLogic], logicDir, seenPaks)
+    const parityPaks = parityMain.length + parityLogic.length
+
     // Authoritative pak/LogicMods counts — walk the actual output dirs (the per-mod
-    // `placed` accounting doesn't tally Workshop InstallRule paks into these arrays).
+    // `placed` accounting doesn't tally Workshop InstallRule / parity paks into these arrays).
     pakFiles.length = 0
     for (const f of await walkFiles(pakDir)) if (/\.pak$/i.test(f)) pakFiles.push(basename(f))
     for (const f of await walkFiles(logicDir)) if (/\.pak$/i.test(f)) logicMods.push(basename(f))
@@ -511,6 +524,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       skipped,
       totalKept: kept.length,
       configOverrides,
+      parityPaks,
       sizeBytes: 0,
       generatedAt,
     }
