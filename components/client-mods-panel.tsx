@@ -272,31 +272,26 @@ export function ClientModsPanel() {
     setGenerating(true)
     setLastLoadout(null)
     try {
+      // Step 1: generate the bundle server-side and get a one-time download token.
       const res = await fetch(`/api/client-mods/loadout?ue4ss=${includeUe4ss ? '1' : '0'}`, {
+        method: 'POST',
         headers: buildPalworldProxyHeaders(config),
         cache: 'no-store',
       })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText)
-      const h = res.headers
-      const lua = h.get('X-Loadout-Lua') ?? '?'
-      const pak = h.get('X-Loadout-Pak') ?? '?'
-      const skipped = Number(h.get('X-Loadout-Skipped') ?? '0')
-      const sizeMb = (Number(h.get('X-Loadout-Size') ?? '0') / 1024 / 1024).toFixed(0)
-      const withUe4ss = h.get('X-Loadout-Ue4ss') === '1'
-      // Stream to a file. Large bundles (~1GB) buffer in the browser here — acceptable for
-      // an admin action; the download starts once the server finishes zipping.
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? res.statusText)
+      const s = json.summary ?? {}
+      const sizeMb = (Number(s.sizeBytes ?? 0) / 1024 / 1024).toFixed(0)
+      const summary = `${s.luaMods?.length ?? '?'} Lua + ${s.pakFiles?.length ?? '?'} pak · ${sizeMb} MB · UE4SS ${s.includedUe4ss ? 'included' : 'excluded'}${s.configOverrides ? ` · ${s.configOverrides} config` : ''}${s.skipped?.length ? ` · ${s.skipped.length} skipped (see manifest.json)` : ''}`
+      setLastLoadout(summary)
+      // Step 2: stream to disk via the token URL — a plain navigation, no in-browser buffer.
       const a = document.createElement('a')
-      a.href = url
-      a.download = res.headers.get('Content-Disposition')?.match(/filename="(.+?)"/)?.[1] ?? 'palworld-client-loadout.zip'
+      a.href = `/api/client-mods/loadout?token=${encodeURIComponent(json.token)}`
+      a.download = json.fileName ?? 'palworld-client-loadout.zip'
       document.body.appendChild(a)
       a.click()
       a.remove()
-      URL.revokeObjectURL(url)
-      const summary = `${lua} Lua + ${pak} pak · ${sizeMb} MB · UE4SS ${withUe4ss ? 'included' : 'excluded'}${skipped ? ` · ${skipped} skipped (see manifest.json)` : ''}`
-      setLastLoadout(summary)
-      toast.success(`Loadout built — ${summary}`)
+      toast.success(`Loadout built — ${summary}. Download starting…`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Loadout generation failed')
     } finally {

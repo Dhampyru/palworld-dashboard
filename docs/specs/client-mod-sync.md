@@ -205,8 +205,17 @@ them, and this area turns that into a one-click friend loadout + human-readable 
      locator/installer) + `manifest.json` (placed + skipped, with reasons). Assembled ON DISK
      and zipped via the `zip` CLI (added to the image); archive payloads unpacked with `unar`
      — so the ~1GB set never sits in a Node buffer; mod-folder names are collision-safe.
-     `GET /api/client-mods/loadout?ue4ss=0|1` streams the .zip (admin-only, counts in
-     headers); a **Build friend loadout** card in the Client-mods tab downloads it.
+     **Download (streamed-token, 2026-08-07):** the bundle is ~1GB, so it must not buffer in
+     the browser. `POST /api/client-mods/loadout?ue4ss=0|1` (admin) generates + mints a
+     one-time, 256-bit, 15-min token (`lib/loadout-tokens.ts`) → `{token, fileName, summary}`;
+     the browser then NAVIGATES to `GET …/loadout?token=…`, which streams straight to disk
+     (the token IS the capability — no header, so a plain `<a download>` works), consumed on
+     first use with the temp dir cleaned up on stream close (abandoned tokens swept). A
+     header-authed `GET` (no token) is kept for programmatic/direct download. This is the
+     **public-release delivery path** — self-service, admin-gated, no host/shell access
+     (chosen over copying the zip to a host path, which assumes SSH). The **Build friend
+     loadout** card in the Client-mods tab runs POST→navigate. Verified: mint→stream (byte
+     count exact)→reuse 410→bad-token 400→temp self-cleans.
      **Verified 2026-08-06 on the live 72-mod set:** a 954 MB bundle in ~34s — correct Classic
      layout (dwmapi.dll, ue4ss core, `mods.txt` = enabled framework + 34 client Lua, 29 `~mods`
      paks, 3 LogicMods), 61 placed / 11 skipped (5 server-side PalSchema, 2 unclassified, 4
