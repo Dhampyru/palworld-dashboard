@@ -344,6 +344,17 @@ The admin mints a **share link**; a non-admin friend opens a PUBLIC page (the un
 - **Access model:** a share link is a BEARER capability — anyone with the URL can download
   (no login, no per-person check); the 192-bit token is the only gate (unguessable, not
   enumerable). Multi-use + persistent until revoked (revoke = instant 404 + deletes the zip).
+- **FSA "sync into ~mods" browser flow — BUILT + tested 2026-08-08** (§5.2). The zero-install
+  happy path (Chrome/Edge): the friend picks their Palworld folder once (`showDirectoryPicker`)
+  and each file streams straight to disk — no manual extract. Server-serves-individual-files
+  (not a client-side unzip), so a 500MB pak streams via `response.body.pipeTo(writable)` with
+  no big buffer. createShare now ALSO persists the extracted tree at `<game>/client-shares/
+  <token>/` (beside the zip). Public gated endpoints: `GET …/files` (manifest, counts one use)
+  + `GET …/file?path=` (one file, path-safe under the tree, no count). `components/share-
+  download.tsx` feature-detects and shows a Sync button (falls back to the .zip on Firefox/
+  Safari). Verified server-side: manifest 361 files (403 without pass), per-file CL matches
+  disk, traversal → 404, revoke deletes tree+zip. (Real browser folder-write is the owner's
+  client test.)
 - **Hardening — BUILT + tested 2026-08-08:** per-link **expiry** (Never/1d/7d/30d; a `sweep`
   on read deletes expired links + their zip), **max downloads** (`uses`/`maxUses`; a
   non-incrementing `checkShare` pre-check + `prepareDownload` counts the use; exhausted →

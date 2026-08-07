@@ -44,6 +44,7 @@ export type LoadoutSummary = {
 }
 export type LoadoutResult = {
   zipPath: string
+  bundleDir: string // the assembled tree (contains game/ + INSTALL.txt + …) — for FSA per-file serving
   fileName: string
   summary: LoadoutSummary
   cleanup: () => Promise<void>
@@ -648,7 +649,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     await execFileP('zip', ['-r', '-q', '-X', zipPath, '.'], { cwd: bundle, maxBuffer: 8 * 1024 * 1024, timeout: 600_000 })
     summary.sizeBytes = (await stat(zipPath)).size
 
-    return { zipPath, fileName, summary, cleanup }
+    return { zipPath, bundleDir: bundle, fileName, summary, cleanup }
   } catch (e) {
     await cleanup()
     throw e
