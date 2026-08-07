@@ -317,6 +317,26 @@ from the spreadsheet — NOT in any API. So "add a mod by URL" cannot (and must 
 - Prefer a token or share-link over fully open, and never expose anything but the
   curated `clientMods` set.
 
+### 8a. Friend share links — BUILT + tested 2026-08-08
+The admin mints a **share link**; a non-admin friend opens a PUBLIC page (the unguessable
+192-bit token IS the capability — no admin login) and downloads the bundle.
+- `lib/client-shares.ts`: `createShare` generates a bundle (`buildClientLoadout`) and
+  PERSISTS it — the .zip to `<game>/client-shares/<token>.zip` (game volume has space; the
+  data volume is small), metadata (server-info snapshot + connect + summary + zip path) to
+  `data/client-shares.json`. Persistent + multi-use + revocable (vs. the admin one-time
+  in-memory token). `listShares`/`getShare`/`deleteShare`/`resolveShareZip` (never exposes
+  the path; download resolves it server-side from the token).
+- Admin CRUD: `app/api/client-mods/share` POST create / GET list / DELETE revoke (admin).
+- PUBLIC (token-gated, no admin header): `GET /api/share/[token]` (curated metadata only) +
+  `GET /api/share/[token]/download` (streams the persisted zip; path server-resolved, no
+  traversal; multi-use). Public PAGE `app/share/[token]/page.tsx` — server component, NOT
+  behind the login gate (that's only in `app/page.tsx`): server identity + connect + one
+  Download button + install steps. Revoked/unknown token → 404.
+- Invite tab: a **Share links** section (create with optional label, list with copy + revoke;
+  full URL = `window.location.origin/share/<token>`). Caveats (§4): the dashboard becomes a
+  limited file host for the admin's own community (opt-in) and must be reachable by friends
+  (public HTTPS / LAN). FSA "write into ~mods" browser flow (§5.2) remains the follow-up.
+
 ## 9. Open decisions (for the owner)
 - Serve client paks from the dashboard (opt-in) vs. admin hosts them elsewhere.
 - ~~Standalone script vs. browser FSA~~ — RESOLVED: ship **both** (§5b), FSA as the

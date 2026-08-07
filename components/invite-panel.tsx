@@ -7,7 +7,19 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
-import { CheckIcon, CopyIcon, DownloadIcon, PackageIcon, RefreshCwIcon, UsersIcon } from 'lucide-react'
+import { CheckIcon, CopyIcon, DownloadIcon, Link2Icon, PackageIcon, RefreshCwIcon, Trash2Icon, UsersIcon } from 'lucide-react'
+
+type ShareInfo = {
+  token: string
+  fileName: string
+  sizeBytes: number
+  createdAt: number
+  label: string | null
+  serverName: string | null
+  gameVersion: string | null
+  connect: string | null
+  summary: { lua: number; pak: number; logic: number; parity: number; skipped: number; ue4ss: boolean }
+}
 
 // PATCH (not upstream): client mod-sync, Phase 1 (docs/specs/client-mod-sync.md).
 // A read-only "invite / server requirements" surface: shows what a joining client
@@ -42,6 +54,12 @@ export function InvitePanel() {
   const [generating, setGenerating] = useState(false)
   const [lastLoadout, setLastLoadout] = useState<string | null>(null)
 
+  // Friend share links.
+  const [shares, setShares] = useState<ShareInfo[]>([])
+  const [shareLabel, setShareLabel] = useState('')
+  const [creatingShare, setCreatingShare] = useState(false)
+  const [copiedToken, setCopiedToken] = useState<string | null>(null)
+
   useEffect(() => {
     try {
       const s = localStorage.getItem(HOST_KEY)
@@ -71,6 +89,13 @@ export function InvitePanel() {
         const j = await cm.json()
         setKeptCount((j.mods ?? []).filter((m: { keep?: boolean }) => m.keep).length)
       }
+    } catch {
+      /* ignore */
+    }
+    // Existing share links.
+    try {
+      const sh = await fetch('/api/client-mods/share', { headers: buildPalworldProxyHeaders(config), cache: 'no-store' })
+      if (sh.ok) setShares((await sh.json()).shares ?? [])
     } catch {
       /* ignore */
     }
@@ -137,6 +162,78 @@ export function InvitePanel() {
     lines.push('merging when asked, then relaunch. That’s everything you need to match the server.')
     return lines.join('\n')
   }, [manifest, host])
+
+  const shareUrl = useCallback((token: string) => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    return `${origin}/share/${token}`
+  }, [])
+
+  const createShare = useCallback(async () => {
+    if (!config) return
+    setCreatingShare(true)
+    try {
+      const res = await fetch('/api/client-mods/share', {
+        method: 'POST',
+        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          includeUe4ss,
+          serverName: manifest?.serverName ?? null,
+          gameVersion: manifest?.gameVersion ?? null,
+          port: manifest?.port,
+          connectHost: host.trim() || null,
+          label: shareLabel.trim() || null,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? res.statusText)
+      const share: ShareInfo = json.share
+      setShares((prev) => [share, ...prev])
+      setShareLabel('')
+      try {
+        await navigator.clipboard.writeText(shareUrl(share.token))
+        toast.success('Share link created & copied — send it to your friend')
+      } catch {
+        toast.success('Share link created — copy it from the list')
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create share link')
+    } finally {
+      setCreatingShare(false)
+    }
+  }, [config, includeUe4ss, manifest, host, shareLabel, shareUrl])
+
+  const revokeShare = useCallback(
+    async (token: string) => {
+      if (!config) return
+      if (!window.confirm('Revoke this link? Anyone with it will no longer be able to download.')) return
+      try {
+        const res = await fetch(`/api/client-mods/share?token=${encodeURIComponent(token)}`, {
+          method: 'DELETE',
+          headers: buildPalworldProxyHeaders(config),
+        })
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText)
+        setShares((prev) => prev.filter((s) => s.token !== token))
+        toast.success('Link revoked')
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Revoke failed')
+      }
+    },
+    [config],
+  )
+
+  const copyShareLink = useCallback(
+    async (token: string) => {
+      try {
+        await navigator.clipboard.writeText(shareUrl(token))
+        setCopiedToken(token)
+        setTimeout(() => setCopiedToken((t) => (t === token ? null : t)), 2000)
+        toast.success('Link copied')
+      } catch {
+        toast.error('Could not copy')
+      }
+    },
+    [shareUrl],
+  )
 
   const copyInvite = useCallback(async () => {
     try {
@@ -288,6 +385,68 @@ export function InvitePanel() {
           </p>
         )}
         {lastLoadout && <p className="text-[11px] text-emerald-600 dark:text-emerald-400">Last build: {lastLoadout}</p>}
+      </div>
+
+      {/* Share links — a friend-facing web download (no admin login for them) */}
+      <div className="flex flex-col gap-2 rounded-md border p-3">
+        <div className="flex items-center gap-2">
+          <Link2Icon className="size-4 text-primary" />
+          <span className="text-sm font-semibold">Share links</span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Instead of sending the .zip yourself, create a link a friend can open (no login) to see the server info and
+          download the bundle. Snapshots the current mods + connect address; revoke it anytime. Needs your dashboard
+          reachable by them (public URL / LAN).
+        </p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Input
+            placeholder="Label (optional, e.g. “for Discord”)"
+            value={shareLabel}
+            onChange={(e) => setShareLabel(e.target.value)}
+            className="sm:max-w-xs"
+          />
+          <Button
+            size="sm"
+            className="h-9 gap-1.5 text-xs"
+            onClick={createShare}
+            disabled={creatingShare || keptCount === 0}
+          >
+            {creatingShare ? <Spinner className="size-3.5" /> : <Link2Icon className="size-3.5" />}
+            {creatingShare ? 'Building…' : 'Create share link'}
+          </Button>
+        </div>
+        {creatingShare && (
+          <p className="text-[11px] text-muted-foreground">Building the bundle for the link — a large set takes a minute.</p>
+        )}
+        {shares.length > 0 && (
+          <ul className="flex flex-col divide-y rounded-md border">
+            {shares.map((s) => (
+              <li key={s.token} className="flex items-center justify-between gap-2 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{s.label ?? 'Share link'}</div>
+                  <div className="truncate font-mono text-[11px] text-muted-foreground">{shareUrl(s.token)}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <button
+                    onClick={() => copyShareLink(s.token)}
+                    title="Copy link"
+                    className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-primary/10 hover:text-primary"
+                  >
+                    {copiedToken === s.token ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+                    Copy
+                  </button>
+                  <button
+                    onClick={() => revokeShare(s.token)}
+                    title="Revoke link"
+                    className="inline-flex items-center rounded-md border px-2 py-1 text-xs text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <Trash2Icon className="size-3.5" />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   )
