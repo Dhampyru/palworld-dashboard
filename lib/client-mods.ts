@@ -108,9 +108,13 @@ function pickFile(files: NexusFile[]): NexusFile | null {
 // client = Lua + pak + LogicMods; PalSchema/UE4SS = server-side.
 const SERVER_SIDE_WARN =
   'PalSchema/server-side mod — it runs on the server, not the client, so there are no client files and it won’t ship in the loadout.'
+const FOMOD_WARN =
+  'FOMOD installer — it has multiple variant options; pick one and stage it manually (it can’t be auto-shipped in a client loadout).'
 
 // Classify from a list of archive entry names (shared by the buffer + on-disk paths).
 function classifyNames(names: string[], kind: ClientModKind): string | null {
+  // FOMOD (variant installer) wins over the kind short-circuit — it needs a manual choice.
+  if (names.some((n) => /(^|\/)fomod\/moduleconfig\.xml$/i.test(n))) return FOMOD_WARN
   if (kind === 'ue4ss' || kind === 'pak') return null // Lua or a pak → client-installable
   if (names.some((n) => /\.(pak|utoc|ucas)$/i.test(n))) return null // a pak (even alongside PalSchema) → client gets it
   if (

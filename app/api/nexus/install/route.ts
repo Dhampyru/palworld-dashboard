@@ -17,7 +17,7 @@ import {
 } from '@/lib/nexus'
 import { detectModKind, installPakArchive, installUe4ssModArchive, setModGroup } from '@/lib/game-mods'
 import { installPalSchemaSubmod } from '@/lib/palschema'
-import { normalizeArchiveToZip } from '@/lib/archive'
+import { FOMOD_MESSAGE, isFomodArchive, normalizeArchiveToZip } from '@/lib/archive'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -94,6 +94,8 @@ async function installModFile(
       "Couldn't open this download as an archive — it may be corrupt, password-protected, or an unsupported format. Try installing it via manual upload.",
     )
   }
+  // FOMOD installer (variant options) — can't be auto-installed; needs a manual choice.
+  if (isFomodArchive(buffer)) throw new Error(FOMOD_MESSAGE)
   const kind = detectModKind(buffer)
   if (!kind) {
     throw new Error(
@@ -209,7 +211,12 @@ async function _POST(request: NextRequest) {
           const r = await installModFile(modId, mains[0].fileId)
           results.push({ input, ok: true, name: r.name, version: r.version, kind: r.kind })
         } catch (e) {
-          results.push({ input, ok: false, error: e instanceof Error ? e.message : 'Install failed' })
+          const msg = e instanceof Error ? e.message : 'Install failed'
+          if (msg === FOMOD_MESSAGE) {
+            results.push({ input, ok: false, needsChoice: true, error: 'FOMOD installer — install via the single-URL box and pick a variant.' })
+          } else {
+            results.push({ input, ok: false, error: msg })
+          }
         }
       }
       const installed = results.filter((r) => r.ok).length
@@ -258,9 +265,8 @@ async function _POST(request: NextRequest) {
       note: `Installed ${r.name} (${r.kind}) from Nexus — restart the server to apply.`,
     })
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Nexus install failed' },
-      { status: 500 },
-    )
+    const msg = error instanceof Error ? error.message : 'Nexus install failed'
+    const fomod = msg === FOMOD_MESSAGE
+    return NextResponse.json({ error: msg, fomod: fomod || undefined }, { status: fomod ? 400 : 500 })
   }
 }

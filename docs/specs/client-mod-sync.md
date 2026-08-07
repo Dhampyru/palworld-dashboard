@@ -252,6 +252,17 @@ them, and this area turns that into a one-click friend loadout + human-readable 
      **skipped** (was silently dropped). Verified: Elemental Passive Icons (Steam 3777233424,
      PalSchema-only) → warn fires; moved it OFF the client set and installed it as a **server**
      PalSchema mod (`PalSchema/mods/ElementalPassiveIcons`).
+  2c. **FOMOD contingency — BUILT + tested 2026-08-07.** A **FOMOD** (Nexus installer whose
+     `fomod/ModuleConfig.xml` declares mutually-exclusive variant options — e.g. Wing Pack
+     Gliding's Unchanged/Zero/Double) has a SINGLE MAIN file, so the bulk "multiple MAIN →
+     manual" guard missed it, and its variant files map to no mod-folder layout → it can't be
+     auto-installed. `lib/archive.ts isFomodArchive(buffer)` + `FOMOD_MESSAGE` detect it (on
+     the normalized zip). Wired everywhere a mod lands: **Nexus single install** → 400 +
+     `fomod:true`; **Nexus bulk** → per-item `needsChoice` (route to the single-URL box, like
+     the multi-MAIN case); **manual upload** → 400; **client add/backfill** → a FOMOD-specific
+     `warn` (via `classifyNames`). Verified on mod 4126 (all three paths flag it; nothing
+     installs). Follow-up (not built): parse `ModuleConfig.xml` and offer a variant PICKER
+     that installs the chosen file to its declared destination.
 
 ## 7a. Planned (not built): catalog-entry-on-add
 The operator's `mod_data` catalog is generated OUTSIDE the dashboard by `fetch_all_mods.py`

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { mkdir, writeFile, rename, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import AdmZip from 'adm-zip'
-import { normalizeArchiveToZip } from '@/lib/archive'
+import { FOMOD_MESSAGE, isFomodArchive, normalizeArchiveToZip } from '@/lib/archive'
 import { classifyPassword, tierForClass } from '@/lib/access-tier'
 import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { DEMO_MODE } from '@/lib/demo-mode'
@@ -153,12 +153,15 @@ async function _POST(request: NextRequest) {
 
     // Accept .rar/.7z uploads too — normalize to a zip buffer, then extract as
     // usual. A .zip passes through unchanged.
-    let zip: AdmZip
+    let normalized: Buffer
     try {
-      zip = new AdmZip(await normalizeArchiveToZip(buffer))
+      normalized = await normalizeArchiveToZip(buffer)
     } catch {
       return NextResponse.json({ error: 'Not a valid archive (expected .zip, .rar or .7z)' }, { status: 400 })
     }
+    // FOMOD installer (variant options) — can't be auto-installed; needs a manual choice.
+    if (isFomodArchive(normalized)) return NextResponse.json({ error: FOMOD_MESSAGE, fomod: true }, { status: 400 })
+    const zip = new AdmZip(normalized)
     const entries = zip.getEntries()
 
     // Pass 1: validate every entry BEFORE writing anything. Any single bad

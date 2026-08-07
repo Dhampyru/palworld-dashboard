@@ -26,6 +26,24 @@ export function archiveFormat(buffer: Buffer): ArchiveFormat {
   return 'unknown'
 }
 
+// A FOMOD is a Nexus installer archive: a single download whose `fomod/ModuleConfig.xml`
+// declares MULTIPLE mutually-exclusive variant options (SelectExactlyOne). It has one MAIN
+// file, so the bulk "multiple MAIN files → manual" guard misses it, and its variant files
+// don't map to any mod-folder layout — so it can't be auto-installed. Detect it (on a
+// normalized zip buffer) and route it to a manual single-install + variant choice.
+export const FOMOD_MESSAGE =
+  'This is a FOMOD installer with multiple variant options — it can’t be auto-installed. Download it, pick a variant, and upload the chosen files (or place them manually).'
+
+export function isFomodArchive(zipBuffer: Buffer): boolean {
+  try {
+    return new AdmZip(zipBuffer)
+      .getEntries()
+      .some((e) => /(^|\/)fomod\/moduleconfig\.xml$/i.test(e.entryName.replace(/\\/g, '/')))
+  } catch {
+    return false
+  }
+}
+
 // Normalize any supported archive to a ZIP buffer so the existing adm-zip based
 // install pipeline (detectModKind / installUe4ssModArchive / installPakArchive /
 // installPalSchemaSubmod) handles .rar and .7z without touching any of it.
