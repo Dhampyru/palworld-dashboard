@@ -78,7 +78,10 @@ export function ShareDownload({
     try {
       dir = await picker({ mode: 'readwrite' })
     } catch {
-      return // user cancelled the folder picker
+      // Cancelled — or Chrome blocked the folder ("contains system files"), which happens
+      // when Palworld is under Program Files. Point them at the reliable path.
+      setError('No folder selected. If Windows said it "contains system files" (Palworld in Program Files), Chrome can’t write there — use the Download button below instead.')
+      return
     }
     setSyncing(true)
     setProgress(null)
@@ -129,35 +132,32 @@ export function ShareDownload({
           className="rounded-md border bg-muted/20 px-3 py-2 text-sm"
         />
       )}
-      {hasFSA && (
-        <button
-          onClick={syncToFolder}
-          disabled={disabled}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
-        >
-          {syncing
-            ? progress
-              ? `Syncing… ${progress.done}/${progress.total}`
-              : 'Preparing…'
-            : '⚡ Sync into my Palworld folder'}
-        </button>
-      )}
       <button
         onClick={download}
         disabled={disabled}
-        className={
-          hasFSA
-            ? 'flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-60'
-            : 'flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60'
-        }
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
       >
         {busy ? 'Checking…' : `⬇ Download the .zip (${sizeLabel})`}
       </button>
       {hasFSA && (
-        <p className="text-center text-[11px] text-muted-foreground">
-          “Sync” writes the mods straight into your game folder (Chrome/Edge). Download gives you the .zip to run
-          install.bat.
-        </p>
+        <div className="mt-1 flex flex-col gap-1">
+          <button
+            onClick={syncToFolder}
+            disabled={disabled}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-60"
+          >
+            {syncing
+              ? progress
+                ? `Syncing… ${progress.done}/${progress.total}`
+                : 'Preparing…'
+              : '⚡ Or sync straight into my Palworld folder (advanced)'}
+          </button>
+          <p className="text-center text-[11px] text-muted-foreground">
+            Chrome/Edge only, and <b>only works for custom installs outside protected system folders</b> — e.g. a
+            Steam library at <code>D:\SteamLibrary</code> or <code>C:\Games</code>. It <b>won’t</b> work in the
+            default <code>C:\Program&nbsp;Files&nbsp;(x86)\Steam</code> location — use Download + install.bat there.
+          </p>
+        </div>
       )}
       {synced && (
         <p className="text-center text-xs text-emerald-600 dark:text-emerald-400">
