@@ -341,6 +341,12 @@ The admin mints a **share link**; a non-admin friend opens a PUBLIC page (the un
   full URL = `window.location.origin/share/<token>`). Caveats (§4): the dashboard becomes a
   limited file host for the admin's own community (opt-in) and must be reachable by friends
   (public HTTPS / LAN). FSA "write into ~mods" browser flow (§5.2) remains the follow-up.
+- **Access model:** a share link is a BEARER capability — anyone with the URL can download
+  (no login, no per-person check); the 192-bit token is the only gate (unguessable, not
+  enumerable). Multi-use + persistent until revoked (revoke = instant 404 + deletes the zip).
+- **Deferred hardening (owner, later — not built):** optional link **expiry** (auto-die
+  after N hrs/days), **one-time / limited uses**, an optional **passphrase** the friend
+  enters, and a **"revoke all"** convenience. Current control = manual revoke when done.
 
 ## 9. Open decisions (for the owner)
 - Serve client paks from the dashboard (opt-in) vs. admin hosts them elsewhere.
