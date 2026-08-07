@@ -1,5 +1,5 @@
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, sep } from 'node:path'
+import { basename, dirname, join, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -301,6 +301,12 @@ function installTxt(s: LoadoutSummary, includedUe4ss: boolean): string {
     '     already there — that\'s expected).',
     '  4. Launch Palworld. UE4SS loads the mods ~1-2 minutes into the world.',
     '',
+    'UNINSTALL',
+    '  Keep this extracted folder. To remove the mods later, close Palworld and double-click',
+    '  uninstall.bat — it deletes exactly the files this bundle added (listed in',
+    '  installed-files.txt) and nothing else. (This also removes UE4SS; if you run other',
+    '  UE4SS mods, reinstall your loader afterward.)',
+    '',
     'MODS IN THIS LOADOUT',
     ...s.mods.map((m) => `  - ${m.name}  [${m.kind}]  -> ${m.placed.join(', ') || 'nothing placed'}`),
     ...(s.skipped.length
@@ -364,6 +370,76 @@ function installBat(): string {
   const s = String.raw`@echo off
 REM Double-click me to install. This bypasses PowerShell's script block and keeps the window open.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
+echo.
+pause
+`
+  return s.replace(/\r?\n/g, '\r\n')
+}
+
+// Uninstaller: removes EXACTLY the files this bundle installed (from installed-files.txt),
+// then prunes any mod dirs it emptied — so it reverses the install without touching the
+// friend's other files or save data. Same robust shape as install.ps1.
+function uninstallPs1(): string {
+  const s = String.raw`# Palworld client-mods UNINSTALLER. Easiest: double-click uninstall.bat.
+try {
+  $ErrorActionPreference = "Stop"
+  Write-Host "Palworld client-mods uninstaller" -ForegroundColor Cyan
+  $listFile = Join-Path $PSScriptRoot "installed-files.txt"
+  if (-not (Test-Path $listFile)) { throw "installed-files.txt not found next to this script (keep the extracted folder)." }
+  function Find-Palworld {
+    $cands = @()
+    try {
+      $steam = (Get-ItemProperty "HKCU:\Software\Valve\Steam" -EA SilentlyContinue).SteamPath
+      if ($steam) {
+        $cands += (Join-Path $steam "steamapps\common\Palworld")
+        $vdf = Join-Path $steam "steamapps\libraryfolders.vdf"
+        if (Test-Path $vdf) {
+          foreach ($line in Get-Content $vdf) {
+            if ($line -match '"path"\s+"(.+?)"') { $cands += (Join-Path ($Matches[1] -replace '\\\\','\') "steamapps\common\Palworld") }
+          }
+        }
+      }
+    } catch {}
+    $cands += "C:\Program Files (x86)\Steam\steamapps\common\Palworld"
+    foreach ($c in $cands) { if (Test-Path (Join-Path $c "Pal\Binaries\Win64")) { return $c } }
+    return $null
+  }
+  $pal = Find-Palworld
+  if (-not $pal) { $pal = Read-Host "Could not auto-find Palworld. Paste your Palworld folder (with Pal\Binaries)" }
+  if (-not (Test-Path (Join-Path $pal "Pal\Binaries\Win64"))) { throw "That folder is not a Palworld install (no Pal\Binaries\Win64)." }
+  Write-Host "Close Palworld first, then this removes the bundle's files from: $pal" -ForegroundColor Cyan
+  $ans = Read-Host "Remove now? (y/n)"
+  if ($ans -ne "y") { Write-Host "Cancelled."; return }
+  $removed = 0
+  foreach ($line in Get-Content $listFile) {
+    $rel = $line.Trim(); if (-not $rel) { continue }
+    $p = Join-Path $pal ($rel -replace '/','\')
+    if (Test-Path $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force; $removed++ }
+  }
+  foreach ($d in @("Pal\Binaries\Win64\ue4ss","Pal\Content\Paks\~mods","Pal\Content\Paks\LogicMods")) {
+    $dir = Join-Path $pal $d
+    if (Test-Path $dir) {
+      Get-ChildItem -LiteralPath $dir -Recurse -Directory | Sort-Object FullName -Descending | ForEach-Object {
+        if (-not (Get-ChildItem -LiteralPath $_.FullName -Force)) { Remove-Item -LiteralPath $_.FullName -Force }
+      }
+      if (-not (Get-ChildItem -LiteralPath $dir -Force)) { Remove-Item -LiteralPath $dir -Force }
+    }
+  }
+  Write-Host "Removed $removed file(s). The mods are uninstalled." -ForegroundColor Green
+  Write-Host "Note: this also removed UE4SS (dwmapi.dll + ue4ss) - if you run OTHER UE4SS mods, reinstall your loader." -ForegroundColor Yellow
+} catch {
+  Write-Host ""
+  Write-Host ("ERROR: " + $_.Exception.Message) -ForegroundColor Red
+  Write-Host "You can remove manually - delete the files listed in installed-files.txt from your Palworld folder." -ForegroundColor Yellow
+}
+`
+  return s.replace(/\r?\n/g, '\r\n')
+}
+
+function uninstallBat(): string {
+  const s = String.raw`@echo off
+REM Double-click me to REMOVE the mods this bundle installed. Keeps the window open.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall.ps1"
 echo.
 pause
 `
@@ -550,10 +626,20 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       sizeBytes: 0,
       generatedAt,
     }
+    // Record every file the bundle installs (relative to game/) so uninstall.ps1 can
+    // reverse EXACTLY this install without touching the friend's other files.
+    const gameRoot = join(bundle, 'game')
+    const installedFiles = (await walkFiles(gameRoot))
+      .map((f) => relative(gameRoot, f).replace(/\\/g, '/'))
+      .sort()
+    await writeFile(join(bundle, 'installed-files.txt'), installedFiles.join('\n') + '\n', 'utf8')
+
     await writeFile(join(bundle, 'manifest.json'), JSON.stringify(summary, null, 2), 'utf8')
     await writeFile(join(bundle, 'INSTALL.txt'), installTxt(summary, includedUe4ss), 'utf8')
     await writeFile(join(bundle, 'install.ps1'), installPs1(), 'utf8')
     await writeFile(join(bundle, 'install.bat'), installBat(), 'utf8')
+    await writeFile(join(bundle, 'uninstall.ps1'), uninstallPs1(), 'utf8')
+    await writeFile(join(bundle, 'uninstall.bat'), uninstallBat(), 'utf8')
 
     // Zip the bundle contents (game/, INSTALL.txt, install.ps1, manifest.json) at the
     // zip root. Streaming CLI zip — the ~1GB tree never sits in a Node buffer.
