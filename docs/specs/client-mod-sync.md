@@ -261,8 +261,19 @@ them, and this area turns that into a one-click friend loadout + human-readable 
      `fomod:true`; **Nexus bulk** → per-item `needsChoice` (route to the single-URL box, like
      the multi-MAIN case); **manual upload** → 400; **client add/backfill** → a FOMOD-specific
      `warn` (via `classifyNames`). Verified on mod 4126 (all three paths flag it; nothing
-     installs). Follow-up (not built): parse `ModuleConfig.xml` and offer a variant PICKER
-     that installs the chosen file to its declared destination.
+     installs).
+  2d. **FOMOD variant PICKER — BUILT + tested 2026-08-07.** `lib/fomod.ts` parses
+     `fomod/ModuleConfig.xml` (UTF-16/UTF-8) → module name + groups (SelectExactlyOne/Any/…)
+     + plugins (name/description/recommended/files) via `fast-xml-parser`. `app/api/nexus/
+     install` actions: `fomodOptions` (download MAIN → parse → return options) + `fomodInstall`
+     (copy the selected plugins' `<file>`/`<folder>` + any `requiredInstallFiles` to their
+     declared game-relative destinations, path-safe under the game dir). UI: `components/
+     fomod-picker.tsx` — a Sheet opened by the Nexus-install flow when a mod comes back
+     `fomod:true`; radios for SelectExactlyOne/AtMostOne, checkboxes otherwise, recommended
+     pre-selected. Not handled (MVP): flag conditions / conditionalFileInstalls / step
+     visibility. Verified on mod 4126: options parsed (Unchanged/Zero/Double), installing
+     "Zero" wrote the 0-cost jsonc to the mod's declared destination. UI is API-verified;
+     browser layout unverified (no client here).
 
 ## 7a. Planned (not built): catalog-entry-on-add
 The operator's `mod_data` catalog is generated OUTSIDE the dashboard by `fetch_all_mods.py`

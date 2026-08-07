@@ -5,6 +5,7 @@ import { useServer } from '@/lib/server-context'
 import { buildPalworldProxyHeaders } from '@/lib/palworld'
 import { isFrameworkDefault, frameworkDefaultDescription } from '@/lib/ue4ss-framework-defaults'
 import { PalSchemaSection } from '@/components/palschema-section'
+import { FomodPicker } from '@/components/fomod-picker'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Spinner } from '@/components/ui/spinner'
@@ -155,6 +156,7 @@ export function GameModsPanel() {
   const [nexusResolved, setNexusResolved] = useState<{ modId: number; name: string; latestVersion: string | null; files: NexusFile[] } | null>(null)
   const [nexusFileId, setNexusFileId] = useState<number | ''>('')
   const [nexusInstalling, setNexusInstalling] = useState<string | null>(null)
+  const [fomodUrl, setFomodUrl] = useState<string | null>(null) // FOMOD variant picker (open when set)
   // Install-from-Steam-Workshop (steam-workshop-download.md). Shown when a Steam
   // account session is connected.
   const [steamConnected, setSteamConnected] = useState(false)
@@ -502,7 +504,15 @@ export function GameModsPanel() {
         body: JSON.stringify({ modId: nexusResolved.modId, fileId: nexusFileId }),
       })
       const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? 'Failed')
+      if (!res.ok) {
+        // FOMOD installer — open the variant picker instead of erroring.
+        if (json.fomod) {
+          toast.dismiss(toastId)
+          setFomodUrl(nexusUrl.trim())
+          return
+        }
+        throw new Error(json.error ?? 'Failed')
+      }
       toast.success((json.note as string) ?? 'Installed from Nexus', { id: toastId })
       setNexusResolved(null)
       setNexusUrl('')
@@ -514,7 +524,7 @@ export function GameModsPanel() {
     } finally {
       setNexusInstalling(null)
     }
-  }, [config, nexusResolved, nexusFileId, load, loadNexus])
+  }, [config, nexusResolved, nexusFileId, nexusUrl, load, loadNexus])
 
   const installFromWorkshop = useCallback(async () => {
     if (!config || !steamUrl.trim()) return
@@ -2215,6 +2225,23 @@ export function GameModsPanel() {
           )}
         </SheetContent>
       </Sheet>
+
+      {fomodUrl && config && (
+        <FomodPicker
+          url={fomodUrl}
+          config={config}
+          onClose={() => setFomodUrl(null)}
+          onInstalled={(note) => {
+            toast.success(note)
+            setFomodUrl(null)
+            setNexusResolved(null)
+            setNexusUrl('')
+            setNexusFileId('')
+            void load()
+            void loadNexus()
+          }}
+        />
+      )}
     </div>
   )
 }

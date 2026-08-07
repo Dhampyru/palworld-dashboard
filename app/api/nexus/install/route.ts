@@ -18,6 +18,7 @@ import {
 import { detectModKind, installPakArchive, installUe4ssModArchive, setModGroup } from '@/lib/game-mods'
 import { installPalSchemaSubmod } from '@/lib/palschema'
 import { FOMOD_MESSAGE, isFomodArchive, normalizeArchiveToZip } from '@/lib/archive'
+import { installFomodSelections, parseFomodConfig } from '@/lib/fomod'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -72,6 +73,16 @@ function pickUpdateFile(files: NexusFile[], latestVersion: string | null): Nexus
     if (match) return match
   }
   return pool[pool.length - 1]
+}
+
+// Download a mod's newest MAIN file (fallback: newest file) and normalize to a zip
+// buffer. Shared by the FOMOD picker's resolve + install steps.
+async function downloadMainArchive(modId: number): Promise<Buffer> {
+  const files = await getModFiles(modId)
+  const mains = files.filter((f) => (f.category ?? '').toUpperCase() === 'MAIN')
+  const file = (mains.length ? mains : files).pop()
+  if (!file) throw new Error('No downloadable file found on Nexus.')
+  return normalizeArchiveToZip(await downloadNexusFile(modId, file.fileId))
 }
 
 // Download + install a specific Nexus file through the existing pipeline, then link
@@ -153,7 +164,15 @@ async function _POST(request: NextRequest) {
     )
   }
 
-  let body: { url?: string; modId?: number; fileId?: number; action?: string; modKey?: string; urls?: string[] }
+  let body: {
+    url?: string
+    modId?: number
+    fileId?: number
+    action?: string
+    modKey?: string
+    urls?: string[]
+    selections?: Record<string, number[]>
+  }
   try {
     body = (await request.json()) as typeof body
   } catch {
@@ -161,6 +180,25 @@ async function _POST(request: NextRequest) {
   }
 
   try {
+    // FOMOD variant picker: resolve the options, then install the chosen plugin(s).
+    if (body.action === 'fomodOptions' || body.action === 'fomodInstall') {
+      const modId = parseNexusModId(body.url ?? '')
+      if (!modId) return NextResponse.json({ error: 'Paste a valid Nexus mod URL' }, { status: 400 })
+      const buffer = await downloadMainArchive(modId)
+      const config = parseFomodConfig(buffer)
+      if (!config) return NextResponse.json({ error: 'This mod is not a FOMOD (no fomod/ModuleConfig.xml).' }, { status: 400 })
+      if (body.action === 'fomodOptions') {
+        return NextResponse.json({ modId, moduleName: config.moduleName, groups: config.groups })
+      }
+      const selections: Record<number, number[]> = {}
+      for (const [k, v] of Object.entries(body.selections ?? {})) selections[Number(k)] = (v ?? []).map(Number)
+      const r = await installFomodSelections(buffer, config, selections)
+      return NextResponse.json({
+        ...r,
+        note: `Installed ${r.installed.length} file(s) from ${r.moduleName} — restart the server to load it.`,
+      })
+    }
+
     // Bulk flow: install many mods from pasted URLs. Auto-picks the single MAIN
     // file per mod; anything ambiguous (multiple/zero MAIN files) is flagged for
     // the single-URL box rather than guessed. Sequential — each is a CDN download
