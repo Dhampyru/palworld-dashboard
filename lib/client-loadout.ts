@@ -288,15 +288,17 @@ function installTxt(s: LoadoutSummary, includedUe4ss: boolean): string {
     'INSTALL (easy)',
     '  1. Close Palworld completely.',
     '  2. Make sure your Palworld is the SAME version as the server (update via Steam).',
-    '  3. Right-click install.ps1 -> "Run with PowerShell" and follow the prompt, OR do it',
-    '     manually (below).',
+    '  3. DOUBLE-CLICK  install.bat  and follow the prompt. (Use the .bat, not the .ps1 —',
+    '     it gets past Windows\' "scripts are disabled / blocked" and keeps the window open',
+    '     so you can read any message.)',
     '',
-    'INSTALL (manual)',
+    'INSTALL (manual — always works)',
     '  1. Close Palworld.',
     '  2. Open your Palworld install folder, e.g.:',
     '       ...\\Steam\\steamapps\\common\\Palworld\\',
     '  3. Copy EVERYTHING inside this bundle\'s  game\\  folder into that Palworld folder,',
-    '     merging/overwriting when asked.',
+    '     merging/overwriting when asked (you\'ll be merging a  Pal  folder into the one',
+    '     already there — that\'s expected).',
     '  4. Launch Palworld. UE4SS loads the mods ~1-2 minutes into the world.',
     '',
     'MODS IN THIS LOADOUT',
@@ -311,41 +313,61 @@ function installTxt(s: LoadoutSummary, includedUe4ss: boolean): string {
 // A best-effort PowerShell installer. Locates Palworld via the Steam registry +
 // libraryfolders.vdf, falls back to prompting, then copies the game/ overlay in.
 function installPs1(): string {
-  return [
-    '# Palworld client-mods installer (best-effort).',
-    '$ErrorActionPreference = "Stop"',
-    'Write-Host "Palworld client-mods installer" -ForegroundColor Cyan',
-    '$bundleGame = Join-Path $PSScriptRoot "game"',
-    'if (-not (Test-Path $bundleGame)) { Write-Error "This script must sit next to the game\\ folder."; exit 1 }',
-    'function Find-Palworld {',
-    '  try {',
-    '    $steam = (Get-ItemProperty "HKCU:\\Software\\Valve\\Steam" -EA SilentlyContinue).SteamPath',
-    '    if ($steam) {',
-    '      $libs = @((Join-Path $steam "steamapps"))',
-    '      $vdf = Join-Path $steam "steamapps\\libraryfolders.vdf"',
-    '      if (Test-Path $vdf) {',
-    '        Select-String -Path $vdf -Pattern \'"path"\\s+"(.+?)"\' -AllMatches | ForEach-Object {',
-    '          $_.Matches | ForEach-Object { $libs += (Join-Path ($_.Groups[1].Value -replace "\\\\\\\\","\\") "steamapps") }',
-    '        }',
-    '      }',
-    '      foreach ($l in $libs) {',
-    '        $p = Join-Path $l "common\\Palworld"',
-    '        if (Test-Path (Join-Path $p "Pal\\Binaries\\Win64")) { return $p }',
-    '      }',
-    '    }',
-    '  } catch {}',
-    '  return $null',
-    '}',
-    '$pal = Find-Palworld',
-    'if (-not $pal) { $pal = Read-Host "Couldn\'t auto-find Palworld. Paste your Palworld folder path" }',
-    'if (-not (Test-Path (Join-Path $pal "Pal\\Binaries\\Win64"))) { Write-Error "That doesn\'t look like a Palworld install."; exit 1 }',
-    'Write-Host "Installing into: $pal"',
-    '$ans = Read-Host "Copy the mods in now? (y/n)"',
-    'if ($ans -ne "y") { Write-Host "Cancelled."; exit 0 }',
-    'Copy-Item -Path (Join-Path $bundleGame "*") -Destination $pal -Recurse -Force',
-    'Write-Host "Done. Launch Palworld — mods load ~1-2 min into the world." -ForegroundColor Green',
-    '',
-  ].join('\r\n')
+  // String.raw so backslashes stay literal — the old regex-escaping was the fragile part.
+  // Everything is wrapped in try/catch so an error PRINTS (red) instead of slamming the
+  // window shut; the copy uses robocopy (reliable merge). Meant to be launched by
+  // install.bat (bypasses execution policy + keeps the window open).
+  const s = String.raw`# Palworld client-mods installer. Easiest: double-click install.bat instead.
+try {
+  $ErrorActionPreference = "Stop"
+  Write-Host "Palworld client-mods installer" -ForegroundColor Cyan
+  $bundleGame = Join-Path $PSScriptRoot "game"
+  if (-not (Test-Path $bundleGame)) { throw "Run this next to the game\ folder (extract the WHOLE zip first)." }
+  function Find-Palworld {
+    $cands = @()
+    try {
+      $steam = (Get-ItemProperty "HKCU:\Software\Valve\Steam" -EA SilentlyContinue).SteamPath
+      if ($steam) {
+        $cands += (Join-Path $steam "steamapps\common\Palworld")
+        $vdf = Join-Path $steam "steamapps\libraryfolders.vdf"
+        if (Test-Path $vdf) {
+          foreach ($line in Get-Content $vdf) {
+            if ($line -match '"path"\s+"(.+?)"') { $cands += (Join-Path ($Matches[1] -replace '\\\\','\') "steamapps\common\Palworld") }
+          }
+        }
+      }
+    } catch {}
+    $cands += "C:\Program Files (x86)\Steam\steamapps\common\Palworld"
+    foreach ($c in $cands) { if (Test-Path (Join-Path $c "Pal\Binaries\Win64")) { return $c } }
+    return $null
+  }
+  $pal = Find-Palworld
+  if (-not $pal) { $pal = Read-Host "Could not auto-find Palworld. Paste your Palworld folder (the one containing Pal\Binaries)" }
+  if (-not (Test-Path (Join-Path $pal "Pal\Binaries\Win64"))) { throw "That folder is not a Palworld install (no Pal\Binaries\Win64)." }
+  Write-Host "Installing into: $pal" -ForegroundColor Cyan
+  robocopy "$bundleGame" "$pal" /E /IS /IT /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+  if ($LASTEXITCODE -ge 8) { throw "Copy failed (robocopy code $LASTEXITCODE) - see INSTALL.txt to copy manually." }
+  Write-Host "Done! Launch Palworld - mods load ~1-2 min into the world." -ForegroundColor Green
+} catch {
+  Write-Host ""
+  Write-Host ("ERROR: " + $_.Exception.Message) -ForegroundColor Red
+  Write-Host "You can install manually instead - see INSTALL.txt (copy the game\ folder's CONTENTS into your Palworld folder)." -ForegroundColor Yellow
+}
+`
+  return s.replace(/\r?\n/g, '\r\n')
+}
+
+// Double-click launcher: bypasses PowerShell execution policy + the downloaded-file block
+// (Mark-of-the-Web), and pauses so any message stays readable — the two reasons a bare
+// .ps1 "flashes red and closes".
+function installBat(): string {
+  const s = String.raw`@echo off
+REM Double-click me to install. This bypasses PowerShell's script block and keeps the window open.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
+echo.
+pause
+`
+  return s.replace(/\r?\n/g, '\r\n')
 }
 
 // Build the bundle. `includeUe4ss` (default true) ships the loader for a self-contained
@@ -531,6 +553,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     await writeFile(join(bundle, 'manifest.json'), JSON.stringify(summary, null, 2), 'utf8')
     await writeFile(join(bundle, 'INSTALL.txt'), installTxt(summary, includedUe4ss), 'utf8')
     await writeFile(join(bundle, 'install.ps1'), installPs1(), 'utf8')
+    await writeFile(join(bundle, 'install.bat'), installBat(), 'utf8')
 
     // Zip the bundle contents (game/, INSTALL.txt, install.ps1, manifest.json) at the
     // zip root. Streaming CLI zip — the ~1GB tree never sits in a Node buffer.
