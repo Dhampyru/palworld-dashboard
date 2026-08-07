@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
-import { CheckIcon, CopyIcon, DownloadIcon, RefreshCwIcon, UsersIcon } from 'lucide-react'
+import { CheckIcon, CopyIcon, DownloadIcon, PackageIcon, RefreshCwIcon, UsersIcon } from 'lucide-react'
 
 // PATCH (not upstream): client mod-sync, Phase 1 (docs/specs/client-mod-sync.md).
 // A read-only "invite / server requirements" surface: shows what a joining client
@@ -42,6 +42,13 @@ export function InvitePanel() {
   const [downloading, setDownloading] = useState<string | null>(null)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Client-mod loadout builder (moved here from the Client-mods tab — this is the
+  // onboarding/align-friends area). keptCount is fetched for the button label/gate.
+  const [keptCount, setKeptCount] = useState<number | null>(null)
+  const [includeUe4ss, setIncludeUe4ss] = useState(true)
+  const [generating, setGenerating] = useState(false)
+  const [lastLoadout, setLastLoadout] = useState<string | null>(null)
+
   useEffect(() => {
     try {
       const s = localStorage.getItem(HOST_KEY)
@@ -63,6 +70,16 @@ export function InvitePanel() {
       toast.error(err instanceof Error ? err.message : 'Failed to load manifest')
     } finally {
       setLoading(false)
+    }
+    // How many client mods are kept (for the loadout button label + gate). Best-effort.
+    try {
+      const cm = await fetch('/api/client-mods', { headers: buildPalworldProxyHeaders(config), cache: 'no-store' })
+      if (cm.ok) {
+        const j = await cm.json()
+        setKeptCount((j.mods ?? []).filter((m: { keep?: boolean }) => m.keep).length)
+      }
+    } catch {
+      /* ignore */
     }
   }, [config])
 
@@ -105,6 +122,37 @@ export function InvitePanel() {
     },
     [config],
   )
+
+  const generateLoadout = useCallback(async () => {
+    if (!config) return
+    setGenerating(true)
+    setLastLoadout(null)
+    try {
+      // Generate the bundle server-side → one-time download token → stream to disk.
+      const res = await fetch(`/api/client-mods/loadout?ue4ss=${includeUe4ss ? '1' : '0'}`, {
+        method: 'POST',
+        headers: buildPalworldProxyHeaders(config),
+        cache: 'no-store',
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? res.statusText)
+      const s = json.summary ?? {}
+      const sizeMb = (Number(s.sizeBytes ?? 0) / 1024 / 1024).toFixed(0)
+      const summary = `${s.luaMods?.length ?? '?'} Lua + ${s.pakFiles?.length ?? '?'} pak · ${sizeMb} MB · UE4SS ${s.includedUe4ss ? 'included' : 'excluded'}${s.configOverrides ? ` · ${s.configOverrides} config` : ''}${s.skipped?.length ? ` · ${s.skipped.length} skipped (see manifest.json)` : ''}`
+      setLastLoadout(summary)
+      const a = document.createElement('a')
+      a.href = `/api/client-mods/loadout?token=${encodeURIComponent(json.token)}`
+      a.download = json.fileName ?? 'palworld-client-loadout.zip'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      toast.success(`Loadout built — ${summary}. Download starting…`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Loadout generation failed')
+    } finally {
+      setGenerating(false)
+    }
+  }, [config, includeUe4ss])
 
   const inviteText = useMemo(() => {
     if (!manifest) return ''
@@ -268,11 +316,53 @@ export function InvitePanel() {
         </>
       )}
 
-      <p className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
-        Client-only mods for your friends (cosmetics / UI / QoL) are managed under{' '}
-        <span className="font-medium text-foreground">Mods → Client mods</span> — the onboarding loadout is built
-        from that set.
-      </p>
+      {/* Build friend loadout — the onboarding payoff (moved here from the Client-mods tab) */}
+      <div className="flex flex-col gap-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+        <div className="flex items-center gap-2">
+          <PackageIcon className="size-4 text-primary" />
+          <span className="text-sm font-semibold">Build friend loadout</span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Packages your kept client mods
+          {keptCount != null ? (
+            <>
+              {' '}(<span className="font-medium text-foreground">{keptCount}</span>)
+            </>
+          ) : (
+            ''
+          )}{' '}
+          into a Classic-UE4SS bundle your friend extracts over their Palworld install — no Steam Workshop or Nexus
+          needed on their end. Includes an <span className="font-mono">INSTALL.txt</span> +{' '}
+          <span className="font-mono">install.ps1</span>. Stage which mods to include under{' '}
+          <span className="font-medium text-foreground">Mods → Client mods</span>.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            size="sm"
+            className="h-9 gap-1.5 text-xs"
+            onClick={generateLoadout}
+            disabled={generating || keptCount === 0}
+          >
+            {generating ? <Spinner className="size-3.5" /> : <DownloadIcon className="size-3.5" />}
+            {generating ? 'Building…' : 'Generate & download'}
+          </Button>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={includeUe4ss}
+              onChange={(e) => setIncludeUe4ss(e.target.checked)}
+              className="size-4 accent-primary"
+            />
+            Include UE4SS loader (self-contained)
+          </label>
+        </div>
+        {generating && (
+          <p className="text-[11px] text-muted-foreground">
+            Assembling on the server — a large set can take a minute and download as a big .zip.
+          </p>
+        )}
+        {lastLoadout && <p className="text-[11px] text-emerald-600 dark:text-emerald-400">Last build: {lastLoadout}</p>}
+      </div>
     </div>
   )
 }

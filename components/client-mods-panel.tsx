@@ -21,10 +21,8 @@ import {
 import {
   AlertTriangleIcon,
   ChevronDownIcon,
-  DownloadIcon,
   ExternalLinkIcon,
   MonitorIcon,
-  PackageIcon,
   PlusIcon,
   RefreshCwIcon,
   RotateCcwIcon,
@@ -86,7 +84,7 @@ function detectSource(u: string): 'nexus' | 'steam' | null {
 }
 
 export function ClientModsPanel() {
-  const { config } = useServer()
+  const { config, requestTab } = useServer()
   const [mods, setMods] = useState<ClientMod[]>([])
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [catalogAvailable, setCatalogAvailable] = useState(false)
@@ -104,10 +102,6 @@ export function ClientModsPanel() {
   const [nexus, setNexus] = useState<{ premium: boolean; name: string | null } | null>(null)
   const [steam, setSteam] = useState<{ connected: boolean; username: string | null } | null>(null)
 
-  // Loadout generation.
-  const [includeUe4ss, setIncludeUe4ss] = useState(true)
-  const [generating, setGenerating] = useState(false)
-  const [lastLoadout, setLastLoadout] = useState<string | null>(null)
 
   // Config editor.
   const [configMod, setConfigMod] = useState<ClientMod | null>(null)
@@ -284,38 +278,6 @@ export function ClientModsPanel() {
     [postJson, load],
   )
 
-  const generateLoadout = useCallback(async () => {
-    if (!config) return
-    setGenerating(true)
-    setLastLoadout(null)
-    try {
-      // Step 1: generate the bundle server-side and get a one-time download token.
-      const res = await fetch(`/api/client-mods/loadout?ue4ss=${includeUe4ss ? '1' : '0'}`, {
-        method: 'POST',
-        headers: buildPalworldProxyHeaders(config),
-        cache: 'no-store',
-      })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json.error ?? res.statusText)
-      const s = json.summary ?? {}
-      const sizeMb = (Number(s.sizeBytes ?? 0) / 1024 / 1024).toFixed(0)
-      const summary = `${s.luaMods?.length ?? '?'} Lua + ${s.pakFiles?.length ?? '?'} pak · ${sizeMb} MB · UE4SS ${s.includedUe4ss ? 'included' : 'excluded'}${s.configOverrides ? ` · ${s.configOverrides} config` : ''}${s.skipped?.length ? ` · ${s.skipped.length} skipped (see manifest.json)` : ''}`
-      setLastLoadout(summary)
-      // Step 2: stream to disk via the token URL — a plain navigation, no in-browser buffer.
-      const a = document.createElement('a')
-      a.href = `/api/client-mods/loadout?token=${encodeURIComponent(json.token)}`
-      a.download = json.fileName ?? 'palworld-client-loadout.zip'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      toast.success(`Loadout built — ${summary}. Download starting…`)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Loadout generation failed')
-    } finally {
-      setGenerating(false)
-    }
-  }, [config, includeUe4ss])
-
   const openConfig = useCallback(
     async (m: ClientMod) => {
       setConfigMod(m)
@@ -417,49 +379,16 @@ export function ClientModsPanel() {
         <p>
           Mods that run on a <span className="font-medium text-foreground">friend&apos;s client</span> (cosmetics, UI,
           FOV, quality-of-life) — <span className="font-medium text-foreground">not</span> installed on the server.
-          Stage the ones your friends should have here; the dashboard uses this set to build the{' '}
-          <span className="font-medium text-foreground">onboarding packet and client loadout</span> (Invite tab). The
-          server&apos;s own mods live under the <span className="font-medium text-foreground">Server mods</span> tab.
-        </p>
-      </div>
-
-      {/* Build friend loadout — the payoff action */}
-      <div className="flex flex-col gap-2 rounded-md border border-primary/30 bg-primary/5 p-3">
-        <div className="flex items-center gap-2">
-          <PackageIcon className="size-4 text-primary" />
-          <span className="text-sm font-semibold">Build friend loadout</span>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Packages the <span className="font-medium text-foreground">{keptCount}</span> kept mod{keptCount === 1 ? '' : 's'} into
-          a Classic-UE4SS bundle your friend extracts over their Palworld install — no Steam Workshop or Nexus needed on
-          their end. Includes an <span className="font-mono">INSTALL.txt</span> + <span className="font-mono">install.ps1</span>.
-        </p>
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            size="sm"
-            className="h-9 gap-1.5 text-xs"
-            onClick={generateLoadout}
-            disabled={generating || keptCount === 0}
+          Stage the ones your friends should have here, then build &amp; download the bundle from the{' '}
+          <button
+            type="button"
+            onClick={() => requestTab('invite')}
+            className="font-medium text-primary underline underline-offset-2 hover:opacity-80"
           >
-            {generating ? <Spinner className="size-3.5" /> : <DownloadIcon className="size-3.5" />}
-            {generating ? 'Building…' : 'Generate & download'}
-          </Button>
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={includeUe4ss}
-              onChange={(e) => setIncludeUe4ss(e.target.checked)}
-              className="size-4 accent-primary"
-            />
-            Include UE4SS loader (self-contained)
-          </label>
-        </div>
-        {generating && (
-          <p className="text-[11px] text-muted-foreground">
-            Assembling on the server — a large set can take a minute and download as a big .zip.
-          </p>
-        )}
-        {lastLoadout && <p className="text-[11px] text-emerald-600 dark:text-emerald-400">Last build: {lastLoadout}</p>}
+            Invite friends tab
+          </button>
+          . The server&apos;s own mods live under the <span className="font-medium text-foreground">Server mods</span> tab.
+        </p>
       </div>
 
       {/* Account status hints — neutral "checking…" until the status resolves, so the first

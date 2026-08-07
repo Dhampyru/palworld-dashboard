@@ -47,7 +47,7 @@ function readStoredTab(): DashboardTab {
 }
 
 export function Dashboard() {
-  const { consoleRequest, activeInstanceId } = useServer()
+  const { consoleRequest, activeInstanceId, tabRequest, requestTab } = useServer()
   const [playersSheetOpen, setPlayersSheetOpen] = useState(false)
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<DashboardTab>(readStoredTab)
@@ -73,6 +73,13 @@ export function Dashboard() {
     setActiveTab(tab)
     window.localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, tab)
   }, [])
+
+  // A deep child (e.g. the Client-mods "Invite tab" link) asks to switch tabs.
+  useEffect(() => {
+    if (!tabRequest) return
+    handleTabChange(tabRequest as DashboardTab)
+    requestTab(null)
+  }, [tabRequest, handleTabChange, requestTab])
 
   // When you switch INTO a server (fleet → open, or a different server), land on
   // the Overview rather than inheriting the previous server's last tab. A plain

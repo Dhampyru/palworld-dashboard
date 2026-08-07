@@ -214,8 +214,10 @@ them, and this area turns that into a one-click friend loadout + human-readable 
      header-authed `GET` (no token) is kept for programmatic/direct download. This is the
      **public-release delivery path** — self-service, admin-gated, no host/shell access
      (chosen over copying the zip to a host path, which assumes SSH). The **Build friend
-     loadout** card in the Client-mods tab runs POST→navigate. Verified: mint→stream (byte
-     count exact)→reuse 410→bad-token 400→temp self-cleans.
+     loadout** card runs POST→navigate. **Moved 2026-08-07 to the Invite tab** (the
+     onboarding area) — the Client-mods tab keeps a link to it (a new `requestTab` nav helper
+     in server-context, consumed by dashboard.tsx, mirrors `consoleRequest`). Verified:
+     mint→stream (byte count exact)→reuse 410→bad-token 400→temp self-cleans.
      **Verified 2026-08-06 on the live 72-mod set:** a 954 MB bundle in ~34s — correct Classic
      layout (dwmapi.dll, ue4ss core, `mods.txt` = enabled framework + 34 client Lua, 29 `~mods`
      paks, 3 LogicMods), 61 placed / 11 skipped (5 server-side PalSchema, 2 unclassified, 4

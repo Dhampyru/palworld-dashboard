@@ -164,6 +164,10 @@ interface ServerContextType {
   consoleRequest: { command: string; userId: string } | null
   requestConsole: (command: string, userId: string) => void
   clearConsoleRequest: () => void
+  // A deep child asks the dashboard to switch tabs (e.g. a "go to Invite" link). The
+  // dashboard consumes it (setActiveTab) and clears it. Same pattern as consoleRequest.
+  tabRequest: string | null
+  requestTab: (tab: string | null) => void
   // Multi-instance (#7): the fleet drill-in. null = show the fleet landing; a
   // value = the server the dashboard is scoped to (carried to every API via the
   // x-palworld-instance header). enterInstance/exitToFleet switch between them.
@@ -195,6 +199,7 @@ export function ServerProvider({ children }: { children: ReactNode }) {
   const [players, setPlayersState] = useState<Player[]>([])
   const [consoleLogs, setConsoleLogs] = useState<ConsoleLog[]>([])
   const [consoleRequest, setConsoleRequest] = useState<{ command: string; userId: string } | null>(null)
+  const [tabRequest, setTabRequest] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState<Record<string, boolean>>({})
   const [isHydrated, setIsHydrated] = useState(false)
 
@@ -657,6 +662,8 @@ export function ServerProvider({ children }: { children: ReactNode }) {
     consoleRequest,
     requestConsole: (command: string, userId: string) => setConsoleRequest({ command, userId }),
     clearConsoleRequest: () => setConsoleRequest(null),
+    tabRequest,
+    requestTab: setTabRequest,
     activeInstanceId,
     enterInstance,
     exitToFleet,
@@ -691,6 +698,7 @@ export function ServerProvider({ children }: { children: ReactNode }) {
     lastConnectionError,
     nextSnapshotFetchAt,
     consoleRequest,
+    tabRequest,
   ])
 
   if (!isHydrated) {
