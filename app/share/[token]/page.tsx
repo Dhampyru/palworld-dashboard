@@ -75,7 +75,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
             <li>Download the bundle above and extract the whole .zip.</li>
             <li>
               Double-click <span className="font-mono text-foreground">install.bat</span> and follow the prompt.
-              (Or copy the <span className="font-mono text-foreground">game</span> folder&apos;s contents into your
+              (Or copy the <span className="font-mono text-foreground">game</span>{' '}folder&apos;s contents into your
               Palworld install folder — see <span className="font-mono text-foreground">INSTALL.txt</span>.)
             </li>
             <li>Launch Palworld and connect. Mods load ~1–2 minutes into the world.</li>
