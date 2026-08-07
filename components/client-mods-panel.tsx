@@ -9,6 +9,16 @@ import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   ChevronDownIcon,
   DownloadIcon,
   ExternalLinkIcon,
@@ -80,6 +90,7 @@ export function ClientModsPanel() {
   const [catalogAvailable, setCatalogAvailable] = useState(false)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null) // id or 'add'/'upload'/'bulk'
+  const [confirmRemove, setConfirmRemove] = useState<ClientMod | null>(null)
   const [url, setUrl] = useState('')
   const [bulk, setBulk] = useState('')
   const [bulkResults, setBulkResults] = useState<BulkResult[] | null>(null)
@@ -251,9 +262,10 @@ export function ClientModsPanel() {
     [postJson],
   )
 
+  // Called from the confirm dialog (AlertDialog — replaces window.confirm, which blocked
+  // the page thread and hung automated browsers).
   const remove = useCallback(
     async (m: ClientMod) => {
-      if (!window.confirm(`Remove "${m.name}" from the client-mod set? (Does not affect the server.)`)) return
       setBusy(m.id)
       try {
         await postJson({ action: 'remove', id: m.id })
@@ -445,7 +457,8 @@ export function ClientModsPanel() {
         {lastLoadout && <p className="text-[11px] text-emerald-600 dark:text-emerald-400">Last build: {lastLoadout}</p>}
       </div>
 
-      {/* Account status hints */}
+      {/* Account status hints — neutral "checking…" until the status resolves, so the first
+          paint never flashes a misleading "not Premium / not connected". */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-muted-foreground">Auto-download sources:</span>
         <span
@@ -453,20 +466,20 @@ export function ClientModsPanel() {
             nexus?.premium ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'
           }`}
         >
-          Nexus {nexus?.premium ? `· Premium (${nexus.name ?? 'connected'})` : '· not Premium'}
+          Nexus {nexus === null ? '· checking…' : nexus.premium ? `· Premium (${nexus.name ?? 'connected'})` : '· not Premium'}
         </span>
         <span
           className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 ${
             steam?.connected ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'
           }`}
         >
-          Steam {steam?.connected ? `· ${steam.username ?? 'connected'}` : '· not connected'}
+          Steam {steam === null ? '· checking…' : steam.connected ? `· ${steam.username ?? 'connected'}` : '· not connected'}
         </span>
       </div>
-      {(!nexus?.premium || !steam?.connected) && (
+      {((nexus && !nexus.premium) || (steam && !steam.connected)) && (
         <p className="-mt-2 text-[11px] text-muted-foreground">
-          {!nexus?.premium && 'Nexus auto-download needs a Premium key (Panel Settings → Nexus). '}
-          {!steam?.connected && 'Steam Workshop needs a connected account (Panel Settings → Steam). '}
+          {nexus && !nexus.premium && 'Nexus auto-download needs a Premium key (Panel Settings → Nexus). '}
+          {steam && !steam.connected && 'Steam Workshop needs a connected account (Panel Settings → Steam). '}
           Without them, use <span className="font-medium">Upload</span> for those mods.
         </p>
       )}
@@ -585,7 +598,7 @@ export function ClientModsPanel() {
                     </button>
                   )}
                   <button
-                    onClick={() => remove(m)}
+                    onClick={() => setConfirmRemove(m)}
                     disabled={busy === m.id}
                     title="Remove from the client-mod set"
                     className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
@@ -721,6 +734,29 @@ export function ClientModsPanel() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Remove confirm — the shared AlertDialog (not window.confirm) */}
+      <AlertDialog open={!!confirmRemove} onOpenChange={(o) => !o && setConfirmRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this client mod?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmRemove ? `"${confirmRemove.name}" will be removed from the client-mod set and won't ship in the loadout. This does not affect the server.` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (confirmRemove) void remove(confirmRemove)
+                setConfirmRemove(null)
+              }}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
