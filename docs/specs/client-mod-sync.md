@@ -241,6 +241,37 @@ them, and this area turns that into a one-click friend loadout + human-readable 
      actions `configList`/`configSave`/`configClear` on `/api/client-mods`; a **Config** button
      + editor Sheet per staged mod row (non-pak). Verified: edited FOV Control's `config.lua`
      → the marker appeared in the generated bundle (`manifest.json configOverrides:1`).
+  2b. **Add-time placement WARNING — BUILT + tested 2026-08-07.** A client mod with no
+     client-installable files (PalSchema/UE4SS-only, Engine.ini-text, or an unreadable
+     archive) is now flagged AT STAGE TIME instead of silently doing nothing at loadout time.
+     `lib/client-mods.ts` classifies each add — `warnFromZip` (Nexus/upload: AdmZip entry
+     scan — Lua/pak/LogicMods ⇒ ok; PalSchema-only ⇒ server-side warn) / `warnFromContent`
+     (Steam: `Info.json` InstallRule types) — and stores `warn` on the record. The panel shows
+     an amber ⚠ badge + "won't ship to clients" on the row, a warning toast on add, and the
+     warn in bulk results. The loadout also now records a Steam mod that places nothing as
+     **skipped** (was silently dropped). Verified: Elemental Passive Icons (Steam 3777233424,
+     PalSchema-only) → warn fires; moved it OFF the client set and installed it as a **server**
+     PalSchema mod (`PalSchema/mods/ElementalPassiveIcons`).
+
+## 7a. Planned (not built): catalog-entry-on-add
+The operator's `mod_data` catalog is generated OUTSIDE the dashboard by `fetch_all_mods.py`
+(reads a tracker spreadsheet → fetches Nexus/Steam API fields → writes `mods.json` +
+`descriptions/`), mounted **read-only**, and its **`Install On` flag is a human judgment**
+from the spreadsheet — NOT in any API. So "add a mod by URL" cannot (and must not) write into
+`mod_data`. Plan to give the *feeling* the owner expected (URL → it lands in the catalog):
+- **Writable overlay** `data/catalog-additions.json` (data volume), keyed `<source>_<id>`, same
+  field shape as a `mods.json` entry (source/id/url/name/category/tags/author/version/updated/
+  summary/description) + `installOn` (INFERRED) + `origin: 'dashboard'`.
+- **On add** (server or client), fetch the same API fields `fetch_all_mods.py` does (Nexus
+  `mods/<id>.json`; Steam `GetPublishedFileDetails`) and write the overlay entry; optionally a
+  description overlay so config-discovery covers dashboard-added mods too.
+- **Infer `Install On`** from the Part-2b classifier: PalSchema/UE4SS-only ⇒ `Server`; has a
+  client pak ⇒ `BOTH (client needs the pak)`; Lua ⇒ `Server / host (confirm)` (client-vs-server
+  Lua isn't reliably inferable) — always tagged `(inferred)`, admin-overridable.
+- **`readCatalog()` merges** base `mods.json` + overlay, **operator (curated) wins** on conflict.
+- **Reconciliation:** additions live in the writable data volume, NOT `mod_data` (`:ro`), so a
+  `fetch_all_mods.py` re-run never clobbers them; a later spreadsheet entry supersedes by id.
+- **Clean-room preserved:** still ships only the reader + an operator-owned writable overlay.
   3. **Delivery** — keep §5b's dual client (FSA browser happy-path + standalone script
      fallback) for the *pak-sync* subset, and add the loadout bundle/script for the full
      client-only set. A **Steam Workshop Collection** link covers the Workshop-only subset.

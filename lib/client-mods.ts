@@ -4,6 +4,7 @@ import { detectModKind, cleanModName } from '@/lib/game-mods'
 import { downloadNexusFile, getModFiles, getModInfo, parseNexusModId, type NexusFile } from '@/lib/nexus'
 import { downloadWorkshopItem, parseWorkshopId } from '@/lib/steam'
 import { normalizeArchiveToZip } from '@/lib/archive'
+import AdmZip from 'adm-zip'
 
 // Client-mod store (docs/specs/client-mod-sync.md §2c, Phase 2 intake). Where an admin
 // STAGES the mods a friend's client needs — WITHOUT installing them on the server. The
@@ -36,6 +37,7 @@ export type ClientMod = {
   sizeBytes: number
   keep: boolean // include this mod in the generated friend loadout
   addedAt: number
+  warn?: string | null // set when the mod has NO client-installable files (server-side / not a mod)
 }
 
 type Index = Record<string, ClientMod>
@@ -95,6 +97,49 @@ function pickFile(files: NexusFile[]): NexusFile | null {
   return pool[pool.length - 1]
 }
 
+// ── Client-placement classification (add-time warning) ───────────────────────
+// Determine whether a staged mod actually has files a friend's CLIENT installs. Returns a
+// warning string when it does NOT (so the panel can flag a mis-categorized add on the
+// spot), or null when it's client-installable. Mirrors the loadout generator's placement:
+// client = Lua + pak + LogicMods; PalSchema/UE4SS = server-side.
+const SERVER_SIDE_WARN =
+  'PalSchema/server-side mod — it runs on the server, not the client, so there are no client files and it won’t ship in the loadout.'
+
+function warnFromZip(buffer: Buffer, kind: ClientModKind): string | null {
+  if (kind === 'ue4ss' || kind === 'pak') return null // Lua or a pak → client-installable
+  let names: string[]
+  try {
+    names = new AdmZip(buffer)
+      .getEntries()
+      .filter((e) => !e.isDirectory)
+      .map((e) => e.entryName.replace(/\\/g, '/'))
+  } catch {
+    return 'Not a readable archive — nothing to ship to clients.'
+  }
+  if (names.some((n) => /\.(pak|utoc|ucas)$/i.test(n))) return null // a pak (even alongside PalSchema) → client gets it
+  if (names.some((n) => {
+    const l = n.toLowerCase()
+    return l.includes('/scripts/') || l.startsWith('scripts/') || l.endsWith('.lua') || l.endsWith('/main.dll')
+  }))
+    return null // Lua mod
+  if (names.some((n) => /(^|\/)palschema\/mods\/.+\.jsonc?$/i.test(n))) return SERVER_SIDE_WARN
+  if (names.length > 0 && names.every((n) => /engine\.ini|\.txt$/i.test(n)))
+    return 'Engine.ini text tweak — not an installable mod; apply to Engine.ini manually.'
+  return 'No client-installable files detected (no pak / Lua) — it won’t ship in the loadout.'
+}
+
+async function warnFromContent(contentDir: string): Promise<string | null> {
+  try {
+    const info = JSON.parse(await readFile(join(contentDir, 'Info.json'), 'utf8')) as { InstallRule?: { Type?: string }[] }
+    const types = (Array.isArray(info.InstallRule) ? info.InstallRule : []).map((r) => String(r?.Type ?? ''))
+    if (types.some((t) => t === 'Lua' || t === 'Paks' || t === 'LogicMods')) return null
+    if (types.some((t) => t === 'PalSchema' || t === 'UE4SS')) return SERVER_SIDE_WARN
+    return 'No client-installable files in this Workshop item — it won’t ship in the loadout.'
+  } catch {
+    return 'No Info.json — can’t confirm client files; it may not ship in the loadout.'
+  }
+}
+
 export async function listClientMods(): Promise<ClientMod[]> {
   const idx = await readIndex()
   return Object.values(idx).sort((a, b) => a.name.localeCompare(b.name) || b.addedAt - a.addedAt)
@@ -144,6 +189,7 @@ export async function addClientModFromNexus(url: string): Promise<ClientMod> {
     sizeBytes: buffer.length,
     keep: true,
     addedAt: Date.now(),
+    warn: warnFromZip(buffer, kind),
   }
   idx[id] = rec
   await writeIndex(idx)
@@ -180,6 +226,7 @@ export async function addClientModFromSteam(url: string): Promise<ClientMod> {
     sizeBytes: await pathSize(dest),
     keep: true,
     addedAt: Date.now(),
+    warn: await warnFromContent(dest),
   }
   idx[id] = rec
   await writeIndex(idx)
@@ -228,6 +275,7 @@ export async function addClientModUpload(fileName: string, buffer: Buffer): Prom
     sizeBytes: stored.length,
     keep: true,
     addedAt: Date.now(),
+    warn: isPak ? null : warnFromZip(stored, kind),
   }
   idx[id] = rec
   await writeIndex(idx)
@@ -243,7 +291,7 @@ export function detectSource(input: string): 'nexus' | 'steam' | null {
   return null
 }
 
-export type BulkResult = { input: string; ok: boolean; name?: string; kind?: string; error?: string }
+export type BulkResult = { input: string; ok: boolean; name?: string; kind?: string; warn?: string | null; error?: string }
 
 // Stage many mods from pasted Nexus/Steam URLs. Sequential — each is a CDN download +
 // disk write mutating the shared store; serial avoids races and is gentle on the Nexus
@@ -259,7 +307,7 @@ export async function addClientModsBulk(inputs: string[]): Promise<BulkResult[]>
     }
     try {
       const mod = src === 'nexus' ? await addClientModFromNexus(input) : await addClientModFromSteam(input)
-      results.push({ input, ok: true, name: mod.name, kind: mod.kind })
+      results.push({ input, ok: true, name: mod.name, kind: mod.kind, warn: mod.warn })
     } catch (e) {
       results.push({ input, ok: false, error: e instanceof Error ? e.message : 'Failed' })
     }

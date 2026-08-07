@@ -399,6 +399,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
           // Steam Workshop item — place by its Info.json InstallRule.
           const where = await placeWorkshop(join(store, 'content'), m.name, { modsDir, pakDir, logicDir }, luaMods, seenPaks, uniqueMod, producedForMod)
           placed.push(...where)
+          if (!where.length) skipped.push({ name: m.name, reason: 'server-side (PalSchema/UE4SS) or no client files — nothing to install on a client' })
         } else if (m.payload === 'payload.pak') {
           // Bare uploaded pak — name from the mod (original filename wasn't retained).
           const name = `${safeName(m.name)}.pak`

@@ -19,6 +19,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
+  AlertTriangleIcon,
   ChevronDownIcon,
   DownloadIcon,
   ExternalLinkIcon,
@@ -58,6 +59,7 @@ type ClientMod = {
   sizeBytes: number
   keep: boolean
   addedAt: number
+  warn?: string | null
 }
 type Suggestion = {
   source: 'nexus' | 'workshop'
@@ -67,7 +69,7 @@ type Suggestion = {
   category: string | null
   installOn: string
 }
-type BulkResult = { input: string; ok: boolean; name?: string; kind?: string; error?: string }
+type BulkResult = { input: string; ok: boolean; name?: string; kind?: string; warn?: string | null; error?: string }
 
 const SOURCE_LABEL: Record<string, string> = { nexus: 'Nexus', steam: 'Steam', workshop: 'Steam', upload: 'Upload' }
 
@@ -175,7 +177,8 @@ export function ClientModsPanel() {
     setBusy('add')
     try {
       const json = await postJson({ action: src === 'nexus' ? 'addNexus' : 'addSteam', url: u })
-      toast.success(json?.note ?? 'Staged for clients')
+      if (json?.mod?.warn) toast.warning(`Staged ${json.mod.name}, but: ${json.mod.warn}`, { duration: 8000 })
+      else toast.success(json?.note ?? 'Staged for clients')
       setUrl('')
       await load()
     } catch (err) {
@@ -210,7 +213,8 @@ export function ClientModsPanel() {
       setBusy(`sug:${s.source}:${s.id}`)
       try {
         const json = await postJson({ action: 'addCatalog', source: s.source, id: s.id })
-        toast.success(json?.note ?? `Staged ${s.name}`)
+        if (json?.mod?.warn) toast.warning(`Staged ${json.mod.name}, but: ${json.mod.warn}`, { duration: 8000 })
+        else toast.success(json?.note ?? `Staged ${s.name}`)
         await load()
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Add failed')
@@ -235,7 +239,8 @@ export function ClientModsPanel() {
         })
         const json = await res.json().catch(() => ({}))
         if (!res.ok) throw new Error(json.error ?? res.statusText)
-        toast.success(json?.note ?? 'Staged for clients')
+        if (json?.mod?.warn) toast.warning(`Staged ${json.mod.name}, but: ${json.mod.warn}`, { duration: 8000 })
+        else toast.success(json?.note ?? 'Staged for clients')
         await load()
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Upload failed')
@@ -544,9 +549,9 @@ export function ClientModsPanel() {
         {bulkResults && (
           <ul className="flex flex-col gap-1 rounded-md border p-2 text-xs">
             {bulkResults.map((r, i) => (
-              <li key={i} className={r.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}>
-                {r.ok ? '✓' : '✕'} {r.name ?? r.input}
-                {r.ok ? ` (${r.kind})` : ` — ${r.error}`}
+              <li key={i} className={r.ok ? (r.warn ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400') : 'text-destructive'}>
+                {r.ok ? (r.warn ? '⚠' : '✓') : '✕'} {r.name ?? r.input}
+                {r.ok ? (r.warn ? ` (${r.kind}) — ${r.warn}` : ` (${r.kind})`) : ` — ${r.error}`}
               </li>
             ))}
           </ul>
@@ -579,10 +584,16 @@ export function ClientModsPanel() {
                           <ExternalLinkIcon className="size-3" />
                         </a>
                       )}
+                      {m.warn && (
+                        <span title={m.warn} className="text-amber-500">
+                          <AlertTriangleIcon className="size-3.5" />
+                        </span>
+                      )}
                     </div>
                     <div className="truncate text-xs text-muted-foreground">
                       {SOURCE_LABEL[m.source] ?? m.source} · {m.kind}
                       {m.version ? ` · v${m.version}` : ''} · {formatBytes(m.sizeBytes)}
+                      {m.warn ? <span className="text-amber-500"> · won’t ship to clients</span> : ''}
                     </div>
                   </div>
                 </label>
