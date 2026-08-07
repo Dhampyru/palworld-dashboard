@@ -344,9 +344,13 @@ The admin mints a **share link**; a non-admin friend opens a PUBLIC page (the un
 - **Access model:** a share link is a BEARER capability — anyone with the URL can download
   (no login, no per-person check); the 192-bit token is the only gate (unguessable, not
   enumerable). Multi-use + persistent until revoked (revoke = instant 404 + deletes the zip).
-- **Deferred hardening (owner, later — not built):** optional link **expiry** (auto-die
-  after N hrs/days), **one-time / limited uses**, an optional **passphrase** the friend
-  enters, and a **"revoke all"** convenience. Current control = manual revoke when done.
+- **Hardening — BUILT + tested 2026-08-08:** per-link **expiry** (Never/1d/7d/30d; a `sweep`
+  on read deletes expired links + their zip), **max downloads** (`uses`/`maxUses`; a
+  non-incrementing `checkShare` pre-check + `prepareDownload` counts the use; exhausted →
+  410), optional **passphrase** (scrypt(pass, token) hash — never stored/exposed plaintext;
+  the public page shows an input, wrong → 403 via `?check=1`), and **"revoke all"**. Verified:
+  wrong-pass 403 / right-pass 200, 3rd download 410, backdated-expiry → 404 + zip swept,
+  revoke-all cleared the store.
 
 ## 9. Open decisions (for the owner)
 - Serve client paks from the dashboard (opt-in) vs. admin hosts them elsewhere.

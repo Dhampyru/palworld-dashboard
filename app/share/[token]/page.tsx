@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { getShare } from '@/lib/client-shares'
+import { ShareDownload } from '@/components/share-download'
 
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Join the server — mod bundle' }
@@ -10,6 +11,12 @@ export const metadata: Metadata = { title: 'Join the server — mod bundle' }
 // sent a link to. The unguessable token in the URL is the only capability.
 function fmtMB(n: number): string {
   return n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 / 1024).toFixed(0)} MB`
+}
+function fmtExpiry(ms: number): string {
+  const left = ms - Date.now()
+  if (left <= 0) return 'expired'
+  const h = Math.round(left / 3600_000)
+  return h < 48 ? `expires in ${h}h` : `expires in ${Math.round(h / 24)}d`
 }
 
 export default async function SharePage({ params }: { params: Promise<{ token: string }> }) {
@@ -29,6 +36,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
 
   const s = share.summary
   const modCount = s.lua + s.pak + s.logic
+  const exhausted = share.maxUses != null && share.uses >= share.maxUses
 
   return (
     <main className="mx-auto flex min-h-[85vh] max-w-lg flex-col justify-center gap-5 px-4 py-10">
@@ -56,16 +64,18 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           </p>
         )}
 
-        <a
-          href={`/api/share/${token}/download`}
-          download
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-        >
-          ⬇ Download the mod bundle ({fmtMB(share.sizeBytes)})
-        </a>
+        {exhausted ? (
+          <p className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-center text-sm text-amber-600 dark:text-amber-400">
+            This link has been used the maximum number of times. Ask your host for a new one.
+          </p>
+        ) : (
+          <ShareDownload token={token} requiresPass={share.requiresPass} sizeLabel={fmtMB(share.sizeBytes)} />
+        )}
         <p className="mt-1.5 text-center text-xs text-muted-foreground">
           {modCount} mod{modCount === 1 ? '' : 's'}
           {s.ue4ss ? ' · UE4SS included (self-contained)' : ''} · one .zip
+          {share.expiresAt ? ` · ${fmtExpiry(share.expiresAt)}` : ''}
+          {share.maxUses != null ? ` · ${share.uses}/${share.maxUses} downloads` : ''}
         </p>
 
         <div className="mt-6 rounded-md border border-primary/20 bg-primary/5 p-4 text-sm">

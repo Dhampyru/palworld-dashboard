@@ -4,7 +4,7 @@ import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { DEMO_MODE } from '@/lib/demo-mode'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { runWithInstance } from '@/lib/instances'
-import { createShare, deleteShare, listShares } from '@/lib/client-shares'
+import { createShare, deleteShare, listShares, revokeAll } from '@/lib/client-shares'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -53,6 +53,9 @@ async function _POST(request: NextRequest) {
     port?: number
     connectHost?: string | null
     label?: string | null
+    expiryHours?: number | null
+    maxUses?: number | null
+    passphrase?: string | null
   }
   try {
     body = (await request.json()) as typeof body
@@ -67,6 +70,9 @@ async function _POST(request: NextRequest) {
       port: body.port,
       connectHost: body.connectHost,
       label: body.label,
+      expiryHours: body.expiryHours,
+      maxUses: body.maxUses,
+      passphrase: body.passphrase,
     })
     return NextResponse.json({ share })
   } catch (e) {
@@ -80,6 +86,9 @@ export async function DELETE(request: NextRequest) {
 async function _DELETE(request: NextRequest) {
   const denied = requireAdmin(request)
   if (denied) return denied
+  if (request.nextUrl.searchParams.get('all') === '1') {
+    return NextResponse.json(await revokeAll())
+  }
   const token = request.nextUrl.searchParams.get('token') ?? ''
   if (!token) return NextResponse.json({ error: 'token required' }, { status: 400 })
   await deleteShare(token)

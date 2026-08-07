@@ -20,6 +20,10 @@ type ShareInfo = {
   gameVersion: string | null
   connect: string | null
   summary: { lua: number; pak: number; logic: number; parity: number; skipped: number; ue4ss: boolean }
+  expiresAt: number | null
+  maxUses: number | null
+  uses: number
+  requiresPass: boolean
 }
 
 // PATCH (not upstream): client mod-sync, Phase 1 (docs/specs/client-mod-sync.md).
@@ -58,6 +62,9 @@ export function InvitePanel() {
   // Friend share links.
   const [shares, setShares] = useState<ShareInfo[]>([])
   const [shareLabel, setShareLabel] = useState('')
+  const [shareExpiry, setShareExpiry] = useState('0') // hours; '0' = never
+  const [shareMaxUses, setShareMaxUses] = useState('') // '' = unlimited
+  const [sharePass, setSharePass] = useState('')
   const [creatingShare, setCreatingShare] = useState(false)
   const [copiedToken, setCopiedToken] = useState<string | null>(null)
 
@@ -183,6 +190,9 @@ export function InvitePanel() {
           port: manifest?.port,
           connectHost: host.trim() || null,
           label: shareLabel.trim() || null,
+          expiryHours: Number(shareExpiry) || null,
+          maxUses: Number(shareMaxUses) || null,
+          passphrase: sharePass.trim() || null,
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -190,6 +200,7 @@ export function InvitePanel() {
       const share: ShareInfo = json.share
       setShares((prev) => [share, ...prev])
       setShareLabel('')
+      setSharePass('')
       const ok = await copyToClipboard(shareUrl(share.token), { silent: true })
       toast.success(ok ? 'Share link created & copied — send it to your friend' : 'Share link created — copy it from the list')
     } catch (err) {
@@ -197,7 +208,20 @@ export function InvitePanel() {
     } finally {
       setCreatingShare(false)
     }
-  }, [config, includeUe4ss, manifest, host, shareLabel, shareUrl])
+  }, [config, includeUe4ss, manifest, host, shareLabel, shareExpiry, shareMaxUses, sharePass, shareUrl])
+
+  const revokeAllShares = useCallback(async () => {
+    if (!config) return
+    if (!window.confirm('Revoke ALL share links? Every link stops working immediately.')) return
+    try {
+      const res = await fetch('/api/client-mods/share?all=1', { method: 'DELETE', headers: buildPalworldProxyHeaders(config) })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText)
+      setShares([])
+      toast.success('All links revoked')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Revoke failed')
+    }
+  }, [config])
 
   const revokeShare = useCallback(
     async (token: string) => {
@@ -395,33 +419,85 @@ export function InvitePanel() {
           download the bundle. Snapshots the current mods + connect address; revoke it anytime. Needs your dashboard
           reachable by them (public URL / LAN).
         </p>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-2">
           <Input
             placeholder="Label (optional, e.g. “for Discord”)"
             value={shareLabel}
             onChange={(e) => setShareLabel(e.target.value)}
             className="sm:max-w-xs"
           />
-          <Button
-            size="sm"
-            className="h-9 gap-1.5 text-xs"
-            onClick={createShare}
-            disabled={creatingShare || keptCount === 0}
-          >
-            {creatingShare ? <Spinner className="size-3.5" /> : <Link2Icon className="size-3.5" />}
-            {creatingShare ? 'Building…' : 'Create share link'}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <label className="flex items-center gap-1.5">
+              Expires
+              <select
+                value={shareExpiry}
+                onChange={(e) => setShareExpiry(e.target.value)}
+                className="rounded-md border bg-background px-2 py-1 text-xs"
+              >
+                <option value="0">Never</option>
+                <option value="24">1 day</option>
+                <option value="168">7 days</option>
+                <option value="720">30 days</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5">
+              Max downloads
+              <Input
+                type="number"
+                min={1}
+                placeholder="∞"
+                value={shareMaxUses}
+                onChange={(e) => setShareMaxUses(e.target.value)}
+                className="h-8 w-20 text-xs"
+              />
+            </label>
+            <label className="flex items-center gap-1.5">
+              Passphrase
+              <Input
+                placeholder="optional"
+                value={sharePass}
+                onChange={(e) => setSharePass(e.target.value)}
+                className="h-8 w-32 text-xs"
+              />
+            </label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" className="h-9 gap-1.5 text-xs" onClick={createShare} disabled={creatingShare || keptCount === 0}>
+              {creatingShare ? <Spinner className="size-3.5" /> : <Link2Icon className="size-3.5" />}
+              {creatingShare ? 'Building…' : 'Create share link'}
+            </Button>
+            {shares.length > 0 && (
+              <button onClick={revokeAllShares} className="text-xs text-muted-foreground hover:text-destructive">
+                Revoke all
+              </button>
+            )}
+          </div>
         </div>
         {creatingShare && (
           <p className="text-[11px] text-muted-foreground">Building the bundle for the link — a large set takes a minute.</p>
         )}
         {shares.length > 0 && (
           <ul className="flex flex-col divide-y rounded-md border">
-            {shares.map((s) => (
+            {shares.map((s) => {
+              const expLeft = s.expiresAt ? s.expiresAt - Date.now() : null
+              const expired = expLeft != null && expLeft <= 0
+              const exhausted = s.maxUses != null && s.uses >= s.maxUses
+              return (
               <li key={s.token} className="flex items-center justify-between gap-2 px-3 py-2">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium">{s.label ?? 'Share link'}</div>
                   <div className="truncate font-mono text-[11px] text-muted-foreground">{shareUrl(s.token)}</div>
+                  <div className="flex flex-wrap gap-x-2 text-[11px] text-muted-foreground">
+                    {s.requiresPass && <span title="Passphrase-protected">🔒 passphrase</span>}
+                    {s.maxUses != null && (
+                      <span className={exhausted ? 'text-amber-500' : ''}>{s.uses}/{s.maxUses} downloads</span>
+                    )}
+                    {s.expiresAt && (
+                      <span className={expired ? 'text-amber-500' : ''}>
+                        {expired ? 'expired' : `expires ${new Date(s.expiresAt).toLocaleDateString()}`}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   <button
@@ -441,7 +517,8 @@ export function InvitePanel() {
                   </button>
                 </div>
               </li>
-            ))}
+              )
+            })}
           </ul>
         )}
       </div>
