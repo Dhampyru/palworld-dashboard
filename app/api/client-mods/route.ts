@@ -10,6 +10,7 @@ import {
   addClientModFromSteam,
   addClientModsBulk,
   addClientModUpload,
+  backfillClientWarnings,
   listClientMods,
   removeClientMod,
   setClientModKeep,
@@ -144,6 +145,10 @@ async function _POST(request: NextRequest) {
         if (typeof body.id !== 'string') return NextResponse.json({ error: 'id required' }, { status: 400 })
         await removeClientMod(body.id)
         return NextResponse.json({ removed: body.id })
+      }
+      case 'backfillWarnings': {
+        const r = await backfillClientWarnings()
+        return NextResponse.json(r)
       }
       // ── Per-mod config editing (shipped into the loadout) ──────────────────
       case 'configList': {

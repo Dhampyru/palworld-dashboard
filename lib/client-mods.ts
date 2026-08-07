@@ -5,6 +5,10 @@ import { downloadNexusFile, getModFiles, getModInfo, parseNexusModId, type Nexus
 import { downloadWorkshopItem, parseWorkshopId } from '@/lib/steam'
 import { normalizeArchiveToZip } from '@/lib/archive'
 import AdmZip from 'adm-zip'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const execFileP = promisify(execFile)
 
 // Client-mod store (docs/specs/client-mod-sync.md §2c, Phase 2 intake). Where an admin
 // STAGES the mods a friend's client needs — WITHOUT installing them on the server. The
@@ -105,27 +109,46 @@ function pickFile(files: NexusFile[]): NexusFile | null {
 const SERVER_SIDE_WARN =
   'PalSchema/server-side mod — it runs on the server, not the client, so there are no client files and it won’t ship in the loadout.'
 
-function warnFromZip(buffer: Buffer, kind: ClientModKind): string | null {
+// Classify from a list of archive entry names (shared by the buffer + on-disk paths).
+function classifyNames(names: string[], kind: ClientModKind): string | null {
   if (kind === 'ue4ss' || kind === 'pak') return null // Lua or a pak → client-installable
-  let names: string[]
-  try {
-    names = new AdmZip(buffer)
-      .getEntries()
-      .filter((e) => !e.isDirectory)
-      .map((e) => e.entryName.replace(/\\/g, '/'))
-  } catch {
-    return 'Not a readable archive — nothing to ship to clients.'
-  }
   if (names.some((n) => /\.(pak|utoc|ucas)$/i.test(n))) return null // a pak (even alongside PalSchema) → client gets it
-  if (names.some((n) => {
-    const l = n.toLowerCase()
-    return l.includes('/scripts/') || l.startsWith('scripts/') || l.endsWith('.lua') || l.endsWith('/main.dll')
-  }))
+  if (
+    names.some((n) => {
+      const l = n.toLowerCase()
+      return l.includes('/scripts/') || l.startsWith('scripts/') || l.endsWith('.lua') || l.endsWith('/main.dll')
+    })
+  )
     return null // Lua mod
   if (names.some((n) => /(^|\/)palschema\/mods\/.+\.jsonc?$/i.test(n))) return SERVER_SIDE_WARN
   if (names.length > 0 && names.every((n) => /engine\.ini|\.txt$/i.test(n)))
     return 'Engine.ini text tweak — not an installable mod; apply to Engine.ini manually.'
   return 'No client-installable files detected (no pak / Lua) — it won’t ship in the loadout.'
+}
+
+function warnFromZip(buffer: Buffer, kind: ClientModKind): string | null {
+  if (kind === 'ue4ss' || kind === 'pak') return null
+  try {
+    return classifyNames(
+      new AdmZip(buffer).getEntries().filter((e) => !e.isDirectory).map((e) => e.entryName.replace(/\\/g, '/')),
+      kind,
+    )
+  } catch {
+    return 'Not a readable archive — nothing to ship to clients.'
+  }
+}
+
+// Disk variant for BACKFILL: list entries with `lsar` (streaming, no big Node buffer) so a
+// 500MB payload never loads into memory.
+async function warnFromZipPath(zipPath: string, kind: ClientModKind): Promise<string | null> {
+  if (kind === 'ue4ss' || kind === 'pak') return null
+  try {
+    const { stdout } = await execFileP('lsar', [zipPath], { maxBuffer: 32 * 1024 * 1024 })
+    const names = stdout.split('\n').slice(1).map((s) => s.trim().replace(/\\/g, '/')).filter(Boolean)
+    return classifyNames(names, kind)
+  } catch {
+    return 'Not a readable archive — nothing to ship to clients.'
+  }
 }
 
 async function warnFromContent(contentDir: string): Promise<string | null> {
@@ -330,4 +353,26 @@ export async function removeClientMod(id: string): Promise<void> {
   delete idx[id]
   await writeIndex(idx)
   await rm(join(STORE_DIR, id), { recursive: true, force: true })
+}
+
+// Recompute `warn` for every staged mod (for entries added before the classifier existed).
+// Uses disk-safe inspection (lsar / Info.json) so large payloads never load into memory.
+export async function backfillClientWarnings(): Promise<{ updated: number; flagged: { name: string; warn: string }[] }> {
+  const idx = await readIndex()
+  let updated = 0
+  const flagged: { name: string; warn: string }[] = []
+  for (const [id, m] of Object.entries(idx)) {
+    const dir = join(STORE_DIR, id)
+    let warn: string | null
+    if (m.payload === 'content') warn = await warnFromContent(join(dir, 'content'))
+    else if (m.payload === 'payload.pak') warn = null
+    else warn = await warnFromZipPath(join(dir, 'payload.zip'), m.kind)
+    if ((m.warn ?? null) !== warn) {
+      m.warn = warn
+      updated++
+    }
+    if (warn) flagged.push({ name: m.name, warn })
+  }
+  await writeIndex(idx)
+  return { updated, flagged }
 }
