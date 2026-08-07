@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useServer } from '@/lib/server-context'
 import { buildPalworldProxyHeaders } from '@/lib/palworld'
+import { copyToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
@@ -189,12 +190,8 @@ export function InvitePanel() {
       const share: ShareInfo = json.share
       setShares((prev) => [share, ...prev])
       setShareLabel('')
-      try {
-        await navigator.clipboard.writeText(shareUrl(share.token))
-        toast.success('Share link created & copied — send it to your friend')
-      } catch {
-        toast.success('Share link created — copy it from the list')
-      }
+      const ok = await copyToClipboard(shareUrl(share.token), { silent: true })
+      toast.success(ok ? 'Share link created & copied — send it to your friend' : 'Share link created — copy it from the list')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create share link')
     } finally {
@@ -223,26 +220,26 @@ export function InvitePanel() {
 
   const copyShareLink = useCallback(
     async (token: string) => {
-      try {
-        await navigator.clipboard.writeText(shareUrl(token))
+      const ok = await copyToClipboard(shareUrl(token), { silent: true })
+      if (ok) {
         setCopiedToken(token)
         setTimeout(() => setCopiedToken((t) => (t === token ? null : t)), 2000)
         toast.success('Link copied')
-      } catch {
-        toast.error('Could not copy')
+      } else {
+        toast.error('Copy failed — select the link and copy manually')
       }
     },
     [shareUrl],
   )
 
   const copyInvite = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(inviteText)
+    const ok = await copyToClipboard(inviteText, { silent: true })
+    if (ok) {
       setCopied(true)
       if (copyTimer.current) clearTimeout(copyTimer.current)
       copyTimer.current = setTimeout(() => setCopied(false), 2000)
       toast.success('Invite copied to clipboard')
-    } catch {
+    } else {
       toast.error('Could not copy — select the text and copy manually')
     }
   }, [inviteText])
