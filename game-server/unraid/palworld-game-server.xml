@@ -1,0 +1,86 @@
+<?xml version="1.0"?>
+<!--
+  Unraid template for the Palworld game-server (Windows binary under plain Wine,
+  UE4SS + PalDefender capable). Pulls the published image from GHCR
+  (ghcr.io/dhampyru/palworld-game-server) — the game binary is NOT in the image;
+  SteamCMD downloads it to the mapped appdata volume on first boot.
+
+  Install: copy this file to
+    /boot/config/plugins/dockerMan/templates-user/palworld-game-server.xml
+  then Docker tab > Add Container > select "palworld-game-server" from the
+  Template dropdown, set ADMIN_PASSWORD, and Apply.
+
+  The headless virtual display (Xvfb) and the WINEDLLOVERRIDES needed for mod
+  injection are baked into the image / defaulted below — do not remove them.
+-->
+<Container version="2">
+  <Name>palworld-game-server</Name>
+  <Repository>ghcr.io/dhampyru/palworld-game-server:latest</Repository>
+  <Registry>https://github.com/Dhampyru/palworld-dashboard/pkgs/container/palworld-game-server</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Dhampyru/palworld-dashboard/issues</Support>
+  <Project>https://github.com/Dhampyru/palworld-dashboard</Project>
+  <Overview>Modded Palworld 1.0 dedicated server. Runs the WINDOWS server binary under plain WineHQ stable (NOT Proton) so it can load UE4SS server-side mods and PalDefender. The game binary itself is downloaded by SteamCMD to the appdata volume on first boot (~12-15GB) — nothing of Pocketpair's ships in the image. Pairs with the Palworld dashboard. Requires seccomp=unconfined + SYS_PTRACE (Wine ptrace) — preset in Extra Parameters. A headless Xvfb display is baked in (recent Palworld builds need a display context during graphics init even headless). RAM: 16GB minimum, 32GB for community servers.</Overview>
+  <Category>GameServers:</Category>
+  <WebUI/>
+  <TemplateURL/>
+  <Icon/>
+  <ExtraParams>--security-opt seccomp=unconfined --security-opt no-new-privileges:true --cap-add SYS_PTRACE --stop-timeout 30</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>16GB+ RAM. First boot downloads ~12-15GB via SteamCMD to the game path.</Requires>
+
+  <!-- ============================ Ports ============================ -->
+  <Config Name="Game Port" Target="8211" Default="8211" Mode="udp" Description="Players connect here. Forward this at your router." Type="Port" Display="always" Required="true" Mask="false">8211</Config>
+  <Config Name="Steam Query Port" Target="27015" Default="27015" Mode="udp" Description="Community server browser. Optional." Type="Port" Display="always" Required="false" Mask="false">27015</Config>
+  <Config Name="RCON Port" Target="25575" Default="25575" Mode="tcp" Description="Admin console. Needed by the dashboard. Keep INTERNAL — do NOT port-forward at your router." Type="Port" Display="advanced" Required="false" Mask="false">25575</Config>
+  <Config Name="REST API Port" Target="8212" Default="8212" Mode="tcp" Description="Game REST API the dashboard polls. Keep INTERNAL — do NOT port-forward." Type="Port" Display="advanced" Required="false" Mask="false">8212</Config>
+  <Config Name="PalDefender REST Port" Target="17993" Default="17993" Mode="tcp" Description="PalDefender REST (only if ENABLE_PALDEFENDER=true). Keep INTERNAL — do NOT port-forward." Type="Port" Display="advanced" Required="false" Mask="false">17993</Config>
+
+  <!-- ============================ Paths ============================ -->
+  <Config Name="Game data" Target="/palworld" Default="/mnt/user/appdata/palworld-game-server/game" Mode="rw" Description="Server install, saves, mods, backups. The ~12-15GB game lands here on first boot." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/palworld-game-server/game</Config>
+  <Config Name="Mod staging" Target="/mods" Default="/mnt/user/appdata/palworld-game-server/mods" Mode="rw" Description="Optional host-side mod staging: Win64/ (UE4SS) and pak/ (.pak). Copied in on start." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/user/appdata/palworld-game-server/mods</Config>
+  <Config Name="Host machine-id" Target="/etc/machine-id" Default="/etc/machine-id" Mode="ro" Description="Stable machine-id for Steam. Remove this mapping if your host has no /etc/machine-id." Type="Path" Display="advanced" Required="false" Mask="false">/etc/machine-id</Config>
+
+  <!-- ========================= Core settings ========================= -->
+  <Config Name="ADMIN_PASSWORD" Target="ADMIN_PASSWORD" Default="" Mode="" Description="Admin password for RCON + REST. Use 32 alphanumeric chars (punctuation breaks the INI/argv/compose path). CHANGE THIS." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="SERVER_NAME" Target="SERVER_NAME" Default="My Palworld Server" Mode="" Description="Server name shown in the browser." Type="Variable" Display="always" Required="false" Mask="false">My Palworld Server</Config>
+  <Config Name="SERVER_PASSWORD" Target="SERVER_PASSWORD" Default="" Mode="" Description="Join password (blank = open server)." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="MAX_PLAYERS" Target="MAX_PLAYERS" Default="32" Mode="" Description="Max concurrent players (hard cap 32)." Type="Variable" Display="always" Required="false" Mask="false">32</Config>
+
+  <!-- ========================= Wine / injection (do not change) ========================= -->
+  <Config Name="WINEDLLOVERRIDES" Target="WINEDLLOVERRIDES" Default="dwmapi=n,b;d3d9=n,b" Mode="" Description="REQUIRED for mod injection (dwmapi=UE4SS, d3d9=PalDefender). Do NOT change or clear." Type="Variable" Display="advanced" Required="true" Mask="false">dwmapi=n,b;d3d9=n,b</Config>
+
+  <!-- ========================= Mods ========================= -->
+  <Config Name="ENABLE_UE4SS" Target="ENABLE_UE4SS" Default="true" Mode="" Description="Auto-install the UE4SS mod framework on boot." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="ENABLE_PALDEFENDER" Target="ENABLE_PALDEFENDER" Default="false" Mode="" Description="Install PalDefender anti-cheat (needs PALDEFENDER_URL)." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="PALDEFENDER_URL" Target="PALDEFENDER_URL" Default="" Mode="" Description="Download URL for the PalDefender release (only if ENABLE_PALDEFENDER=true)." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <!-- ========================= Connectivity ========================= -->
+  <Config Name="RCON_ENABLED" Target="RCON_ENABLED" Default="true" Mode="" Description="Enable RCON (needed by the dashboard)." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="REST_API_ENABLED" Target="REST_API_ENABLED" Default="true" Mode="" Description="Enable the game REST API (needed by the dashboard)." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="COMMUNITY" Target="COMMUNITY" Default="false" Mode="" Description="Advertise in the community server browser." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="CROSSPLAY_PLATFORMS" Target="CROSSPLAY_PLATFORMS" Default="Steam,Xbox,PS5,Mac" Mode="" Description="Platforms allowed to connect." Type="Variable" Display="advanced" Required="false" Mask="false">Steam,Xbox,PS5,Mac</Config>
+  <Config Name="PUBLIC_IP" Target="PUBLIC_IP" Default="" Mode="" Description="Advertised public IP (usually leave blank; auto-detected)." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <!-- ========================= Gameplay (blank = ini default) ========================= -->
+  <Config Name="ENABLE_PVP" Target="ENABLE_PVP" Default="false" Mode="" Description="Sets all three required PvP toggles together." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="DIFFICULTY" Target="DIFFICULTY" Default="" Mode="" Description="None (custom rates), Casual, Normal, or Hard." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="DEATH_PENALTY" Target="DEATH_PENALTY" Default="" Mode="" Description="None, Item, ItemAndEquipment, or All." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="EXP_RATE" Target="EXP_RATE" Default="" Mode="" Description="XP multiplier (1.0 = vanilla). Blank = ini default." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="PAL_CAPTURE_RATE" Target="PAL_CAPTURE_RATE" Default="" Mode="" Description="Capture multiplier. Blank = ini default." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="WORK_SPEED_RATE" Target="WORK_SPEED_RATE" Default="" Mode="" Description="Pal work-speed multiplier. Blank = ini default." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <!-- ========================= Ops ========================= -->
+  <Config Name="TARGET_MANIFEST_ID" Target="TARGET_MANIFEST_ID" Default="" Mode="" Description="Lock to a specific Steam build (prevents an update outpacing UE4SS). Blank = latest." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="ALWAYS_UPDATE_ON_START" Target="ALWAYS_UPDATE_ON_START" Default="false" Mode="" Description="Run SteamCMD validation on every start (slower boot)." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="BACKUP_ENABLED" Target="BACKUP_ENABLED" Default="false" Mode="" Description="Scheduled in-container backups via supercronic to the game path's backups/." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="BACKUP_CRON_EXPRESSION" Target="BACKUP_CRON_EXPRESSION" Default="0 0 * * *" Mode="" Description="Cron schedule for backups (default midnight daily)." Type="Variable" Display="advanced" Required="false" Mask="false">0 0 * * *</Config>
+  <Config Name="TZ" Target="TZ" Default="UTC" Mode="" Description="Container timezone (e.g. America/Los_Angeles)." Type="Variable" Display="advanced" Required="false" Mask="false">UTC</Config>
+</Container>
