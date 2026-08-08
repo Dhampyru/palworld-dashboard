@@ -475,9 +475,9 @@ function installTxt(s: LoadoutSummary, includedUe4ss: boolean): string {
     '',
     'UNINSTALL',
     '  Keep this extracted folder. To remove the mods later, close Palworld and double-click',
-    '  uninstall.bat — it deletes exactly the files this bundle added (listed in',
-    '  installed-files.txt) and nothing else. (This also removes UE4SS; if you run other',
-    '  UE4SS mods, reinstall your loader afterward.)',
+    '  uninstall.bat — it removes the mods this bundle installed (their folders, including any',
+    '  config/cache they wrote after launch) and nothing else — your other mods are left alone.',
+    '  (This also removes UE4SS; if you run other UE4SS mods, reinstall your loader afterward.)',
     '',
     'MODS IN THIS LOADOUT',
     ...s.mods.map((m) => `  - ${m.name}  [${m.kind}]  -> ${m.placed.join(', ') || 'nothing placed'}`),
@@ -587,6 +587,19 @@ try {
     $rel = $line.Trim(); if (-not $rel) { continue }
     $p = Join-Path $pal ($rel -replace '/','\')
     if (Test-Path $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force; $removed++ }
+  }
+  # Remove the mod FOLDERS this bundle created under ue4ss\Mods wholesale — even if a mod wrote
+  # runtime files (caches/configs) into them after launch, which aren't in the manifest and would
+  # otherwise leave the folder behind. Only folders listed in installed-files.txt are touched, so
+  # the player's OTHER mods are never removed.
+  $modRoots = @{}
+  foreach ($line in Get-Content $listFile) {
+    $rel = $line.Trim() -replace '/','\'
+    if ($rel -match '^Pal\\Binaries\\Win64\\ue4ss\\Mods\\([^\\]+)\\') { $modRoots[$Matches[1]] = $true }
+  }
+  foreach ($name in $modRoots.Keys) {
+    $p = Join-Path $pal ("Pal\Binaries\Win64\ue4ss\Mods\" + $name)
+    if (Test-Path $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
   }
   foreach ($d in @("Pal\Binaries\Win64\ue4ss","Pal\Content\Paks\~mods","Pal\Content\Paks\LogicMods")) {
     $dir = Join-Path $pal $d
