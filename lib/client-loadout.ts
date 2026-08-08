@@ -237,7 +237,14 @@ async function placeWorkshop(
       const dest = join(paths.modsDir, name)
       for (const root of roots) {
         if (root !== contentDir && !root.startsWith(contentDir + sep)) continue
-        if (await isDir(root)) await cp(root, dest, { recursive: true })
+        if (!(await isDir(root))) continue
+        // A NAMED target folder (e.g. ./Scripts) must keep its name under the mod dir so
+        // UE4SS finds Mods/<pkg>/Scripts/main.lua. Copying its CONTENTS into the mod root
+        // (the old behavior) left main.lua at Mods/<pkg>/main.lua, which UE4SS never loads
+        // — so the mod's Lua silently didn't run on clients. A '.' target copies the
+        // content root (which already contains Scripts/) into the mod dir.
+        const dst = root === contentDir ? dest : join(dest, basename(root))
+        await cp(root, dst, { recursive: true })
       }
       luaMods.push(name)
       produced.push(name)
