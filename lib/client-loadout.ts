@@ -274,22 +274,50 @@ async function includeFramework(win64Dest: string, modsDir: string): Promise<boo
   return true
 }
 
-// Copy the live server's PalSchema (the loader framework + every submod it runs) into the
-// bundle so clients render the same modded items/recipes/passives/icons as the host — the
-// PalSchema analogue of the server-parity paks. The framework (dlls/main + enabled.txt)
-// rides along. Returns the submod folder names shipped (empty if PalSchema isn't installed
-// server-side). Caller seeds these into `seen` so per-payload extraction won't duplicate.
-async function includePalSchemaParity(modsDir: string): Promise<string[]> {
+// Copy ONLY the PalSchema loader framework (dlls/config/enabled.txt — NOT its mods/ subtree)
+// from the live install into the bundle, so the client-relevant PalSchema submods we placed
+// have a loader. Server-only PalSchema mods are intentionally NOT bulk-copied — clients get
+// only the PalSchema submods that belong to the curated client set. Returns false if
+// PalSchema isn't installed server-side.
+async function includePalSchemaFramework(modsDir: string): Promise<boolean> {
   const livePS = join(currentGameDir(), 'Pal', 'Binaries', 'Win64', 'ue4ss', 'Mods', 'PalSchema')
-  if (!(await isDir(livePS))) return []
+  if (!(await isDir(livePS))) return false
   const destPS = join(modsDir, 'PalSchema')
-  await cp(livePS, destPS, { recursive: true })
-  const modsSub = join(destPS, 'mods')
-  const names: string[] = []
-  if (await isDir(modsSub)) {
-    for (const e of await readdir(modsSub, { withFileTypes: true })) if (e.isDirectory()) names.push(e.name)
+  await mkdir(destPS, { recursive: true })
+  for (const e of await readdir(livePS, { withFileTypes: true })) {
+    if (e.name === 'mods') continue // submods are placed per client mod, not bulk-copied
+    await cp(join(livePS, e.name), join(destPS, e.name), { recursive: true })
   }
-  return names
+  return true
+}
+
+// A Steam Workshop client mod can carry PalSchema data as a `./PalSchema/` wrapper whose
+// CONTENTS are the submod (blueprints/, buildings/, resources/, …) — cf. Glider Restoration,
+// Palvolve. Flatten that wrapper into PalSchema/mods/<PackageName>/. Returns the folder name
+// placed, or null if there's no PalSchema wrapper. Deduped by name via `seen`.
+async function collectSteamPalSchema(
+  contentDir: string,
+  fallbackName: string,
+  destModsDir: string,
+  seen: Set<string>,
+): Promise<string | null> {
+  const wrapper = join(contentDir, 'PalSchema')
+  if (!(await isDir(wrapper))) return null
+  let pkg = safeName(fallbackName)
+  try {
+    const info = JSON.parse(await readFile(join(contentDir, 'Info.json'), 'utf8')) as { PackageName?: unknown }
+    if (typeof info.PackageName === 'string' && info.PackageName.trim()) pkg = safeName(info.PackageName.trim())
+  } catch {
+    /* fall back to the mod name */
+  }
+  if (seen.has(pkg.toLowerCase())) return null
+  seen.add(pkg.toLowerCase())
+  const dest = join(destModsDir, pkg)
+  await mkdir(dest, { recursive: true })
+  for (const e of await readdir(wrapper, { withFileTypes: true })) {
+    await cp(join(wrapper, e.name), join(dest, e.name), { recursive: true })
+  }
+  return pkg
 }
 
 // PalSchema submod content dirs (mirrors the real layout: items/raw/blueprints/pals/skins/…
@@ -415,7 +443,7 @@ function installTxt(s: LoadoutSummary, includedUe4ss: boolean): string {
     `Generated: ${s.generatedAt}`,
     `Mods: ${s.mods.length} (${s.luaMods.length} UE4SS/Lua, ${s.pakFiles.length} pak, ${s.logicMods.length} LogicMods)`,
     s.parityPaks ? `Includes ${s.parityPaks} server-parity pak(s) so your content matches the server.` : '',
-    s.palSchemaMods ? `Includes PalSchema + ${s.palSchemaMods} PalSchema mod(s) so items/recipes/icons match the server.` : '',
+    s.palSchemaMods ? `Includes PalSchema + ${s.palSchemaMods} client PalSchema mod(s) (custom items/recipes/icons).` : '',
     s.engineTweaks.length
       ? `Engine.ini tweaks from ${s.engineTweaks.length} mod(s) are in recommended-engine-ini.txt (optional, apply manually).`
       : '',
@@ -609,12 +637,11 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     let includedUe4ss = false
     if (includeUe4ss) includedUe4ss = await includeFramework(win64, modsDir)
 
-    // Ship the host's PalSchema (framework + all its submods) so clients render the same
-    // modded items/recipes/passives/icons as the server — parity, like the paks below.
+    // PalSchema: ship only the submods that belong to the curated CLIENT mods (extracted from
+    // their payloads / Steam content below) — NOT the host's server-only PalSchema mods. The
+    // loader framework is added afterwards, only if a client mod contributed a submod.
     const seenPalSchema = new Set<string>()
-    const palSchemaParity = await includePalSchemaParity(modsDir)
-    for (const n of palSchemaParity) seenPalSchema.add(n.toLowerCase())
-    let palSchemaMods = palSchemaParity.length
+    let palSchemaMods = 0
     const engineIniTweaks: { name: string; text: string }[] = []
 
     const luaMods: string[] = []
@@ -649,7 +676,14 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
           // Steam Workshop item — place by its Info.json InstallRule.
           const where = await placeWorkshop(join(store, 'content'), m.name, { modsDir, pakDir, logicDir }, luaMods, seenPaks, uniqueMod, producedForMod)
           placed.push(...where)
-          if (!where.length) skipped.push({ name: m.name, reason: 'server-side (PalSchema/UE4SS) or no client files — nothing to install on a client' })
+          // …and its PalSchema data, if any (a ./PalSchema wrapper — e.g. Palvolve, Glider Restoration).
+          const psSteam = await collectSteamPalSchema(join(store, 'content'), m.name, palSchemaModsDir, seenPalSchema)
+          if (psSteam) {
+            placed.push('PalSchema/mods (1)')
+            palSchemaMods += 1
+          }
+          if (!where.length && !psSteam)
+            skipped.push({ name: m.name, reason: 'server-side (UE4SS) or no client files — nothing to install on a client' })
         } else if (m.payload === 'payload.pak') {
           // Bare uploaded pak — name from the mod (original filename wasn't retained).
           const name = `${safeName(m.name)}.pak`
@@ -679,7 +713,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
           if (ps.placed.length) {
             placed.push(`PalSchema/mods (${ps.placed.length})`)
             palSchemaMods += ps.placed.length
-          } else if (ps.covered.length) placed.push('PalSchema data (server parity)')
+          } else if (ps.covered.length) placed.push('PalSchema data (already in loadout)')
           if (!roots.length && !paks.length && !logic.length && !dupes && !ps.placed.length && !ps.covered.length)
             skipped.push({ name: m.name, reason: 'no Lua mod folder or pak found' })
         } else if (m.kind === 'pak' || m.kind === 'palschema') {
@@ -693,13 +727,13 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
           if (ps.placed.length) {
             placed.push(`PalSchema/mods (${ps.placed.length})`)
             palSchemaMods += ps.placed.length
-          } else if (ps.covered.length) placed.push('PalSchema data (server parity)')
+          } else if (ps.covered.length) placed.push('PalSchema data (already in loadout)')
           if (!paks.length && !logic.length && !dupes && !ps.placed.length && !ps.covered.length) {
             skipped.push({
               name: m.name,
               reason:
                 m.kind === 'palschema'
-                  ? 'PalSchema data not found in payload and not on server — add manually'
+                  ? 'PalSchema data not found in payload — add manually'
                   : 'no pak found in archive',
             })
           }
@@ -722,7 +756,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
           if (ps.placed.length) {
             placed.push(`PalSchema/mods (${ps.placed.length})`)
             palSchemaMods += ps.placed.length
-          } else if (ps.covered.length) placed.push('PalSchema data (server parity)')
+          } else if (ps.covered.length) placed.push('PalSchema data (already in loadout)')
           if (!roots.length && !paks.length && !logic.length && !dupes && !ps.placed.length && !ps.covered.length) {
             // Some Nexus "mods" are just Engine.ini text tweaks (no installable files) — fold
             // their settings into recommended-engine-ini.txt instead of dropping them.
@@ -780,6 +814,10 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     pakFiles.length = 0
     for (const f of await walkFiles(pakDir)) if (/\.pak$/i.test(f)) pakFiles.push(basename(f))
     for (const f of await walkFiles(logicDir)) if (/\.pak$/i.test(f)) logicMods.push(basename(f))
+
+    // PalSchema loader framework — shipped only if a client mod contributed a submod, so we
+    // never ship an empty/orphan PalSchema (and never the host's server-only submods).
+    if (palSchemaMods > 0) await includePalSchemaFramework(modsDir)
 
     // Generate mods.txt: enabled framework defaults + every client Lua mod + PalSchema.
     const active = new Map<string, boolean>()
