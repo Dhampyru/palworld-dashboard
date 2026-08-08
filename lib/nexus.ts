@@ -86,6 +86,10 @@ const MODS_FILE = process.env.NEXUS_MODS_FILE ?? './data/nexus-mods.json'
 type Assoc = {
   modId: number
   baselineVersion: string | null
+  // The installed file's clean display name (variant key). Update detection compares the
+  // baseline only against files sharing this name, so a DIFFERENT variant of a multi-file mod
+  // bumping never shows a phantom update. Absent on legacy links → inferred on next check.
+  variant?: string | null
   // Version cache for the bulk-sweep fast path (Phase 3). `latestVersion` absent
   // (undefined) = never cached; null = cached, mod has no version string.
   latestVersion?: string | null
@@ -134,7 +138,11 @@ export async function getModInfo(modId: number): Promise<NexusModInfo | null> {
   }
 }
 
-export type NexusFile = { fileId: number; name: string; version: string | null; category: string | null }
+// `name` is the download filename (noisy: embeds modId/version/timestamp/hash). `displayName`
+// is Nexus's clean per-file name (e.g. "358 GuildChest Slots Pak version") — STABLE across
+// versions of the same variant, so it's the key used to match "the same file" when detecting
+// updates on a mod that ships several independently-versioned MAIN files.
+export type NexusFile = { fileId: number; name: string; displayName: string; version: string | null; category: string | null }
 
 // The version of the newest MAIN file — the correct thing to compare an installed
 // mod against. Nexus has TWO version fields: the mod page's headline `version` AND each
@@ -174,6 +182,35 @@ export function latestMainFileVersion(files: NexusFile[]): string | null {
   return best ?? (pool.length ? (pool[pool.length - 1].version ?? null) : null)
 }
 
+// Variant-aware latest: the newest version among MAIN files that share the INSTALLED variant's
+// display name — so a mod shipping several independently-versioned MAIN files (e.g. 3434
+// GuildChest: "358 …Pak version" v2 vs "2466 …" v1) never reports a different variant's bump as
+// an update. `variant` is the stored installed display name; if absent (legacy link) it's
+// inferred as the unique MAIN file whose version equals the baseline. Returns the resolved
+// variant so the caller can persist it. Falls back to all MAIN files when the variant is
+// unknown or has disappeared from the mod.
+export function resolveVariantLatest(
+  files: NexusFile[],
+  baselineVersion: string | null,
+  variant: string | null | undefined,
+): { latest: string | null; variant: string | null } {
+  const main = files.filter((f) => (f.category ?? '').toUpperCase() === 'MAIN')
+  const pool = main.length ? main : files
+  let v = variant ?? null
+  if (!v && baselineVersion) {
+    const matches = pool.filter((f) => f.version && compareVersions(f.version, baselineVersion) === 0)
+    if (matches.length === 1) v = matches[0].displayName
+  }
+  const scoped = v ? pool.filter((f) => f.displayName === v) : pool
+  const use = scoped.length ? scoped : pool
+  let best: string | null = null
+  for (const f of use) {
+    if (f.version == null) continue
+    if (best == null || compareVersions(f.version, best) > 0) best = f.version
+  }
+  return { latest: best ?? (use.length ? (use[use.length - 1].version ?? null) : null), variant: v }
+}
+
 // Downloadable files for a mod — MAIN + OPTIONAL only (skip ARCHIVED/OLD_VERSION).
 export async function getModFiles(modId: number): Promise<NexusFile[]> {
   const found = await readNexusKey()
@@ -186,14 +223,20 @@ export async function getModFiles(modId: number): Promise<NexusFile[]> {
     })
     if (!res.ok) return []
     const j = (await res.json()) as {
-      files?: { file_id: number; file_name: string; version?: string; category_name?: string | null }[]
+      files?: { file_id: number; name?: string; file_name: string; version?: string; category_name?: string | null }[]
     }
     return (j.files ?? [])
       .filter((f) => {
         const c = (f.category_name ?? '').toUpperCase()
         return c === 'MAIN' || c === 'OPTIONAL' || c === 'UPDATE'
       })
-      .map((f) => ({ fileId: f.file_id, name: f.file_name, version: f.version ?? null, category: f.category_name ?? null }))
+      .map((f) => ({
+        fileId: f.file_id,
+        name: f.file_name,
+        displayName: (f.name ?? f.file_name).trim(),
+        version: f.version ?? null,
+        category: f.category_name ?? null,
+      }))
   } catch {
     return []
   }
@@ -248,20 +291,28 @@ async function writeAssocs(a: Assocs): Promise<void> {
 // Used by the update flow to resolve which Nexus mod a row points at.
 export async function getLinkedModId(
   modKey: string,
-): Promise<{ modId: number; baselineVersion: string | null } | null> {
+): Promise<{ modId: number; baselineVersion: string | null; variant?: string | null } | null> {
   const a = await readAssocs()
   return a[modKey] ?? null
 }
 
-export async function linkNexusMod(modKey: string, modId: number, haveVersion: string | null): Promise<void> {
+export async function linkNexusMod(
+  modKey: string,
+  modId: number,
+  haveVersion: string | null,
+  variant?: string | null,
+): Promise<void> {
   const info = await getModInfo(modId)
   const a = await readAssocs()
   // Seed the version cache from this fetch so getNexusMods needn't re-hit Nexus
-  // until the bulk sweep says this mod actually changed.
+  // until the bulk sweep says this mod actually changed. `variant` = the installed file's
+  // display name, so update detection stays scoped to the same file across versions.
+  const baseline = (haveVersion?.trim() || info?.version) ?? null
   a[modKey] = {
     modId,
-    baselineVersion: (haveVersion?.trim() || info?.version) ?? null,
-    latestVersion: info?.version ?? null,
+    baselineVersion: baseline,
+    variant: variant ?? null,
+    latestVersion: baseline, // seed latest == baseline so a just-installed mod shows no update
     latestName: info?.name,
     latestAuthor: info?.author ?? null,
     checkedAt: Date.now(),
@@ -392,14 +443,22 @@ export async function getNexusMods(): Promise<Record<string, NexusModRow>> {
     let available: boolean
     if (mustRefetch) {
       const [info, files] = await Promise.all([getModInfo(assoc.modId), getModFiles(assoc.modId)])
-      // Compare the installed FILE version (baseline) to the latest FILE version — NOT
-      // the mod's headline `version`, which is a different field and diverges for some
-      // mods (that mismatch was flagging phantom updates on up-to-date mods).
-      latest = latestMainFileVersion(files) ?? info?.version ?? null
+      // Compare the installed FILE version (baseline) to the latest version OF THE SAME VARIANT
+      // — not the headline `version` (a divergent field) and not the newest across all MAIN
+      // files (a different variant's bump would flag a phantom update on a multi-file mod).
+      const rv = resolveVariantLatest(files, assoc.baselineVersion, assoc.variant)
+      latest = rv.latest ?? info?.version ?? null
       name = info?.name ?? `Mod ${assoc.modId}`
       author = info?.author ?? null
       available = info?.available ?? true
-      a[modKey] = { ...assoc, latestVersion: latest, latestName: name, latestAuthor: author, checkedAt: now }
+      a[modKey] = {
+        ...assoc,
+        variant: rv.variant ?? assoc.variant ?? null, // backfill the inferred variant
+        latestVersion: latest,
+        latestName: name,
+        latestAuthor: author,
+        checkedAt: now,
+      }
       dirty = true
     } else {
       latest = assoc.latestVersion ?? null

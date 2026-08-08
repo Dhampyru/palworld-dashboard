@@ -5,6 +5,7 @@ import { DEMO_MODE } from '@/lib/demo-mode'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { runWithInstance } from '@/lib/instances'
 import {
+  compareVersions,
   downloadNexusFile,
   getLinkedModId,
   getModFiles,
@@ -12,6 +13,7 @@ import {
   getNexusStatus,
   linkNexusMod,
   parseNexusModId,
+  resolveVariantLatest,
   unlinkNexusMod,
   type NexusFile,
 } from '@/lib/nexus'
@@ -64,15 +66,25 @@ async function _GET(request: NextRequest) {
 // MAIN file, and among those the one matching the mod's headline version; else the
 // newest MAIN, else the newest of any downloadable file. Paks embed no version so
 // the version-match is best-effort — but MAIN is the right file to (re)install.
-function pickUpdateFile(files: NexusFile[], latestVersion: string | null): NexusFile | null {
+function pickUpdateFile(files: NexusFile[], latestVersion: string | null, variant: string | null): NexusFile | null {
   if (!files.length) return null
   const main = files.filter((f) => (f.category ?? '').toUpperCase() === 'MAIN')
-  const pool = main.length ? main : files
+  const base = main.length ? main : files
+  // Stay within the installed variant so an update never silently switches variant.
+  const scoped = variant ? base.filter((f) => f.displayName === variant) : base
+  const pool = scoped.length ? scoped : base
   if (latestVersion) {
     const match = pool.find((f) => f.version === latestVersion)
     if (match) return match
   }
-  return pool[pool.length - 1]
+  // Newest by version within the pool (fall back to the last entry).
+  let best: NexusFile | null = null
+  for (const f of pool) {
+    if (best == null || (f.version != null && (best.version == null || compareVersions(f.version, best.version) > 0))) {
+      best = f
+    }
+  }
+  return best ?? pool[pool.length - 1] ?? null
 }
 
 // Download a mod's newest MAIN file (fallback: newest file) and normalize to a zip
@@ -117,7 +129,9 @@ async function installModFile(
   // Baseline = the version of the file we just installed. Mod name → a folder-name
   // hint so bare "guts at the root" Lua mods (no wrapper folder) can be named.
   const files = await getModFiles(modId)
-  const version = files.find((f) => f.fileId === fileId)?.version ?? null
+  const installedFile = files.find((f) => f.fileId === fileId)
+  const version = installedFile?.version ?? null
+  const variant = installedFile?.displayName ?? null // the installed variant → update-detection scope
   const nameHint = ((await getModInfo(modId))?.name ?? '').replace(/[^A-Za-z0-9_-]/g, '') || undefined
 
   let assocKey: string | null = null
@@ -140,8 +154,8 @@ async function installModFile(
     // runtime-write placeholder) is now extracted by installUe4ssModArchive itself.
   }
 
-  // Link it for update-watching (baseline = the installed version).
-  if (assocKey) await linkNexusMod(assocKey, modId, version)
+  // Link it for update-watching (baseline = the installed version; variant scopes updates).
+  if (assocKey) await linkNexusMod(assocKey, modId, version, variant)
   return { kind, name: installedName, version, assocKey }
 }
 
@@ -271,8 +285,10 @@ async function _POST(request: NextRequest) {
       if (!modKey) return NextResponse.json({ error: 'modKey required' }, { status: 400 })
       const linked = await getLinkedModId(modKey)
       if (!linked) return NextResponse.json({ error: "This mod isn't linked to Nexus." }, { status: 400 })
-      const [info, files] = await Promise.all([getModInfo(linked.modId), getModFiles(linked.modId)])
-      const file = pickUpdateFile(files, info?.version ?? null)
+      const files = await getModFiles(linked.modId)
+      // Update WITHIN the installed variant — newest version of the same file, never a different variant.
+      const { latest, variant } = resolveVariantLatest(files, linked.baselineVersion, linked.variant)
+      const file = pickUpdateFile(files, latest, variant)
       if (!file) return NextResponse.json({ error: 'No downloadable file found on Nexus.' }, { status: 400 })
 
       const r = await installModFile(linked.modId, file.fileId, true) // update = replace in place
