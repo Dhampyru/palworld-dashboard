@@ -189,6 +189,26 @@ function fmtDate(iso: string | null): string {
 
 export function SavesPanel() {
   const { config, players } = useServer()
+  const [purgingCache, setPurgingCache] = useState(false)
+  const purgeModCache = useCallback(async () => {
+    if (!config) return
+    setPurgingCache(true)
+    const toastId = toast.loading('Clearing mod download cache…')
+    try {
+      const res = await fetch('/api/game-mods/scan', {
+        method: 'DELETE',
+        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Failed')
+      toast.success(`Cleared ${j.stashCleared ?? 0} pending upload(s) + ${j.workshopRemoved ?? 0} un-installed Steam download(s).`, { id: toastId })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to clear cache', { id: toastId })
+    } finally {
+      setPurgingCache(false)
+    }
+  }, [config])
   const [data, setData] = useState<SavesData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1060,6 +1080,21 @@ export function SavesPanel() {
             ) : (
               <p className="text-sm text-muted-foreground">{loading ? 'Loading…' : 'No dashboard config backups yet.'}</p>
             )}
+          </section>
+
+          {/* Mod download cache (deep-scan downloads pending accept) */}
+          <section className="flex flex-col gap-2">
+            <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <HardDriveIcon className="size-3.5" /> Mod download cache
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Deep scan downloads a mod to read its files before install. Rejected scans self-clean (on the next scan
+              and immediately when you cancel); this clears everything now — all pending uploads plus any Steam
+              Workshop items that were scanned but never installed. Installed mods are never touched.
+            </p>
+            <Button variant="outline" size="sm" className="w-fit gap-1.5" disabled={!config || purgingCache} onClick={purgeModCache}>
+              {purgingCache ? <Spinner className="size-4" /> : <HardDriveIcon className="size-4" />} Clear mod download cache
+            </Button>
           </section>
 
           {/* Player saves (active world) */}

@@ -113,6 +113,8 @@ export type NexusModInfo = {
   author: string | null
   available: boolean
   url: string
+  summary: string | null // short plain-text blurb
+  description: string | null // full BBCode description (used for placement keyword mining)
 }
 
 export async function getModInfo(modId: number): Promise<NexusModInfo | null> {
@@ -125,13 +127,17 @@ export async function getModInfo(modId: number): Promise<NexusModInfo | null> {
       signal: AbortSignal.timeout(10_000),
     })
     if (!res.ok) return null
-    const j = (await res.json()) as { name?: string; version?: string; author?: string; available?: boolean }
+    const j = (await res.json()) as {
+      name?: string; version?: string; author?: string; available?: boolean; summary?: string; description?: string
+    }
     return {
       name: j.name ?? `Mod ${modId}`,
       version: j.version ?? null,
       author: j.author ?? null,
       available: j.available !== false,
       url: `https://www.nexusmods.com/${NEXUS_GAME_DOMAIN}/mods/${modId}`,
+      summary: j.summary ?? null,
+      description: j.description ?? null,
     }
   } catch {
     return null

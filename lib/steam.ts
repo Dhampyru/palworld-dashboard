@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, readFile, rm, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -263,6 +263,81 @@ export async function fetchWorkshopUpdateTimes(
   } catch {
     return {}
   }
+}
+
+// Title + description for one workshop item, via the public GetPublishedFileDetails (no key).
+// Used to mine the mod page for placement keywords (server/client/both) — the file CONTENTS
+// still need a SteamCMD download, but the description is public. Null on any error.
+export async function fetchWorkshopDetails(input: string): Promise<{ title: string; description: string } | null> {
+  const id = parseWorkshopId(input)
+  if (!id) return null
+  const body = new URLSearchParams()
+  body.set('itemcount', '1')
+  body.set('publishedfileids[0]', id)
+  try {
+    const res = await fetch('https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+    if (!res.ok) return null
+    const j = (await res.json()) as {
+      response?: { publishedfiledetails?: { result?: number; title?: string; file_description?: string }[] }
+    }
+    const d = j.response?.publishedfiledetails?.[0]
+    if (!d || d.result !== 1) return null
+    return { title: d.title ?? '', description: d.file_description ?? '' }
+  } catch {
+    return null
+  }
+}
+
+// Info.json InstallRule types for a downloaded Workshop item (deep-scan placement signal).
+// Lua/Paks/LogicMods = client-installable; PalSchema/UE4SS = server-side.
+export async function readWorkshopInstallTypes(contentDir: string): Promise<string[]> {
+  try {
+    const info = JSON.parse(await readFile(join(contentDir, 'Info.json'), 'utf8')) as { InstallRule?: { Type?: string }[] }
+    return (Array.isArray(info.InstallRule) ? info.InstallRule : []).map((r) => String(r?.Type ?? '')).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+// Purge orphaned Workshop cache dirs — items downloaded for a scan (or a failed install)
+// that were never installed. An item's cache is KEPT while it's installed (its .acf powers
+// update detection), so this only removes ids NOT in `installedIds`. `olderThanMs` protects
+// a scan still mid-decision; `only` targets one id (immediate purge on reject). Returns the
+// ids removed. Best-effort — never throws.
+export async function purgeOrphanWorkshopContent(
+  installedIds: Set<string>,
+  opts: { olderThanMs?: number; only?: string } = {},
+): Promise<string[]> {
+  const base = join(currentGameDir(), 'steamapps', 'workshop', 'content', PALWORLD_APPID)
+  let ids: string[]
+  try {
+    ids = await readdir(base)
+  } catch {
+    return []
+  }
+  const now = Date.now()
+  const removed: string[] = []
+  for (const id of ids) {
+    if (!/^\d+$/.test(id)) continue
+    if (installedIds.has(id)) continue
+    if (opts.only && id !== opts.only) continue
+    const dir = join(base, id)
+    try {
+      if (opts.olderThanMs != null) {
+        const st = await stat(dir)
+        if (now - st.mtimeMs < opts.olderThanMs) continue
+      }
+      await rm(dir, { recursive: true, force: true })
+      removed.push(id)
+    } catch {
+      /* skip */
+    }
+  }
+  return removed
 }
 
 export type SteamModUpdate = { installedAt: number | null; latestAt: number; updateAvailable: boolean; title: string }

@@ -83,7 +83,9 @@ function detectSource(u: string): 'nexus' | 'steam' | null {
   return null
 }
 
-export function ClientModsPanel() {
+// `hideUploader` removes the client add/upload/bulk controls — the unified uploader above
+// the tabs stages client mods now. `reloadKey` refreshes this list after it commits.
+export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploader?: boolean; reloadKey?: number } = {}) {
   const { config, requestTab } = useServer()
   const [mods, setMods] = useState<ClientMod[]>([])
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
@@ -144,6 +146,11 @@ export function ClientModsPanel() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // Refresh when the unified uploader (above the tabs) stages a client mod.
+  useEffect(() => {
+    if (reloadKey) void load()
+  }, [reloadKey, load])
 
   const postJson = useCallback(
     async (body: Record<string, unknown>) => {
@@ -418,6 +425,8 @@ export function ClientModsPanel() {
         </p>
       )}
 
+      {!hideUploader && (
+      <>
       {/* Single add + upload */}
       <div className="flex flex-col gap-2">
         <label className="text-sm font-medium">Add a client mod</label>
@@ -486,6 +495,8 @@ export function ClientModsPanel() {
           </ul>
         )}
       </div>
+      </>
+      )}
 
       {/* Staged list */}
       {mods.length > 0 && (

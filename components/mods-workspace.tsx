@@ -5,13 +5,16 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { GameModsPanel } from '@/components/game-mods-panel'
 import { ClientModsPanel } from '@/components/client-mods-panel'
 import { ClientConfigsPanel } from '@/components/client-configs-panel'
+import { UnifiedModUploader } from '@/components/unified-mod-uploader'
+import { Ue4ssLoaderCard } from '@/components/ue4ss-loader-card'
 import { ServerIcon, MonitorIcon } from 'lucide-react'
 
-// PATCH (not upstream): the Mods page is split into two sub-tabs (docs/specs/client-mod-
-// sync.md §6). "Server mods" is the original panel (what the SERVER runs). "Client mods"
-// stages the mods a friend's client needs for the onboarding loadout — never installed on
-// the server. Sub-tab only; the main tab is still `mods` (dashboard.tsx tab plumbing
-// unchanged). The choice persists locally so it survives a reload.
+// PATCH (not upstream): the Mods page. ONE uploader (UnifiedModUploader) sits ABOVE the two
+// sub-tabs — it scans an upload/URL, decides server/client/both, and installs there. The
+// tabs below are now just LISTS: "Server mods" = what the SERVER runs; "Client mods" = the
+// friend loadout staging. The old per-tab uploaders are hidden (hideInstall/hideUploader);
+// a bumped reloadKey refreshes both lists after the shared uploader commits. Sub-tab only;
+// the main dashboard tab is still `mods`. The sub-tab choice persists locally.
 type Sub = 'server' | 'client'
 const STORE_KEY = 'modsSubTab'
 
@@ -33,6 +36,7 @@ function SubTab({ active, onClick, icon, label }: { active: boolean; onClick: ()
 
 export function ModsWorkspace() {
   const [sub, setSub] = useState<Sub>('server')
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     try {
@@ -54,6 +58,12 @@ export function ModsWorkspace() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* Shared, always-visible loader + uploader above the tabs. */}
+      <div className="shrink-0 space-y-3 border-b border-border/60 p-3">
+        <Ue4ssLoaderCard onChanged={() => setReloadKey((k) => k + 1)} />
+        <UnifiedModUploader onInstalled={() => setReloadKey((k) => k + 1)} />
+      </div>
+
       <div role="tablist" className="flex shrink-0 items-center gap-1 border-b border-border/60 px-3 py-2">
         <SubTab active={sub === 'server'} onClick={() => choose('server')} icon={<ServerIcon className="size-4" />} label="Server mods" />
         <SubTab active={sub === 'client'} onClick={() => choose('client')} icon={<MonitorIcon className="size-4" />} label="Client mods" />
@@ -61,10 +71,10 @@ export function ModsWorkspace() {
       <div className="min-h-0 flex-1 overflow-y-auto lg:overflow-hidden">
         <ScrollArea className="h-full lg:h-auto lg:flex-1">
           {sub === 'server' ? (
-            <GameModsPanel />
+            <GameModsPanel hideInstall hideLoader reloadKey={reloadKey} />
           ) : (
             <>
-              <ClientModsPanel />
+              <ClientModsPanel hideUploader reloadKey={reloadKey} />
               <ClientConfigsPanel />
             </>
           )}

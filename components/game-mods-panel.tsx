@@ -108,7 +108,10 @@ const fmtEpoch = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 10
 // through useServer().apiCall, which is hardwired to proxy the Palworld REST
 // API) since mod listing is filesystem-backed, not something the game's REST
 // API exposes at all. Same auth header, different route(s).
-export function GameModsPanel() {
+// `hideInstall` removes the built-in "Install a Mod" card and `hideLoader` the UE4SS Loader
+// card — both are hoisted above the tabs now (the unified uploader + Ue4ssLoaderCard).
+// `reloadKey` lets those refresh this list after a change.
+export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadKey }: { hideInstall?: boolean; hideLoader?: boolean; reloadKey?: number } = {}) {
   const { config, connectionStatus } = useServer()
   const [mods, setMods] = useState<GameModEntry[] | null>(null)
   const [modGroups, setModGroups] = useState<Record<string, string[]>>({})
@@ -491,6 +494,16 @@ export function GameModsPanel() {
       setLoading(false)
     }
   }, [config])
+
+  // Refresh the list when the unified uploader (above the tabs) commits an install.
+  useEffect(() => {
+    if (!reloadKey) return
+    load()
+    loadNexus()
+    loadSteam()
+    loadUe4ss()
+    setPalschemaReload((n) => n + 1) // refresh the PalSchema section if the hoisted loader installed it
+  }, [reloadKey, load, loadNexus, loadSteam, loadUe4ss])
 
   // Defined after `load` since it refreshes the mod list on success.
   const installFromNexus = useCallback(async () => {
@@ -1382,6 +1395,7 @@ export function GameModsPanel() {
 
       {/* UE4SS Loader (spec docs/specs/ue4ss-loader.md) — loaded build + enable/disable.
           Version install/swap buttons land in a later phase. */}
+      {!hideLoader && (
       <div className="flex flex-col gap-2 rounded-md border p-3">
         <div className="flex items-center justify-between">
           <h3 className="flex items-center gap-1.5 text-sm font-semibold">
@@ -1575,6 +1589,7 @@ export function GameModsPanel() {
           </div>
         )}
       </div>
+      )}
 
       {/* Unified "Installed Mods" card: the PalSchema panel + the installed mod list
           in one bordered block (PalSchema: docs/specs/palschema-support.md, paired
@@ -1663,6 +1678,7 @@ export function GameModsPanel() {
         </div>
       </div>
 
+      {!hideInstall && (
       <div className="mt-2 flex flex-col gap-4 rounded-md border p-3">
         <div className="flex items-center gap-2">
           <UploadIcon className="size-4" />
@@ -1977,6 +1993,7 @@ export function GameModsPanel() {
           </form>
         </section>
       </div>
+      )}
 
       {/* Extra confirmation specifically for disabling a UE4SS framework default */}
       <AlertDialog

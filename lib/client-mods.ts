@@ -114,7 +114,9 @@ const FOMOD_WARN =
   'FOMOD installer — it has multiple variant options; pick one and stage it manually (it can’t be auto-shipped in a client loadout).'
 
 // Classify from a list of archive entry names (shared by the buffer + on-disk paths).
-function classifyNames(names: string[], kind: ClientModKind): string | null {
+// Exported so lib/mod-targeting.ts can reuse the SAME client-installability rule (a null
+// return = the mod has files a friend's client installs).
+export function classifyNames(names: string[], kind: ClientModKind): string | null {
   // FOMOD (variant installer) wins over the kind short-circuit — it needs a manual choice.
   if (names.some((n) => /(^|\/)fomod\/moduleconfig\.xml$/i.test(n))) return FOMOD_WARN
   if (kind === 'ue4ss' || kind === 'pak') return null // Lua or a pak → client-installable
@@ -186,7 +188,8 @@ function bufHasConfigSig(buf: Buffer): boolean {
 }
 
 // Scan a zip payload's pak entries in memory (small entries only).
-function zipUsesModConfig(buffer: Buffer): boolean {
+// Exported so lib/mod-targeting.ts can surface the in-game Config Menu signal at scan time.
+export function zipUsesModConfig(buffer: Buffer): boolean {
   try {
     for (const e of new AdmZip(buffer).getEntries()) {
       if (e.isDirectory || !/\.pak$/i.test(e.entryName) || e.header.size > CONFIG_SIG_CAP) continue
