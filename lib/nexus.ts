@@ -141,10 +141,37 @@ export type NexusFile = { fileId: number; name: string; version: string | null; 
 // file's `version`, and for some mods they DIFFER. `baselineVersion` is the installed
 // FILE's version, so update-detection must compare it to the latest FILE version (not the
 // mod headline), or a divergent mod perpetually shows a phantom update. Newest = last.
+// Compare version-ish strings numerically by their digit groups: "2" > "1",
+// "1.3.5" > "1.2", "v2.0.1" > "v1.9". Returns >0 if a is newer than b, <0 if older, 0 equal.
+// Non-numeric noise (prefixes/suffixes) is ignored so odd version labels still order sanely.
+export function compareVersions(a: string, b: string): number {
+  const parse = (v: string) => (v.match(/\d+/g) ?? []).map(Number)
+  const pa = parse(a)
+  const pb = parse(b)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0
+    const y = pb[i] ?? 0
+    if (x !== y) return x - y
+  }
+  return 0
+}
+
+// The NEWEST MAIN file version — the MAX across MAIN files, not just the last in the list.
+// A mod with several MAIN files (variants, each independently versioned — e.g. 3434 GuildChest
+// ships 358-pak-v2 alongside 2466-*-v1) must not report a lower variant's version as "latest",
+// or an up-to-date install shows a phantom update. Falls back to the last file when no version
+// parses. NOTE: still not variant-aware — a DIFFERENT variant bumping can look like an update;
+// the strictly-newer gate at the call site keeps the common (installed-is-newest) case correct.
 export function latestMainFileVersion(files: NexusFile[]): string | null {
   const main = files.filter((f) => (f.category ?? '').toUpperCase() === 'MAIN')
   const pool = main.length ? main : files
-  return pool.length ? (pool[pool.length - 1].version ?? null) : null
+  let best: string | null = null
+  for (const f of pool) {
+    const v = f.version ?? null
+    if (v == null) continue
+    if (best == null || compareVersions(v, best) > 0) best = v
+  }
+  return best ?? (pool.length ? (pool[pool.length - 1].version ?? null) : null)
 }
 
 // Downloadable files for a mod — MAIN + OPTIONAL only (skip ARCHIVED/OLD_VERSION).
@@ -387,7 +414,9 @@ export async function getNexusMods(): Promise<Record<string, NexusModRow>> {
       author,
       latestVersion: latest,
       baselineVersion: assoc.baselineVersion,
-      updateAvailable: Boolean(latest && assoc.baselineVersion && latest !== assoc.baselineVersion),
+      updateAvailable: Boolean(
+        latest && assoc.baselineVersion && compareVersions(latest, assoc.baselineVersion) > 0,
+      ),
       available,
       url: `https://www.nexusmods.com/${NEXUS_GAME_DOMAIN}/mods/${assoc.modId}`,
     }
