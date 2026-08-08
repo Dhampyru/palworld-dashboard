@@ -26,8 +26,8 @@
   <Overview>Modded Palworld 1.0 dedicated server. Runs the WINDOWS server binary under plain WineHQ stable (NOT Proton) so it can load UE4SS server-side mods and PalDefender. The game binary itself is downloaded by SteamCMD to the appdata volume on first boot (~12-15GB) — nothing of Pocketpair's ships in the image. Pairs with the Palworld dashboard. Requires seccomp=unconfined + SYS_PTRACE (Wine ptrace) — preset in Extra Parameters. A headless Xvfb display is baked in (recent Palworld builds need a display context during graphics init even headless). RAM: 16GB minimum, 32GB for community servers.</Overview>
   <Category>GameServers:</Category>
   <WebUI/>
-  <TemplateURL/>
-  <Icon/>
+  <TemplateURL>https://raw.githubusercontent.com/Dhampyru/palworld-dashboard/main/game-server/unraid/palworld-game-server.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/Dhampyru/palworld-dashboard/main/game-server/unraid/palworld-game-server.png</Icon>
   <ExtraParams>--security-opt seccomp=unconfined --security-opt no-new-privileges:true --cap-add SYS_PTRACE --stop-timeout 30</ExtraParams>
   <PostArgs/>
   <CPUset/>
