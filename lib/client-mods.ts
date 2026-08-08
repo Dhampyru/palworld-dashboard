@@ -42,6 +42,8 @@ export type ClientMod = {
   keep: boolean // include this mod in the generated friend loadout
   addedAt: number
   warn?: string | null // set when the mod has NO client-installable files (server-side / not a mod)
+  configMenu?: boolean // detected: ships an in-game Mod Config Menu → writes a client-side
+  // LogicMods/<name>.modconfig.json the admin can capture + pre-configure (client-configs editor)
 }
 
 type Index = Record<string, ClientMod>
@@ -167,6 +169,63 @@ async function warnFromContent(contentDir: string): Promise<string | null> {
   }
 }
 
+// ---- Mod Config Menu detection --------------------------------------------------------
+// Mods that expose an in-game settings menu (DekModConfigMenu / a JsonSettingsLibrary) write
+// their config to Pal/Content/Paks/LogicMods/<name>.modconfig.json ON THE CLIENT at runtime.
+// We can't grab that file (it doesn't exist until the mod runs), but we CAN detect that a mod
+// produces one — by a signature in its pak — so the UI can prompt the admin to capture +
+// pre-configure it (client-configs editor). Match ASCII and UTF-16LE (UE stores FStrings wide).
+const CONFIG_SIG_BUFS = ['JsonSettingsLibrary', 'ModConfigMenu', 'DekModConfig', 'modconfig'].flatMap((s) => [
+  Buffer.from(s, 'latin1'),
+  Buffer.from(s, 'utf16le'),
+])
+const CONFIG_SIG_CAP = 40 * 1024 * 1024 // skip huge texture paks — config mods ship small code paks
+
+function bufHasConfigSig(buf: Buffer): boolean {
+  return CONFIG_SIG_BUFS.some((needle) => buf.indexOf(needle) !== -1)
+}
+
+// Scan a zip payload's pak entries in memory (small entries only).
+function zipUsesModConfig(buffer: Buffer): boolean {
+  try {
+    for (const e of new AdmZip(buffer).getEntries()) {
+      if (e.isDirectory || !/\.pak$/i.test(e.entryName) || e.header.size > CONFIG_SIG_CAP) continue
+      if (bufHasConfigSig(e.getData())) return true
+    }
+  } catch {
+    /* unreadable → no detection */
+  }
+  return false
+}
+
+// Scan a Steam content dir's paks on disk (small files only).
+async function contentUsesModConfig(dir: string): Promise<boolean> {
+  const walk = async (d: string): Promise<string[]> => {
+    let ents: import('node:fs').Dirent[]
+    try {
+      ents = await readdir(d, { withFileTypes: true })
+    } catch {
+      return []
+    }
+    const out: string[] = []
+    for (const e of ents) {
+      const p = join(d, e.name)
+      if (e.isDirectory()) out.push(...(await walk(p)))
+      else if (/\.pak$/i.test(e.name)) out.push(p)
+    }
+    return out
+  }
+  for (const p of await walk(dir)) {
+    try {
+      if ((await stat(p)).size > CONFIG_SIG_CAP) continue
+      if (bufHasConfigSig(await readFile(p))) return true
+    } catch {
+      /* skip */
+    }
+  }
+  return false
+}
+
 export async function listClientMods(): Promise<ClientMod[]> {
   const idx = await readIndex()
   return Object.values(idx).sort((a, b) => a.name.localeCompare(b.name) || b.addedAt - a.addedAt)
@@ -217,6 +276,7 @@ export async function addClientModFromNexus(url: string): Promise<ClientMod> {
     keep: true,
     addedAt: Date.now(),
     warn: warnFromZip(buffer, kind),
+    configMenu: zipUsesModConfig(buffer),
   }
   idx[id] = rec
   await writeIndex(idx)
@@ -254,6 +314,7 @@ export async function addClientModFromSteam(url: string): Promise<ClientMod> {
     keep: true,
     addedAt: Date.now(),
     warn: await warnFromContent(dest),
+    configMenu: await contentUsesModConfig(dest),
   }
   idx[id] = rec
   await writeIndex(idx)
@@ -303,6 +364,7 @@ export async function addClientModUpload(fileName: string, buffer: Buffer): Prom
     keep: true,
     addedAt: Date.now(),
     warn: isPak ? null : warnFromZip(stored, kind),
+    configMenu: isPak ? bufHasConfigSig(stored) : zipUsesModConfig(stored),
   }
   idx[id] = rec
   await writeIndex(idx)
@@ -359,8 +421,22 @@ export async function removeClientMod(id: string): Promise<void> {
   await rm(join(STORE_DIR, id), { recursive: true, force: true })
 }
 
-// Recompute `warn` for every staged mod (for entries added before the classifier existed).
-// Uses disk-safe inspection (lsar / Info.json) so large payloads never load into memory.
+// Recompute `configMenu` from a stored payload on disk (size-capped so a big payload never
+// bloats memory). Used by add (in-memory variants) and backfill.
+async function detectConfigMenuOnDisk(dir: string, payload: string): Promise<boolean> {
+  try {
+    if (payload === 'content') return await contentUsesModConfig(join(dir, 'content'))
+    const p = join(dir, payload)
+    if ((await stat(p)).size > CONFIG_SIG_CAP) return false
+    const buf = await readFile(p)
+    return payload === 'payload.pak' ? bufHasConfigSig(buf) : zipUsesModConfig(buf)
+  } catch {
+    return false
+  }
+}
+
+// Recompute `warn` + `configMenu` for every staged mod (for entries added before those
+// existed). `warn` uses disk-safe listing (lsar / Info.json); `configMenu` reads small paks.
 export async function backfillClientWarnings(): Promise<{ updated: number; flagged: { name: string; warn: string }[] }> {
   const idx = await readIndex()
   let updated = 0
@@ -371,8 +447,10 @@ export async function backfillClientWarnings(): Promise<{ updated: number; flagg
     if (m.payload === 'content') warn = await warnFromContent(join(dir, 'content'))
     else if (m.payload === 'payload.pak') warn = null
     else warn = await warnFromZipPath(join(dir, 'payload.zip'), m.kind)
-    if ((m.warn ?? null) !== warn) {
+    const configMenu = await detectConfigMenuOnDisk(dir, m.payload)
+    if ((m.warn ?? null) !== warn || (m.configMenu ?? false) !== configMenu) {
       m.warn = warn
+      m.configMenu = configMenu
       updated++
     }
     if (warn) flagged.push({ name: m.name, warn })

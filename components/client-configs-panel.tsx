@@ -41,6 +41,7 @@ export function ClientConfigsPanel() {
   const [sel, setSel] = useState<string | null>(null)
   const [draft, setDraft] = useState<ConfigJson | null>(null)
   const [busy, setBusy] = useState(false)
+  const [detected, setDetected] = useState<string[]>([]) // client mods that ship an in-game config menu
 
   const load = useCallback(async () => {
     if (!config) return
@@ -49,6 +50,12 @@ export function ClientConfigsPanel() {
       const res = await fetch('/api/client-configs', { headers: buildPalworldProxyHeaders(config), cache: 'no-store' })
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Failed to load')
       setConfigs((await res.json()).configs ?? [])
+      // Which staged client mods produce a Mod Config Menu JSON (auto-detected on add)?
+      const mres = await fetch('/api/client-mods', { headers: buildPalworldProxyHeaders(config), cache: 'no-store' })
+      if (mres.ok) {
+        const mods = ((await mres.json()).mods ?? []) as { name: string; keep: boolean; configMenu?: boolean }[]
+        setDetected(mods.filter((m) => m.configMenu && m.keep).map((m) => m.name))
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load client configs')
     } finally {
@@ -264,6 +271,35 @@ export function ClientConfigsPanel() {
         here, and every friend&apos;s loadout ships pre-configured. Values are the mod&apos;s own — edited settings apply
         on the client&apos;s next launch.
       </p>
+
+      {detected.length > 0 && (
+        <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5 text-xs">
+          <div className="font-medium">Detected mods with an in-game config menu</div>
+          <div className="mb-1 text-muted-foreground">
+            These write a <code>*.modconfig.json</code> to <code>LogicMods\</code> on the client — upload each to
+            pre-configure it here.
+          </div>
+          <ul className="space-y-0.5">
+            {detected.map((n) => {
+              const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, '')
+              const covered = configs.some((c) => {
+                const cn = norm(c.name.replace(/\.modconfig\.json$/i, '').replace(/\.json$/i, ''))
+                const mn = norm(n)
+                return cn.includes(mn) || mn.includes(cn)
+              })
+              return (
+                <li key={n} className="flex items-center gap-1.5">
+                  <span className={covered ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
+                    {covered ? '✓' : '•'}
+                  </span>
+                  <span>{n}</span>
+                  <span className="text-muted-foreground">{covered ? '— config uploaded' : '— no config yet'}</span>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted">
