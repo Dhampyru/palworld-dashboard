@@ -58,6 +58,12 @@ Stage mods in `./mods` (created next to this file):
 - **Plain Wine, not Proton** — Proton's Steam-bridging layer broke the headless
   dedicated-server join handshake; plain Wine works. The `WINEDLLOVERRIDES`
   (`dwmapi=n,b;d3d9=n,b`) is required for UE4SS/PalDefender injection.
+- **Headless display (Xvfb) is baked in and required** — recent Palworld builds
+  need a display context during graphics/RHI init even for the dedicated server,
+  so the image installs `xvfb` and the entrypoint starts `Xvfb :99` (`DISPLAY=:99`)
+  before wine. Without it the server access-violates on boot (`nodrv_CreateWindow`
+  / no GL context) and crash-loops after Steam login. Don't strip it from a
+  custom entrypoint.
 - **Pin the game version** (`TARGET_MANIFEST_ID`) if you rely on UE4SS — a game
   update can outpace UE4SS and break injection until it catches up.
 - Backups: `docker exec palworld-server backup`, or schedule via
