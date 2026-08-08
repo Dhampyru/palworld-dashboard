@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { GameModsPanel } from '@/components/game-mods-panel'
 import { ClientModsPanel } from '@/components/client-mods-panel'
+import { ClientConfigsPanel } from '@/components/client-configs-panel'
 import { ServerIcon, MonitorIcon } from 'lucide-react'
 
 // PATCH (not upstream): the Mods page is split into two sub-tabs (docs/specs/client-mod-
@@ -59,7 +60,14 @@ export function ModsWorkspace() {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto lg:overflow-hidden">
         <ScrollArea className="h-full lg:h-auto lg:flex-1">
-          {sub === 'server' ? <GameModsPanel /> : <ClientModsPanel />}
+          {sub === 'server' ? (
+            <GameModsPanel />
+          ) : (
+            <>
+              <ClientModsPanel />
+              <ClientConfigsPanel />
+            </>
+          )}
         </ScrollArea>
       </div>
     </div>

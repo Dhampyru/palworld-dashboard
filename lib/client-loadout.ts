@@ -8,6 +8,7 @@ import { serializeModsTxt } from '@/lib/game-mods'
 import { UE4SS_FRAMEWORK_DEFAULTS } from '@/lib/ue4ss-framework-defaults'
 import { clientModStorePath, listClientMods, type ClientMod } from '@/lib/client-mods'
 import { readClientModConfigOverrides } from '@/lib/client-mod-config'
+import { overlayClientConfigsInto } from '@/lib/client-configs'
 
 const execFileP = promisify(execFile)
 
@@ -40,6 +41,7 @@ export type LoadoutSummary = {
   configOverrides: number // admin config edits shipped into the bundle
   parityPaks: number // server ~mods/LogicMods paks folded in for client-server parity
   palSchemaMods: number // PalSchema submods shipped (server parity + client-only payloads)
+  preConfigFiles: number // admin-captured runtime config files overlaid into the game tree
   engineTweaks: string[] // mods whose Engine.ini settings were folded into recommended-engine-ini.txt
   sizeBytes: number
   generatedAt: string
@@ -444,6 +446,7 @@ function installTxt(s: LoadoutSummary, includedUe4ss: boolean): string {
     `Mods: ${s.mods.length} (${s.luaMods.length} UE4SS/Lua, ${s.pakFiles.length} pak, ${s.logicMods.length} LogicMods)`,
     s.parityPaks ? `Includes ${s.parityPaks} server-parity pak(s) so your content matches the server.` : '',
     s.palSchemaMods ? `Includes PalSchema + ${s.palSchemaMods} client PalSchema mod(s) (custom items/recipes/icons).` : '',
+    s.preConfigFiles ? `Includes ${s.preConfigFiles} pre-set mod config file(s) — mods come pre-configured.` : '',
     s.engineTweaks.length
       ? `Engine.ini tweaks from ${s.engineTweaks.length} mod(s) are in recommended-engine-ini.txt (optional, apply manually).`
       : '',
@@ -642,6 +645,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     // loader framework is added afterwards, only if a client mod contributed a submod.
     const seenPalSchema = new Set<string>()
     let palSchemaMods = 0
+    let preConfigFiles = 0
     const engineIniTweaks: { name: string; text: string }[] = []
 
     const luaMods: string[] = []
@@ -827,6 +831,28 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     if (await isDir(join(modsDir, 'PalSchema'))) active.set('PalSchema', true)
     if (active.size) await writeFile(join(modsDir, 'mods.txt'), serializeModsTxt(active), 'utf8')
 
+    // Pre-config overlays: runtime config files an admin captured from a configured client
+    // (NOT shipped in the mod download — e.g. YetAnotherMinimap's
+    // Pal/Content/Paks/LogicMods/YetAnotherMinimap.modconfig.json). Each kept client mod's
+    // data/client-mods/<id>/extra/ tree mirrors game-relative paths and is copied verbatim
+    // into game/, so every client installs pre-configured. Path-guarded to stay under game/.
+    {
+      const gameRoot = join(bundle, 'game')
+      for (const m of kept) {
+        const extra = join(clientModStorePath(m.id), 'extra')
+        if (!(await isDir(extra))) continue
+        for (const f of await walkFiles(extra)) {
+          const dest = join(gameRoot, relative(extra, f))
+          if (dest !== gameRoot && !dest.startsWith(gameRoot + sep)) continue
+          await mkdir(dirname(dest), { recursive: true })
+          await cp(f, dest)
+          preConfigFiles++
+        }
+      }
+      // Managed DekModConfigMenu client configs (edited via the dashboard) → LogicMods.
+      preConfigFiles += await overlayClientConfigsInto(logicDir)
+    }
+
     const generatedAt = new Date().toISOString()
     const summary: LoadoutSummary = {
       includedUe4ss,
@@ -839,6 +865,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       configOverrides,
       parityPaks,
       palSchemaMods,
+      preConfigFiles,
       engineTweaks: engineIniTweaks.map((t) => t.name),
       sizeBytes: 0,
       generatedAt,
