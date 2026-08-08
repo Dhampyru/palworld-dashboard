@@ -874,14 +874,19 @@ export async function installPakArchive(buffer: Buffer): Promise<string[]> {
   await mkdir(pakModsDir(), { recursive: true })
   const out: string[] = []
   for (const e of paks) {
-    const name = basename(e.entryName.replace(/\\/g, '/'))
-    if (!/^[A-Za-z0-9_.-]+\.(pak|utoc|ucas)$/i.test(name)) continue
+    let name = basename(e.entryName.replace(/\\/g, '/'))
+    if (!/\.(pak|utoc|ucas)$/i.test(name)) continue
+    // Some authors ship paks with spaces/parens in the filename (e.g. mods 3658,
+    // 3434: "358 GuildChest Slots_P.pak"). Map anything outside the safe set to
+    // '_' so they install instead of being skipped — the pak still loads (~mods
+    // scans by extension, not name). basename() already stripped any path.
+    name = name.replace(/[^A-Za-z0-9_.-]/g, '_')
     const dest = join(pakModsDir(), name)
     if (dest !== pakModsDir() && !dest.startsWith(pakModsDir() + sep)) continue
     await writeFile(dest, e.getData())
     out.push(name)
   }
-  if (!out.length) throw new Error('No safely-named pak files in the archive')
+  if (!out.length) throw new Error('No pak files found in the archive')
   return out
 }
 
