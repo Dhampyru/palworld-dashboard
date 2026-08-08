@@ -39,6 +39,8 @@ export type LoadoutSummary = {
   totalKept: number
   configOverrides: number // admin config edits shipped into the bundle
   parityPaks: number // server ~mods/LogicMods paks folded in for client-server parity
+  palSchemaMods: number // PalSchema submods shipped (server parity + client-only payloads)
+  engineTweaks: string[] // mods whose Engine.ini settings were folded into recommended-engine-ini.txt
   sizeBytes: number
   generatedAt: string
 }
@@ -272,6 +274,140 @@ async function includeFramework(win64Dest: string, modsDir: string): Promise<boo
   return true
 }
 
+// Copy the live server's PalSchema (the loader framework + every submod it runs) into the
+// bundle so clients render the same modded items/recipes/passives/icons as the host — the
+// PalSchema analogue of the server-parity paks. The framework (dlls/main + enabled.txt)
+// rides along. Returns the submod folder names shipped (empty if PalSchema isn't installed
+// server-side). Caller seeds these into `seen` so per-payload extraction won't duplicate.
+async function includePalSchemaParity(modsDir: string): Promise<string[]> {
+  const livePS = join(currentGameDir(), 'Pal', 'Binaries', 'Win64', 'ue4ss', 'Mods', 'PalSchema')
+  if (!(await isDir(livePS))) return []
+  const destPS = join(modsDir, 'PalSchema')
+  await cp(livePS, destPS, { recursive: true })
+  const modsSub = join(destPS, 'mods')
+  const names: string[] = []
+  if (await isDir(modsSub)) {
+    for (const e of await readdir(modsSub, { withFileTypes: true })) if (e.isDirectory()) names.push(e.name)
+  }
+  return names
+}
+
+// PalSchema submod content dirs (mirrors the real layout: items/raw/blueprints/pals/skins/…
+// each holding .json). Used to recognize a PalSchema submod folder in an arbitrary payload.
+const PS_CONTENT_DIRS = new Set([
+  'items', 'raw', 'blueprints', 'pals', 'skins', 'palskins', 'appearance', 'humans', 'monsters',
+  'translations', 'meshes', 'maps', 'movesets', 'passives',
+])
+
+// Does `dir` look like a PalSchema submod folder — i.e. it directly contains a PalSchema
+// content subdir (items/raw/…) with a .json inside? Excludes SwapJSON (the Altermatic
+// recolor framework's config dir, which also holds .json but is NOT PalSchema).
+async function looksLikePalSchemaSubmod(dir: string): Promise<boolean> {
+  if (basename(dir).toLowerCase() === 'swapjson') return false
+  let entries: import('node:fs').Dirent[]
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return false
+  }
+  for (const e of entries) {
+    if (!e.isDirectory() || !PS_CONTENT_DIRS.has(e.name.toLowerCase())) continue
+    for (const f of await walkFiles(join(dir, e.name))) if (/\.jsonc?$/i.test(f)) return true
+  }
+  return false
+}
+
+// Find genuine PalSchema submod folder(s) in an extracted payload, at any depth. Handles the
+// explicit `…/PalSchema/mods/<name>/…` layout AND a bare mod folder whose contents are
+// PalSchema data (e.g. Food Expansion's `NewFoodRecipes/items/*.json`). Skips SwapJSON.
+async function findPalSchemaSubmods(scratch: string): Promise<{ name: string; dir: string }[]> {
+  const out: { name: string; dir: string }[] = []
+  const rec = async (dir: string): Promise<void> => {
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    // Explicit `PalSchema/mods/<name>/` — each child dir is a submod.
+    if (basename(dir).toLowerCase() === 'mods' && basename(dirname(dir)).toLowerCase() === 'palschema') {
+      for (const e of entries) if (e.isDirectory()) out.push({ name: safeName(e.name), dir: join(dir, e.name) })
+      return
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue
+      const full = join(dir, e.name)
+      if (await looksLikePalSchemaSubmod(full)) out.push({ name: safeName(e.name), dir: full })
+      else await rec(full)
+    }
+  }
+  await rec(scratch)
+  return out
+}
+
+// Place any genuine PalSchema submods from `scratch` into the bundle's PalSchema/mods dir,
+// deduped by folder name against what's already there. `placed` = newly copied (client-only
+// PalSchema not on the server); `covered` = found but already shipped via server parity.
+async function collectPalSchemaSubmods(
+  scratch: string,
+  destModsDir: string,
+  seen: Set<string>,
+): Promise<{ placed: string[]; covered: string[] }> {
+  const placed: string[] = []
+  const covered: string[] = []
+  for (const { name, dir } of await findPalSchemaSubmods(scratch)) {
+    if (seen.has(name.toLowerCase())) {
+      covered.push(name)
+      continue
+    }
+    seen.add(name.toLowerCase())
+    await mkdir(destModsDir, { recursive: true })
+    await cp(dir, join(destModsDir, name), { recursive: true })
+    placed.push(name)
+  }
+  return { placed, covered }
+}
+
+// Merge the [SystemSettings] tweaks a friend must paste into their client Engine.ini
+// (mods that ship only Engine.ini text — e.g. the FPS boosters — can't be auto-installed
+// because a client's Engine.ini lives in %LOCALAPPDATA%, outside the game folder we overlay).
+function recommendedEngineIni(tweaks: { name: string; text: string }[]): string {
+  const settings = new Map<string, string>() // key(lower) -> full line; last source wins
+  const sources: string[] = []
+  for (const t of tweaks) {
+    let any = false
+    for (const raw of t.text.split(/\r?\n/)) {
+      const line = raw.trim()
+      if (!line || line.startsWith(';') || line.startsWith('#') || line.startsWith('[')) continue
+      const m = line.match(/^([\w.]+)\s*=/)
+      if (m) {
+        settings.set(m[1].toLowerCase(), line)
+        any = true
+      }
+    }
+    if (any) sources.push(t.name)
+  }
+  const body = [
+    'Recommended Engine.ini performance settings',
+    '===========================================',
+    'These come from mods that are just Engine.ini tweaks (not installable files):',
+    ...sources.map((s) => `  - ${s}`),
+    '',
+    'HOW TO APPLY (optional, improves FPS):',
+    '  1. Close Palworld.',
+    '  2. Open (create the file if missing):',
+    '       %LOCALAPPDATA%\\Pal\\Saved\\Config\\Windows\\Engine.ini',
+    '  3. Paste the block below at the end. If you already have a [SystemSettings]',
+    '     section, merge these lines into it (do not add a second header).',
+    '  4. Save, then launch Palworld.',
+    '',
+    '[SystemSettings]',
+    ...[...settings.values()],
+    '',
+  ].join('\r\n')
+  return body
+}
+
 function installTxt(s: LoadoutSummary, includedUe4ss: boolean): string {
   return [
     'Palworld — Client Mods Loadout',
@@ -279,6 +415,10 @@ function installTxt(s: LoadoutSummary, includedUe4ss: boolean): string {
     `Generated: ${s.generatedAt}`,
     `Mods: ${s.mods.length} (${s.luaMods.length} UE4SS/Lua, ${s.pakFiles.length} pak, ${s.logicMods.length} LogicMods)`,
     s.parityPaks ? `Includes ${s.parityPaks} server-parity pak(s) so your content matches the server.` : '',
+    s.palSchemaMods ? `Includes PalSchema + ${s.palSchemaMods} PalSchema mod(s) so items/recipes/icons match the server.` : '',
+    s.engineTweaks.length
+      ? `Engine.ini tweaks from ${s.engineTweaks.length} mod(s) are in recommended-engine-ini.txt (optional, apply manually).`
+      : '',
     '',
     'WHAT THIS IS',
     '  The client-side mods for this server, laid out the way Palworld expects.',
@@ -461,12 +601,21 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     const bundle = join(work, 'bundle')
     const win64 = join(bundle, 'game', 'Pal', 'Binaries', 'Win64')
     const modsDir = join(win64, 'ue4ss', 'Mods')
+    const palSchemaModsDir = join(modsDir, 'PalSchema', 'mods')
     const pakDir = join(bundle, 'game', 'Pal', 'Content', 'Paks', '~mods')
     const logicDir = join(bundle, 'game', 'Pal', 'Content', 'Paks', 'LogicMods')
     for (const d of [modsDir, pakDir, logicDir]) await mkdir(d, { recursive: true })
 
     let includedUe4ss = false
     if (includeUe4ss) includedUe4ss = await includeFramework(win64, modsDir)
+
+    // Ship the host's PalSchema (framework + all its submods) so clients render the same
+    // modded items/recipes/passives/icons as the server — parity, like the paks below.
+    const seenPalSchema = new Set<string>()
+    const palSchemaParity = await includePalSchemaParity(modsDir)
+    for (const n of palSchemaParity) seenPalSchema.add(n.toLowerCase())
+    let palSchemaMods = palSchemaParity.length
+    const engineIniTweaks: { name: string; text: string }[] = []
 
     const luaMods: string[] = []
     const pakFiles: string[] = []
@@ -525,17 +674,33 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
           if (paks.length) placed.push(`~mods (${paks.length})`)
           if (logic.length) placed.push(`LogicMods (${logic.length})`)
           if (dupes && !paks.length && !logic.length) placed.push('already in loadout (duplicate)')
-          if (!roots.length && !paks.length && !logic.length && !dupes) skipped.push({ name: m.name, reason: 'no Lua mod folder or pak found' })
+          // combined Lua+PalSchema mod: ship its PalSchema companion too
+          const ps = await collectPalSchemaSubmods(scratch, palSchemaModsDir, seenPalSchema)
+          if (ps.placed.length) {
+            placed.push(`PalSchema/mods (${ps.placed.length})`)
+            palSchemaMods += ps.placed.length
+          } else if (ps.covered.length) placed.push('PalSchema data (server parity)')
+          if (!roots.length && !paks.length && !logic.length && !dupes && !ps.placed.length && !ps.covered.length)
+            skipped.push({ name: m.name, reason: 'no Lua mod folder or pak found' })
         } else if (m.kind === 'pak' || m.kind === 'palschema') {
           await unpack(join(store, 'payload.zip'), scratch)
           const { paks, logic, dupes } = await collectPaksRouted([scratch], pakDir, logicDir, seenPaks)
           if (paks.length) placed.push(`~mods (${paks.length})`)
           if (logic.length) placed.push(`LogicMods (${logic.length})`)
           if (dupes && !paks.length && !logic.length) placed.push('already in loadout (duplicate)')
-          if (!paks.length && !logic.length && !dupes) {
+          // real PalSchema data (e.g. Food Expansion) — ship it, or note it's covered by parity
+          const ps = await collectPalSchemaSubmods(scratch, palSchemaModsDir, seenPalSchema)
+          if (ps.placed.length) {
+            placed.push(`PalSchema/mods (${ps.placed.length})`)
+            palSchemaMods += ps.placed.length
+          } else if (ps.covered.length) placed.push('PalSchema data (server parity)')
+          if (!paks.length && !logic.length && !dupes && !ps.placed.length && !ps.covered.length) {
             skipped.push({
               name: m.name,
-              reason: m.kind === 'palschema' ? 'PalSchema data is server-side; no client pak' : 'no pak found in archive',
+              reason:
+                m.kind === 'palschema'
+                  ? 'PalSchema data not found in payload and not on server — add manually'
+                  : 'no pak found in archive',
             })
           }
         } else {
@@ -553,16 +718,25 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
           if (paks.length) placed.push(`~mods (${paks.length})`)
           if (logic.length) placed.push(`LogicMods (${logic.length})`)
           if (dupes && !paks.length && !logic.length) placed.push('already in loadout (duplicate)')
-          if (!roots.length && !paks.length && !logic.length && !dupes) {
-            // Some Nexus "mods" are just Engine.ini text tweaks (no installable files).
+          const ps = await collectPalSchemaSubmods(scratch, palSchemaModsDir, seenPalSchema)
+          if (ps.placed.length) {
+            placed.push(`PalSchema/mods (${ps.placed.length})`)
+            palSchemaMods += ps.placed.length
+          } else if (ps.covered.length) placed.push('PalSchema data (server parity)')
+          if (!roots.length && !paks.length && !logic.length && !dupes && !ps.placed.length && !ps.covered.length) {
+            // Some Nexus "mods" are just Engine.ini text tweaks (no installable files) — fold
+            // their settings into recommended-engine-ini.txt instead of dropping them.
             const files = await walkFiles(scratch)
             const engineTweak = files.length > 0 && files.every((f) => /engine\.ini|\.txt$/i.test(f))
-            skipped.push({
-              name: m.name,
-              reason: engineTweak
-                ? 'Engine.ini tweak (text only) — not an installable mod; apply to Engine.ini manually'
-                : 'could not classify — add manually',
-            })
+            if (engineTweak) {
+              const text = (
+                await Promise.all(files.filter((f) => /\.txt$/i.test(f)).map((f) => readFile(f, 'utf8')))
+              ).join('\n')
+              engineIniTweaks.push({ name: m.name, text })
+              placed.push('Engine.ini tweak → recommended-engine-ini.txt')
+            } else {
+              skipped.push({ name: m.name, reason: 'could not classify — add manually' })
+            }
           }
         }
       } catch (e) {
@@ -607,10 +781,12 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     for (const f of await walkFiles(pakDir)) if (/\.pak$/i.test(f)) pakFiles.push(basename(f))
     for (const f of await walkFiles(logicDir)) if (/\.pak$/i.test(f)) logicMods.push(basename(f))
 
-    // Generate mods.txt: enabled framework defaults + every client Lua mod.
+    // Generate mods.txt: enabled framework defaults + every client Lua mod + PalSchema.
     const active = new Map<string, boolean>()
     if (includedUe4ss) for (const name of UE4SS_FRAMEWORK_DEFAULTS.keys()) active.set(name, ENABLED_FRAMEWORK.has(name))
     for (const name of [...new Set(luaMods)]) active.set(name, true)
+    // Enable PalSchema last so it loads after Lua mods and then applies its own submods.
+    if (await isDir(join(modsDir, 'PalSchema'))) active.set('PalSchema', true)
     if (active.size) await writeFile(join(modsDir, 'mods.txt'), serializeModsTxt(active), 'utf8')
 
     const generatedAt = new Date().toISOString()
@@ -624,6 +800,8 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       totalKept: kept.length,
       configOverrides,
       parityPaks,
+      palSchemaMods,
+      engineTweaks: engineIniTweaks.map((t) => t.name),
       sizeBytes: 0,
       generatedAt,
     }
@@ -637,6 +815,8 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
 
     await writeFile(join(bundle, 'manifest.json'), JSON.stringify(summary, null, 2), 'utf8')
     await writeFile(join(bundle, 'INSTALL.txt'), installTxt(summary, includedUe4ss), 'utf8')
+    if (engineIniTweaks.length)
+      await writeFile(join(bundle, 'recommended-engine-ini.txt'), recommendedEngineIni(engineIniTweaks), 'utf8')
     await writeFile(join(bundle, 'install.ps1'), installPs1(), 'utf8')
     await writeFile(join(bundle, 'install.bat'), installBat(), 'utf8')
     await writeFile(join(bundle, 'uninstall.ps1'), uninstallPs1(), 'utf8')

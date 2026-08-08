@@ -137,7 +137,7 @@ export function InvitePanel() {
       if (!res.ok) throw new Error(json.error ?? res.statusText)
       const s = json.summary ?? {}
       const sizeMb = (Number(s.sizeBytes ?? 0) / 1024 / 1024).toFixed(0)
-      const summary = `${s.luaMods?.length ?? '?'} Lua + ${s.pakFiles?.length ?? '?'} pak · ${sizeMb} MB · UE4SS ${s.includedUe4ss ? 'included' : 'excluded'}${s.configOverrides ? ` · ${s.configOverrides} config` : ''}${s.skipped?.length ? ` · ${s.skipped.length} skipped (see manifest.json)` : ''}`
+      const summary = `${s.luaMods?.length ?? '?'} Lua + ${s.pakFiles?.length ?? '?'} pak${s.palSchemaMods ? ` + ${s.palSchemaMods} PalSchema` : ''} · ${sizeMb} MB · UE4SS ${s.includedUe4ss ? 'included' : 'excluded'}${s.configOverrides ? ` · ${s.configOverrides} config` : ''}${s.engineTweaks?.length ? ` · ${s.engineTweaks.length} Engine.ini tweak(s)` : ''}${s.skipped?.length ? ` · ${s.skipped.length} skipped (see manifest.json)` : ''}`
       setLastLoadout(summary)
       const a = document.createElement('a')
       a.href = `/api/client-mods/loadout?token=${encodeURIComponent(json.token)}`
