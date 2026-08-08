@@ -1,11 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useServer } from '@/lib/server-context'
 import { buildPalworldProxyHeaders } from '@/lib/palworld'
 import { isFrameworkDefault, frameworkDefaultDescription } from '@/lib/ue4ss-framework-defaults'
 import { PalSchemaSection } from '@/components/palschema-section'
-import { FomodPicker } from '@/components/fomod-picker'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Spinner } from '@/components/ui/spinner'
@@ -22,26 +21,9 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
-import { PackageIcon, RefreshCwIcon, Trash2Icon, UploadIcon, ShieldAlertIcon, ShieldCheckIcon, CpuIcon, DownloadIcon, SlidersHorizontalIcon } from 'lucide-react'
+import { PackageIcon, RefreshCwIcon, Trash2Icon, ShieldAlertIcon, ShieldCheckIcon, DownloadIcon, SlidersHorizontalIcon } from 'lucide-react'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 
-// Brand marks for the mod sources — lucide has no brand icons, so these are the
-// official Steam / Nexus Mods logos (Simple Icons, CC0). Monochrome via
-// currentColor so they inherit text color and theme like a lucide icon does.
-function SteamIcon({ className }: { className?: string }) {
-  return (
-    <svg role="img" viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
-      <path d="M11.979 0C5.678 0 .511 4.86.022 11.037l6.432 2.658c.545-.371 1.203-.59 1.912-.59.063 0 .125.004.188.006l2.861-4.142V8.91c0-2.495 2.028-4.524 4.524-4.524 2.494 0 4.524 2.031 4.524 4.527s-2.03 4.525-4.524 4.525h-.105l-4.076 2.911c0 .052.004.105.004.159 0 1.875-1.515 3.396-3.39 3.396-1.635 0-3.016-1.173-3.331-2.727L.436 15.27C1.862 20.307 6.486 24 11.979 24c6.627 0 11.999-5.373 11.999-12S18.605 0 11.979 0zM7.54 18.21l-1.473-.61c.262.543.714.999 1.314 1.25 1.297.539 2.793-.076 3.332-1.375.263-.63.264-1.319.005-1.949s-.75-1.121-1.377-1.383c-.624-.26-1.29-.249-1.878-.03l1.523.63c.956.4 1.409 1.5 1.009 2.455-.397.957-1.497 1.41-2.454 1.012H7.54zm11.415-9.303c0-1.662-1.353-3.015-3.015-3.015-1.665 0-3.015 1.353-3.015 3.015 0 1.665 1.35 3.015 3.015 3.015 1.663 0 3.015-1.35 3.015-3.015zm-5.273-.005c0-1.252 1.013-2.266 2.265-2.266 1.249 0 2.266 1.014 2.266 2.266 0 1.251-1.017 2.265-2.266 2.265-1.253 0-2.265-1.014-2.265-2.265z" />
-    </svg>
-  )
-}
-function NexusIcon({ className }: { className?: string }) {
-  return (
-    <svg role="img" viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
-      <path d="M17.376 0c-.993 0-2.18.686-2.907 1.182-1.676-.36-4.036-.545-6.787.635-1.365-.513-2.425-.562-3.32-.488a2.16 2.16 0 0 0-1.27.429c-.33.22-2.788 2.69-3.069 4.652C-.15 7.508.68 8.932 1.218 9.718c-.44 1.76-.2 4.572.517 6.188-.353 1.041-.713 2.089-.664 3.205.01.584.061 1.188.398 1.684C1.72 21.19 4.528 24 6.545 24c.957 0 1.93-.428 3.07-1.24 2.16.383 4.402.348 6.448-.532 2.573 1.001 4.224.625 4.84.162.587-.457 2.826-2.915 3.07-4.622.1-.672-.023-1.638-1.226-3.397a10.983 10.983 0 0 0-.501-6.455c.396-1.069.673-2.188.59-3.337-.015-.68-.221-1.167-.487-1.507-.209-.335-2.415-2.39-4.028-2.91A3.105 3.105 0 0 0 17.376 0m-.03 2.082c.65.015 2.155 1.093 3.01 1.906l.355.34c-.959-.163-2.125.428-3.26 1.55a10.28 10.28 0 0 0-1.358 1.595c-.28.384-.517.768-.753 1.285l1.18.635-3.895 1.477-1.122-4.18 1.033.547c1.358-3.102 2.524-3.973 3.232-4.416h.015a5.12 5.12 0 0 1 1.49-.724zM12 3.065a8.932 8.932 0 0 1 2.22.279 7.67 7.67 0 0 0-.42.488 8.403 8.403 0 0 0-1.8-.196 8.336 8.336 0 0 0-5.897 2.432 7.86 7.86 0 0 1-.37-.433A8.905 8.905 0 0 1 12 3.065m-7.076.305c.71-.002 1.309.127 2.2.466a9.526 9.526 0 0 0-1.713 1.337c-.327-.542-.624-1.156-.488-1.803m-.606.042c-.162.96.428 2.126 1.55 3.264.457.487 1.003.945 1.594 1.358.383.281.767.517 1.283.754l.62-1.182 1.49 3.914-4.176 1.122.546-1.033c-3.099-1.36-3.969-2.526-4.412-3.235v-.015a5.144 5.144 0 0 1-.723-1.491l-.015-.074c.015-.65 1.092-2.156 1.904-3.013Zm16.035 1.483a1.259 1.259 0 0 1 .26.015l.14.023a5.05 5.05 0 0 1-.13 1.137v.015c-.1.383-.228.765-.377 1.148a9.526 9.526 0 0 0-1.346-1.776c.547-.357 1.051-.546 1.453-.562M18.43 5.8a8.903 8.903 0 0 1 2.506 6.2 8.937 8.937 0 0 1-.27 2.183 7.658 7.658 0 0 0-.488-.425A8.407 8.407 0 0 0 20.364 12 8.334 8.334 0 0 0 18 6.173a7.904 7.904 0 0 1 .429-.373M3.315 9.905c.157.148.319.29.488.425A8.417 8.417 0 0 0 3.636 12c0 2.248.887 4.286 2.327 5.788a8.11 8.11 0 0 1-.426.376A8.902 8.902 0 0 1 3.065 12a8.937 8.937 0 0 1 .25-2.095m13.988 1.541-.546 1.034c3.098 1.359 3.969 2.526 4.412 3.235v.014c.34.488.575.99.723 1.492l.014.074c-.014.65-1.092 2.156-1.903 3.013l-.34.354c.163-.96-.427-2.127-1.549-3.264a10.298 10.298 0 0 0-1.594-1.359 7.008 7.008 0 0 0-1.283-.753l-.605 1.152-1.505-3.87zm-6.006 1.684 1.121 4.18-1.033-.547c-1.357 3.102-2.523 3.973-3.231 4.416h-.015c-.487.34-.989.576-1.49.724l-.074.015c-.65-.015-2.154-1.093-3.01-1.906l-.354-.34c.959.163 2.124-.428 3.26-1.55.488-.458.945-1.004 1.358-1.595.28-.384.517-.768.753-1.285l-1.166-.635ZM3.72 16.663A9.526 9.526 0 0 0 5.086 18.5c-.697.47-1.33.665-1.777.59l-.138-.024c0-.367.038-.748.128-1.137v-.015c.11-.417.254-.835.42-1.252m14.131 1.314c.129.14.253.283.372.43A8.904 8.904 0 0 1 12 20.936a8.932 8.932 0 0 1-2.282-.296 7.757 7.757 0 0 0 .417-.487 8.335 8.335 0 0 0 7.716-2.175m.696.889c.43.666.607 1.267.534 1.698l-.023.138a5.034 5.034 0 0 1-1.136-.128h-.014a10.718 10.718 0 0 1-1.114-.366 9.526 9.526 0 0 0 1.753-1.342" />
-    </svg>
-  )
-}
 
 interface GameModEntry {
   id: string
@@ -81,13 +63,6 @@ type Ue4ssStatus = {
   pendingRestart: boolean
 }
 
-const SOURCE_LABEL: Record<Ue4ssSource, string> = {
-  'experimental-palworld': 'PalSchema build',
-  official: 'Official (Stable)',
-  beta: 'Official (Experimental)',
-  unknown: 'Custom / uploaded',
-}
-type InstallKind = 'pak' | 'ue4ss' | 'palschema'
 
 type NexusModRow = {
   modId: number
@@ -99,7 +74,6 @@ type NexusModRow = {
   available: boolean
   url: string
 }
-type NexusFile = { fileId: number; name: string; version: string | null; category: string | null }
 
 // Steam Workshop exposes an update timestamp, not a version — render it as a date.
 const fmtEpoch = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 10)
@@ -108,10 +82,10 @@ const fmtEpoch = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 10
 // through useServer().apiCall, which is hardwired to proxy the Palworld REST
 // API) since mod listing is filesystem-backed, not something the game's REST
 // API exposes at all. Same auth header, different route(s).
-// `hideInstall` removes the built-in "Install a Mod" card and `hideLoader` the UE4SS Loader
-// card — both are hoisted above the tabs now (the unified uploader + Ue4ssLoaderCard).
-// `reloadKey` lets those refresh this list after a change.
-export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadKey }: { hideInstall?: boolean; hideLoader?: boolean; reloadKey?: number } = {}) {
+// The panel is now the installed-mods LIST only — the "Install a Mod" card and the UE4SS
+// Loader are hoisted above the tabs (the unified uploader + Ue4ssLoaderCard). `reloadKey`
+// lets those refresh this list after a change.
+export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
   const { config, connectionStatus } = useServer()
   const [mods, setMods] = useState<GameModEntry[] | null>(null)
   const [modGroups, setModGroups] = useState<Record<string, string[]>>({})
@@ -132,11 +106,7 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
   const [configOverridden, setConfigOverridden] = useState(false)
   const [configDeclared, setConfigDeclared] = useState(false)
 
-  const [installKind, setInstallKind] = useState<InstallKind>('ue4ss')
-  const [installModName, setInstallModName] = useState('')
-  const [installing, setInstalling] = useState(false)
   const [pakDownloading, setPakDownloading] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Nexus association state (docs/specs/nexus-integration.md). Dormant unless a
   // valid key is connected (Panel Settings → Nexus).
@@ -153,30 +123,9 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
   const [linkTarget, setLinkTarget] = useState<string | null>(null)
   const [linkUrl, setLinkUrl] = useState('')
   const [linkHaveVersion, setLinkHaveVersion] = useState('')
-  // Install-from-Nexus (Phase 2, Premium)
+  // Nexus Premium + Steam account state (gates the update-now actions in the list).
   const [nexusPremium, setNexusPremium] = useState(false)
-  const [nexusUrl, setNexusUrl] = useState('')
-  const [nexusResolved, setNexusResolved] = useState<{ modId: number; name: string; latestVersion: string | null; files: NexusFile[] } | null>(null)
-  const [nexusFileId, setNexusFileId] = useState<number | ''>('')
-  const [nexusInstalling, setNexusInstalling] = useState<string | null>(null)
-  const [fomodUrl, setFomodUrl] = useState<string | null>(null) // FOMOD variant picker (open when set)
-  // Install-from-Steam-Workshop (steam-workshop-download.md). Shown when a Steam
-  // account session is connected.
   const [steamConnected, setSteamConnected] = useState(false)
-  const [steamUrl, setSteamUrl] = useState('')
-  const [steamInstalling, setSteamInstalling] = useState(false)
-  // Bulk Workshop install: paste many URLs/ids, install each sequentially.
-  const [steamBulk, setSteamBulk] = useState('')
-  const [steamBulkBusy, setSteamBulkBusy] = useState(false)
-  const [steamBulkResults, setSteamBulkResults] = useState<
-    { url: string; itemId: string | null; ok: boolean; name?: string; error?: string }[] | null
-  >(null)
-  // Bulk install (Phase 3 follow-up): paste many URLs, auto-pick MAIN per mod.
-  const [nexusBulk, setNexusBulk] = useState('')
-  const [nexusBulkBusy, setNexusBulkBusy] = useState(false)
-  const [nexusBulkResults, setNexusBulkResults] = useState<
-    { input: string; ok: boolean; name?: string; version?: string | null; needsChoice?: boolean; error?: string }[] | null
-  >(null)
 
   const loadNexus = useCallback(async () => {
     if (!config) return
@@ -214,24 +163,6 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
     }
   }, [config])
 
-  const resolveNexus = useCallback(async () => {
-    if (!config || !nexusUrl.trim()) return
-    setNexusInstalling('resolve')
-    try {
-      const res = await fetch(`/api/nexus/install?url=${encodeURIComponent(nexusUrl.trim())}`, {
-        headers: buildPalworldProxyHeaders(config),
-        cache: 'no-store',
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? 'Failed')
-      setNexusResolved({ modId: json.modId, name: json.name, latestVersion: json.latestVersion, files: json.files ?? [] })
-      setNexusFileId(json.files?.[0]?.fileId ?? '')
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to resolve mod')
-    } finally {
-      setNexusInstalling(null)
-    }
-  }, [config, nexusUrl])
 
   const nexusAction = useCallback(
     async (key: string, body: object, okMsg?: string): Promise<boolean> => {
@@ -308,7 +239,6 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
   )
 
   const [ue4ss, setUe4ss] = useState<Ue4ssStatus | null>(null)
-  const [ue4ssToggling, setUe4ssToggling] = useState(false)
 
   const loadUe4ss = useCallback(async () => {
     if (!config) return
@@ -324,155 +254,7 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
     }
   }, [config])
 
-  const toggleUe4ss = useCallback(
-    async (enabled: boolean) => {
-      if (!config) return
-      setUe4ssToggling(true)
-      const toastId = toast.loading(enabled ? 'Enabling UE4SS…' : 'Disabling UE4SS…')
-      try {
-        const res = await fetch('/api/game-mods/ue4ss', {
-          method: 'POST',
-          headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ enabled }),
-        })
-        const json = await res.json()
-        if (!res.ok) throw new Error(json.error ?? res.statusText)
-        setUe4ss(json.status as Ue4ssStatus)
-        toast.success((json.note as string) ?? 'Done', { id: toastId })
-      } catch (err) {
-        toast.error(err instanceof Error && err.message ? err.message : 'Failed', { id: toastId })
-      } finally {
-        setUe4ssToggling(false)
-      }
-    },
-    [config],
-  )
-
-  // ── UE4SS install / swap / rollback (phase 3) ──
-  const [ue4ssBusy, setUe4ssBusy] = useState<string | null>(null)
-  const [ue4ssBackups, setUe4ssBackups] = useState<
-    { file: string; sizeBytes: number; modifiedAt: string | null }[]
-  >([])
-  const [rollbackTarget, setRollbackTarget] = useState('')
-  const swapFileRef = useRef<HTMLInputElement>(null)
-
-  const loadUe4ssBackups = useCallback(async () => {
-    if (!config) return
-    try {
-      const res = await fetch('/api/game-mods/ue4ss/install', {
-        headers: buildPalworldProxyHeaders(config),
-        cache: 'no-store',
-      })
-      const json = await res.json()
-      if (res.ok) setUe4ssBackups(json.backups ?? [])
-    } catch {
-      /* ignore */
-    }
-  }, [config])
-
-  // Returns true on success so callers can chain follow-up steps (e.g. offering
-  // to install the PalSchema mod after swapping to its UE4SS build).
-  const runUe4ssAction = useCallback(
-    async (key: string, init: RequestInit): Promise<boolean> => {
-      if (!config) return false
-      setUe4ssBusy(key)
-      const toastId = toast.loading('Working… (this can take a moment)')
-      try {
-        const res = await fetch('/api/game-mods/ue4ss/install', {
-          ...init,
-          headers: { ...buildPalworldProxyHeaders(config), ...(init.headers ?? {}) },
-        })
-        const json = await res.json()
-        if (!res.ok) throw new Error(json.error ?? res.statusText)
-        if (json.status) setUe4ss(json.status as Ue4ssStatus)
-        toast.success((json.note as string) ?? 'Done', { id: toastId })
-        await loadUe4ssBackups()
-        return true
-      } catch (err) {
-        toast.error(err instanceof Error && err.message ? err.message : 'Failed', { id: toastId })
-        return false
-      } finally {
-        setUe4ssBusy(null)
-      }
-    },
-    [config, loadUe4ssBackups],
-  )
-
-  // Chained flow (owner's call): swapping to the PalSchema UE4SS *build* does NOT
-  // install PalSchema itself — they're a version-locked pair but two mechanisms.
-  // On a successful palschema-build swap, if the PalSchema mod isn't installed
-  // yet, offer step 2 so the build isn't mistaken for a finished PalSchema setup.
-  const [offerPalSchema, setOfferPalSchema] = useState(false)
   const [palschemaReload, setPalschemaReload] = useState(0)
-  // Official builds lack Palworld's MemberVariableLayout.ini + use a flat layout,
-  // so on this game they typically crash or fail to inject — confirm before one.
-  const [confirmSwap, setConfirmSwap] = useState<'official' | 'beta' | null>(null)
-  const [palschemaTag, setPalschemaTag] = useState('0.6.1') // label only; server owns the real pin
-
-  const downloadUe4ss = useCallback(
-    async (source: 'official' | 'beta' | 'palschema') => {
-      const ok = await runUe4ssAction(`dl:${source}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'download', source }),
-      })
-      if (ok && source === 'palschema' && config) {
-        try {
-          const res = await fetch('/api/game-mods/palschema', {
-            headers: buildPalworldProxyHeaders(config),
-            cache: 'no-store',
-          })
-          const json = await res.json()
-          if (typeof json.pinnedTag === 'string') setPalschemaTag(json.pinnedTag)
-          if (res.ok && !json.status?.installed) setOfferPalSchema(true)
-        } catch {
-          /* offer is best-effort; the PalSchema section still shows the install */
-        }
-      }
-    },
-    [runUe4ssAction, config],
-  )
-
-  const installPalSchemaNow = useCallback(async () => {
-    setOfferPalSchema(false)
-    if (!config) return
-    const toastId = toast.loading('Downloading & installing PalSchema…')
-    try {
-      const res = await fetch('/api/game-mods/palschema', {
-        method: 'POST',
-        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'downloadLoader' }),
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? res.statusText)
-      toast.success((json.note as string) ?? 'PalSchema installed', { id: toastId })
-      setPalschemaReload((n) => n + 1)
-    } catch (err) {
-      toast.error(err instanceof Error && err.message ? err.message : 'Failed', { id: toastId })
-    }
-  }, [config])
-
-  const uploadUe4ss = useCallback(async () => {
-    const f = swapFileRef.current?.files?.[0]
-    if (!f) {
-      toast.error('Choose a UE4SS build zip first')
-      return
-    }
-    const body = new FormData()
-    body.set('file', f)
-    await runUe4ssAction('upload', { method: 'POST', body })
-    if (swapFileRef.current) swapFileRef.current.value = ''
-  }, [runUe4ssAction])
-
-  const doRollbackUe4ss = useCallback(
-    (file: string) =>
-      runUe4ssAction(`rb`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'rollback', backupFile: file }),
-      }),
-    [runUe4ssAction],
-  )
 
   const load = useCallback(async () => {
     if (!config) return
@@ -501,65 +283,10 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
     load()
     loadNexus()
     loadSteam()
-    loadUe4ss()
-    setPalschemaReload((n) => n + 1) // refresh the PalSchema section if the hoisted loader installed it
-  }, [reloadKey, load, loadNexus, loadSteam, loadUe4ss])
+    setPalschemaReload((n) => n + 1) // refresh the PalSchema section after a shared-uploader commit
+  }, [reloadKey, load, loadNexus, loadSteam])
 
-  // Defined after `load` since it refreshes the mod list on success.
-  const installFromNexus = useCallback(async () => {
-    if (!config || !nexusResolved || !nexusFileId) return
-    setNexusInstalling('install')
-    const toastId = toast.loading('Downloading & installing from Nexus…')
-    try {
-      const res = await fetch('/api/nexus/install', {
-        method: 'POST',
-        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modId: nexusResolved.modId, fileId: nexusFileId }),
-      })
-      const json = await res.json()
-      if (!res.ok) {
-        // FOMOD installer — open the variant picker instead of erroring.
-        if (json.fomod) {
-          toast.dismiss(toastId)
-          setFomodUrl(nexusUrl.trim())
-          return
-        }
-        throw new Error(json.error ?? 'Failed')
-      }
-      toast.success((json.note as string) ?? 'Installed from Nexus', { id: toastId })
-      setNexusResolved(null)
-      setNexusUrl('')
-      setNexusFileId('')
-      await load()
-      await loadNexus()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed', { id: toastId })
-    } finally {
-      setNexusInstalling(null)
-    }
-  }, [config, nexusResolved, nexusFileId, nexusUrl, load, loadNexus])
 
-  const installFromWorkshop = useCallback(async () => {
-    if (!config || !steamUrl.trim()) return
-    setSteamInstalling(true)
-    const toastId = toast.loading('Downloading from Steam Workshop…')
-    try {
-      const res = await fetch('/api/steam/workshop', {
-        method: 'POST',
-        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: steamUrl.trim() }),
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? 'Workshop install failed')
-      toast.success((json.note as string) ?? 'Downloaded from Workshop', { id: toastId })
-      setSteamUrl('')
-      await load()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Workshop install failed', { id: toastId })
-    } finally {
-      setSteamInstalling(false)
-    }
-  }, [config, steamUrl, load])
 
   // One-click update: re-download the item (SteamCMD pulls the latest) and re-convert
   // to the proxy layout — same path as install. Needs a connected account. Restart to
@@ -589,35 +316,6 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
     [config, load, loadSteam],
   )
 
-  // Bulk: paste many Workshop URLs/ids; the server installs each sequentially and
-  // returns a per-item result. Mirrors the Nexus bulk flow.
-  const bulkInstallFromWorkshop = useCallback(async () => {
-    if (!config) return
-    const urls = steamBulk
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean)
-    if (!urls.length) return
-    setSteamBulkBusy(true)
-    setSteamBulkResults(null)
-    const toastId = toast.loading(`Installing ${urls.length} Workshop mod${urls.length === 1 ? '' : 's'}…`)
-    try {
-      const res = await fetch('/api/steam/workshop', {
-        method: 'POST',
-        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls }),
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? 'Bulk install failed')
-      setSteamBulkResults(json.results ?? [])
-      toast.success((json.note as string) ?? 'Done', { id: toastId })
-      await load()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Bulk install failed', { id: toastId })
-    } finally {
-      setSteamBulkBusy(false)
-    }
-  }, [config, steamBulk, load])
 
   // One-click update (Premium): reinstall a linked mod's latest Nexus file and
   // bump its baseline. Uses the same download+install pipeline as a fresh install.
@@ -698,41 +396,13 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
     setUpdatingAll(false)
   }, [config, nexusMods, nexusPremium, steamUpdates, steamConnected, load, loadNexus, loadSteam])
 
-  // Bulk install: paste many Nexus URLs; the server installs each sequentially,
-  // auto-picking its MAIN file and returning a per-line result.
-  const bulkInstallFromNexus = useCallback(async () => {
-    if (!config) return
-    const urls = nexusBulk.split('\n').map((l) => l.trim()).filter(Boolean)
-    if (!urls.length) return
-    setNexusBulkBusy(true)
-    setNexusBulkResults(null)
-    const toastId = toast.loading(`Installing ${urls.length} mod(s) from Nexus…`)
-    try {
-      const res = await fetch('/api/nexus/install', {
-        method: 'POST',
-        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'bulk', urls }),
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? 'Bulk install failed')
-      setNexusBulkResults(json.results ?? [])
-      toast.success((json.note as string) ?? 'Done', { id: toastId })
-      await load()
-      await loadNexus()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Bulk install failed', { id: toastId })
-    } finally {
-      setNexusBulkBusy(false)
-    }
-  }, [config, nexusBulk, load, loadNexus])
 
   useEffect(() => {
     load()
     void loadUe4ss()
-    void loadUe4ssBackups()
     void loadNexus()
     void loadSteam()
-  }, [load, loadUe4ss, loadUe4ssBackups, loadNexus, loadSteam])
+  }, [load, loadUe4ss, loadNexus, loadSteam])
 
   // Poll UE4SS status so the running/loaded state (banner vs boot time) updates on
   // its own after a restart — a swap stages instantly, but "now running the new
@@ -989,70 +659,6 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
     }
   }, [config, removeTarget])
 
-  const install = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault()
-      if (!config) return
-      const file = fileInputRef.current?.files?.[0]
-      if (!file) {
-        toast.error('Choose a file first')
-        return
-      }
-
-      setInstalling(true)
-      try {
-        if (installKind === 'palschema') {
-          // PalSchema mods have their own route (nested path, JSON/JSONC
-          // validation, hybrid pak-split). This is the single install entry point
-          // for them; the PalSchema section only lists/removes.
-          const body = new FormData()
-          body.set('target', 'submod')
-          body.set('file', file)
-          const response = await fetch('/api/game-mods/palschema', {
-            method: 'POST',
-            headers: buildPalworldProxyHeaders(config),
-            body,
-          })
-          const data = await response.json()
-          if (!response.ok) throw new Error(data.error ?? response.statusText)
-          toast.success((data.note as string) ?? `Installed ${data.result?.name ?? file.name}`)
-          if (fileInputRef.current) fileInputRef.current.value = ''
-          setPalschemaReload((n) => n + 1) // refresh the PalSchema section's list/count
-        } else {
-          const body = new FormData()
-          body.set('kind', installKind)
-          body.set('file', file)
-          if (installKind === 'ue4ss' && installModName.trim()) {
-            body.set('modName', installModName.trim())
-          }
-
-          const response = await fetch('/api/game-mods/install', {
-            method: 'POST',
-            headers: buildPalworldProxyHeaders(config), // no Content-Type — browser sets the multipart boundary itself
-            body,
-          })
-          const data = await response.json()
-          if (!response.ok) throw new Error(data.error ?? response.statusText)
-
-          const linked = data.nexusLinked as { name?: string; version?: string | null } | null
-          toast.success(
-            linked
-              ? `Installed ${data.name ?? file.name} — linked to Nexus (${linked.name}${linked.version ? ` v${linked.version}` : ''})`
-              : `Installed ${data.name ?? file.name}`,
-          )
-          setInstallModName('')
-          if (fileInputRef.current) fileInputRef.current.value = ''
-          await load()
-          if (linked) await loadNexus() // show the freshly-linked mod's Nexus chip
-        }
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Install failed')
-      } finally {
-        setInstalling(false)
-      }
-    },
-    [config, installKind, installModName, load, loadNexus]
-  )
 
   // Version-gating for the three install kinds (spec §3). pak is always fine;
   // UE4SS mods need an active loader; PalSchema mods need the experimental build.
@@ -1064,44 +670,6 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
   // Gate PalSchema install on the STAGED build — you can install PalSchema once
   // its UE4SS build is on disk, even before the restart that loads it.
   const palschemaReady = ue4ss?.stagedSource === 'experimental-palworld'
-  // The Active badge follows the STAGED (installed-on-disk) build, so pressing a
-  // swap button lights up its button immediately — not the last-booted build.
-  const activeSource: 'official' | 'beta' | 'palschema' | null =
-    ue4ss?.stagedSource === 'experimental-palworld'
-      ? 'palschema'
-      : ue4ss?.stagedSource === 'official'
-        ? 'official'
-        : ue4ss?.stagedSource === 'beta'
-          ? 'beta'
-          : null
-  const activeBadge = (
-    <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-emerald-700 dark:text-emerald-400">
-      Active
-    </span>
-  )
-  // Nudge toward the PalSchema build when it's NOT the current one; it gives way
-  // to the Active badge once staged, so the button never shows both.
-  const recommendedBadge = (
-    <span className="rounded-full border border-amber-500/40 bg-amber-500/25 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-800 dark:text-amber-200">
-      ✦ Recommended
-    </span>
-  )
-  const kindGate: Record<InstallKind, { disabled: boolean; reason: string }> = {
-    pak: { disabled: false, reason: '' },
-    ue4ss: {
-      disabled: !ue4ssActive,
-      reason: ue4ssActive ? '' : 'UE4SS is disabled/absent — enable it in the loader above.',
-    },
-    palschema: {
-      disabled: !palschemaReady || !ue4ssActive,
-      reason: !ue4ssActive
-        ? 'UE4SS is disabled/absent — enable it in the loader above.'
-        : palschemaReady
-          ? ''
-          : 'Requires the PalSchema UE4SS build — swap to it in the loader above.',
-    },
-  }
-  const selectedGate = kindGate[installKind]
 
   // A single mod row, reused for the main list, the collapsed built-ins, and (with
   // opts.nested) as a bundled child under a hybrid mod's parent row.
@@ -1395,202 +963,6 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
 
       {/* UE4SS Loader (spec docs/specs/ue4ss-loader.md) — loaded build + enable/disable.
           Version install/swap buttons land in a later phase. */}
-      {!hideLoader && (
-      <div className="flex flex-col gap-2 rounded-md border p-3">
-        <div className="flex items-center justify-between">
-          <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-            <CpuIcon className="size-4" /> UE4SS Loader
-          </h3>
-          {ue4ss?.installed && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              {ue4ss.enabled ? 'Enabled' : 'Disabled'}
-              <Switch
-                checked={ue4ss.enabled}
-                disabled={ue4ssToggling}
-                onCheckedChange={(v) => toggleUe4ss(v)}
-                aria-label="Enable UE4SS"
-              />
-            </div>
-          )}
-        </div>
-
-        {!ue4ss ? (
-          <p className="text-xs text-muted-foreground">Loading…</p>
-        ) : !ue4ss.installed ? (
-          <p className="text-xs text-muted-foreground">UE4SS is not installed.</p>
-        ) : !ue4ss.enabled ? (
-          <p className="text-xs text-muted-foreground">
-            UE4SS is <span className="font-medium">disabled</span>{' '}
-            {ue4ss.regime === 'workshop'
-              ? '(bGlobalEnableMod is off in PalModSettings).'
-              : '(the dwmapi proxy is renamed aside).'}{' '}
-            Enable it and restart the server to load mods.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-1.5 text-xs">
-            {/* Installed / staged build — updates the instant a swap runs. */}
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-muted-foreground">Installed:</span>
-              {ue4ss.regime === 'workshop' ? (
-                <Badge variant="outline" className="border-sky-500/50 text-sky-500">
-                  Workshop layout
-                </Badge>
-              ) : (
-                <Badge
-                  variant="outline"
-                  className={
-                    ue4ss.stagedSource === 'experimental-palworld'
-                      ? 'border-amber-500/50 text-amber-500'
-                      : 'text-muted-foreground'
-                  }
-                >
-                  {ue4ss.stagedSource ? SOURCE_LABEL[ue4ss.stagedSource] : 'unknown'}
-                </Badge>
-              )}
-              {ue4ss.stagedVersion && (
-                <span className="font-mono text-muted-foreground">{ue4ss.stagedVersion}</span>
-              )}
-            </div>
-            {/* Injection regime — proxy (community dwmapi) vs official Workshop loader. */}
-            <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
-              <span>Regime:</span>
-              <span className="font-medium text-foreground">
-                {ue4ss.regime === 'workshop'
-                  ? 'Workshop layout — official loader (Mods/NativeMods)'
-                  : 'Community proxy — dwmapi (Win64/ue4ss)'}
-              </span>
-            </div>
-            {/* Running status — the live truth (banner checked against boot time). */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              {!ue4ss.running ? (
-                <span className="text-muted-foreground">
-                  Server stopped — the installed build loads on next start.
-                </span>
-              ) : ue4ss.loaded && !ue4ss.pendingRestart ? (
-                <span className="text-emerald-600 dark:text-emerald-400">
-                  ✓ Running {ue4ss.version}
-                  {ue4ss.sha ? ` #${ue4ss.sha}` : ''}
-                  {ue4ss.buildConfig ? ` · ${ue4ss.buildConfig}` : ''}
-                </span>
-              ) : ue4ss.loaded && ue4ss.pendingRestart ? (
-                <span className="text-amber-600 dark:text-amber-400">
-                  ⚠ Pending restart — running {ue4ss.version}
-                  {ue4ss.sha ? ` #${ue4ss.sha}` : ''}; restart to load the installed build.
-                </span>
-              ) : (
-                <span className="text-destructive">
-                  ⚠ UE4SS did not load on this boot — the installed build failed to inject, or a
-                  restart is still pending.
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Version install / swap (phase 3). All require the server stopped;
-            each backs up the current UE4SS first. */}
-        {ue4ss?.installed && (
-          <div className="flex flex-col gap-2 border-t pt-2">
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 gap-1.5 text-xs"
-                disabled={!!ue4ssBusy}
-                onClick={() => setConfirmSwap('official')}
-                title="RE-UE4SS v3.0.1 stable — runs classic UE4SS Lua/Blueprint mods; does NOT support PalSchema (no MemberVariableLayout.ini)"
-              >
-                {ue4ssBusy === 'dl:official' && <Spinner className="size-3.5" />} UE4SS (Stable)
-                {activeSource === 'official' && activeBadge}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 gap-1.5 text-xs"
-                disabled={!!ue4ssBusy}
-                onClick={() => setConfirmSwap('beta')}
-                title="RE-UE4SS experimental-latest pre-release — newer UE4SS; runs classic mods, but not the PalSchema-preconfigured build"
-              >
-                {ue4ssBusy === 'dl:beta' && <Spinner className="size-3.5" />} UE4SS (Experimental)
-                {activeSource === 'beta' && activeBadge}
-              </Button>
-              <Button
-                size="sm"
-                className="h-8 gap-1.5 border-amber-500/50 bg-amber-500/15 text-xs text-amber-700 hover:bg-amber-500/25 dark:text-amber-400"
-                variant="outline"
-                disabled={!!ue4ssBusy}
-                onClick={() => downloadUe4ss('palschema')}
-                title="Okaetsu experimental-palworld — includes MemberVariableLayout.ini; required for PalSchema (runs classic mods too)"
-              >
-                {ue4ssBusy === 'dl:palschema' && <Spinner className="size-3.5" />} UE4SS (PalSchema)
-                {activeSource === 'palschema' ? activeBadge : recommendedBadge}
-              </Button>
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              All three report the same version (<span className="font-mono">v3.0.1 Beta #0</span>) — they differ by
-              Git SHA / branch, not version number. All run classic UE4SS Lua/Blueprint mods; only{' '}
-              <span className="text-amber-600 dark:text-amber-400">UE4SS (PalSchema)</span> supports PalSchema (it
-              ships the <span className="font-mono">MemberVariableLayout.ini</span> PalSchema needs).
-            </p>
-
-            {/* Generic operator-supplied build — separate from the named ones. */}
-            <details className="rounded-md border border-border/60 bg-muted/20 p-2">
-              <summary className="cursor-pointer text-[11px] text-muted-foreground">
-                Manual upload — supply your own UE4SS build zip
-              </summary>
-              <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-                You vet this build. It replaces the loader and can break joins — the current UE4SS is backed up
-                first, and rollback is below.
-              </p>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                <input
-                  ref={swapFileRef}
-                  type="file"
-                  accept=".zip"
-                  className="text-xs file:mr-2 file:rounded file:border file:bg-muted file:px-2 file:py-0.5 file:text-xs"
-                />
-                <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={!!ue4ssBusy} onClick={uploadUe4ss}>
-                  {ue4ssBusy === 'upload' ? <Spinner className="size-3.5" /> : <UploadIcon className="size-3.5" />}
-                  Install upload
-                </Button>
-              </div>
-            </details>
-
-            {ue4ssBackups.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-muted-foreground">Rollback to:</span>
-                <select
-                  value={rollbackTarget || ue4ssBackups[0].file}
-                  onChange={(e) => setRollbackTarget(e.target.value)}
-                  className="max-w-[16rem] truncate rounded-md border bg-background px-2 py-1 text-xs"
-                >
-                  {ue4ssBackups.map((b) => (
-                    <option key={b.file} value={b.file}>
-                      {b.file}
-                    </option>
-                  ))}
-                </select>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 gap-1.5 text-xs"
-                  disabled={!!ue4ssBusy}
-                  onClick={() => doRollbackUe4ss(rollbackTarget || ue4ssBackups[0].file)}
-                >
-                  {ue4ssBusy === 'rb' && <Spinner className="size-3.5" />} Rollback
-                </Button>
-              </div>
-            )}
-
-            <p className="text-[11px] text-muted-foreground">
-              All version actions require the server <span className="font-medium">stopped</span> and take effect
-              on the next restart.
-            </p>
-          </div>
-        )}
-      </div>
-      )}
-
       {/* Unified "Installed Mods" card: the PalSchema panel + the installed mod list
           in one bordered block (PalSchema: docs/specs/palschema-support.md, paired
           with / version-locked to the UE4SS build the loader above reports). */}
@@ -1678,323 +1050,6 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
         </div>
       </div>
 
-      {!hideInstall && (
-      <div className="mt-2 flex flex-col gap-4 rounded-md border p-3">
-        <div className="flex items-center gap-2">
-          <UploadIcon className="size-4" />
-          <h3 className="text-sm font-semibold">Install a Mod</h3>
-        </div>
-
-        {/* ── Nexus Mods (nexusmods.com) — auto-download is Premium-gated; free or
-            disconnected accounts get a discoverable placeholder. ── */}
-        <section className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <NexusIcon className="size-4" /> Nexus Mods
-            </div>
-            {nexusConnected && nexusPremium ? (
-              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
-                Premium
-              </span>
-            ) : (
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                {nexusConnected ? 'Connected · not Premium' : 'Not connected'}
-              </span>
-            )}
-          </div>
-
-          {/* Install straight from a Nexus URL (Premium — downloads + installs). */}
-          {nexusConnected && nexusPremium && (
-            <div className="flex flex-col gap-2 rounded-md border border-border/60 bg-muted/20 p-2">
-              <span className="text-xs font-medium">Single mod URL</span>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="https://www.nexusmods.com/palworld/mods/…"
-                  value={nexusUrl}
-                  onChange={(e) => setNexusUrl(e.target.value)}
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={resolveNexus}
-                  disabled={nexusInstalling === 'resolve' || !nexusUrl.trim()}
-                >
-                  {nexusInstalling === 'resolve' ? <Spinner className="size-3.5" /> : 'Fetch'}
-                </Button>
-              </div>
-              {nexusResolved && (
-                <div className="flex flex-col gap-1.5">
-                  <p className="text-xs text-muted-foreground">
-                    {nexusResolved.name}
-                    {nexusResolved.latestVersion ? ` — latest v${nexusResolved.latestVersion}` : ''}
-                  </p>
-                  {nexusResolved.files.length === 0 ? (
-                    <p className="text-xs text-amber-600 dark:text-amber-400">No downloadable files listed.</p>
-                  ) : (
-                    <select
-                      value={nexusFileId === '' ? '' : String(nexusFileId)}
-                      onChange={(e) => setNexusFileId(e.target.value ? Number(e.target.value) : '')}
-                      className="rounded-md border bg-background px-2 py-1 text-xs"
-                    >
-                      {nexusResolved.files.map((f) => (
-                        <option key={f.fileId} value={f.fileId}>
-                          {f.name}
-                          {f.version ? ` — v${f.version}` : ''}
-                          {f.category ? ` (${f.category})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={installFromNexus}
-                    disabled={nexusInstalling === 'install' || !nexusFileId}
-                    className="w-fit"
-                  >
-                    {nexusInstalling === 'install' ? <Spinner className="mr-2 size-4" /> : <DownloadIcon className="mr-2 size-4" />}
-                    Download &amp; install
-                  </Button>
-                </div>
-              )}
-              <p className="text-[11px] text-muted-foreground">
-                Auto-detects the mod type and links it for update checks. Takes effect on next restart.
-              </p>
-            </div>
-          )}
-
-          {/* Bulk install: paste many Nexus URLs (Premium). Auto-picks each MAIN file. */}
-          {nexusConnected && nexusPremium && (
-            <details className="rounded-md border border-border/60 bg-muted/20 p-2">
-              <summary className="cursor-pointer select-none text-xs font-medium">Bulk install</summary>
-              <div className="mt-2 flex flex-col gap-2">
-                <textarea
-                  placeholder={'One Nexus URL or mod id per line:\nhttps://www.nexusmods.com/palworld/mods/1135\n4379'}
-                  value={nexusBulk}
-                  onChange={(e) => setNexusBulk(e.target.value)}
-                  rows={4}
-                  className="w-full rounded-md border bg-background px-2 py-1 text-xs font-mono"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={bulkInstallFromNexus}
-                  disabled={nexusBulkBusy || !nexusBulk.trim()}
-                  className="w-fit"
-                >
-                  {nexusBulkBusy ? <Spinner className="mr-2 size-4" /> : <DownloadIcon className="mr-2 size-4" />}
-                  {nexusBulkBusy ? 'Installing…' : 'Install all'}
-                </Button>
-                {nexusBulkResults && (
-                  <ul className="flex flex-col gap-0.5 text-[11px]">
-                    {nexusBulkResults.map((r, i) => (
-                      <li
-                        key={`${r.input}-${i}`}
-                        className={
-                          r.ok
-                            ? 'text-emerald-600 dark:text-emerald-400'
-                            : r.needsChoice
-                              ? 'text-amber-600 dark:text-amber-400'
-                              : 'text-destructive'
-                        }
-                      >
-                        {r.ok ? '✓' : r.needsChoice ? '⚠' : '✗'} {r.name ?? r.input}
-                        {r.ok && r.version ? ` — v${r.version}` : ''}
-                        {!r.ok && r.error ? ` — ${r.error}` : ''}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <p className="text-[11px] text-muted-foreground">
-                  Each mod&apos;s MAIN file is installed automatically. Mods with multiple/no MAIN file are flagged
-                  — finish those with the single-URL box above. Takes effect on next restart.
-                </p>
-              </div>
-            </details>
-          )}
-
-          {/* No Premium key → discoverable explainer in place of the install boxes. */}
-          {!(nexusConnected && nexusPremium) && (
-            <div className="flex flex-col gap-1 rounded-md border border-dashed border-border/60 bg-muted/10 p-2 opacity-90">
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
-                Download &amp; install mods straight from a Nexus URL — one at a time or in bulk — with automatic
-                type detection and update-linking.{' '}
-                {nexusConnected
-                  ? 'Your Nexus key is connected but not Premium, so auto-download stays off. Free accounts still get update alerts and the guided manual upload below.'
-                  : 'Add a personal Nexus API key in Panel Settings → Nexus to enable it (a Nexus Premium account is required for auto-download).'}
-              </p>
-            </div>
-          )}
-        </section>
-
-        {/* ── Steam Workshop — the platform's actual feature name. Live box when
-            connected, discoverable placeholder otherwise. ── */}
-        <section className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <SteamIcon className="size-4" /> Steam Workshop
-            </div>
-            {steamConnected ? (
-              <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-700 dark:text-sky-400">
-                Connected
-              </span>
-            ) : (
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                Not connected
-              </span>
-            )}
-          </div>
-
-          {steamConnected ? (
-            <div className="flex flex-col gap-2 rounded-md border border-sky-500/40 bg-sky-500/5 p-2">
-              <div className="flex gap-2">
-                <Input
-                  placeholder="https://steamcommunity.com/sharedfiles/filedetails/?id=…"
-                  value={steamUrl}
-                  onChange={(e) => setSteamUrl(e.target.value)}
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={installFromWorkshop}
-                  disabled={steamInstalling || !steamUrl.trim()}
-                >
-                  {steamInstalling ? <Spinner className="mr-1 size-3.5" /> : <DownloadIcon className="mr-1 size-4" />}
-                  Install
-                </Button>
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Downloads via your connected Steam account, then installs the mod into your current UE4SS setup
-                (reading its manifest: Lua → UE4SS Mods, PalSchema data → PalSchema, paks → ~mods). Restart the server
-                to load it. UE4SS/PalSchema framework items are skipped — you already have those.
-              </p>
-
-              {/* Bulk install: paste many Workshop URLs/ids (parallel of the Nexus bulk). */}
-              <details className="rounded-md border border-border/60 bg-background/40 p-2">
-                <summary className="cursor-pointer select-none text-xs font-medium">Bulk install</summary>
-                <div className="mt-2 flex flex-col gap-2">
-                  <textarea
-                    placeholder={
-                      'One Workshop URL or item id per line:\nhttps://steamcommunity.com/sharedfiles/filedetails/?id=123456789\n987654321'
-                    }
-                    value={steamBulk}
-                    onChange={(e) => setSteamBulk(e.target.value)}
-                    rows={4}
-                    className="w-full rounded-md border bg-background px-2 py-1 font-mono text-xs"
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={bulkInstallFromWorkshop}
-                    disabled={steamBulkBusy || !steamBulk.trim()}
-                    className="w-fit"
-                  >
-                    {steamBulkBusy ? <Spinner className="mr-2 size-4" /> : <DownloadIcon className="mr-2 size-4" />}
-                    {steamBulkBusy ? 'Installing…' : 'Install all'}
-                  </Button>
-                  {steamBulkResults && (
-                    <ul className="flex flex-col gap-0.5 text-[11px]">
-                      {steamBulkResults.map((r, i) => (
-                        <li
-                          key={`${r.url}-${i}`}
-                          className={r.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}
-                        >
-                          {r.ok ? '✓' : '✗'} {r.name ?? r.itemId ?? r.url}
-                          {!r.ok && r.error ? ` — ${r.error}` : ''}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </details>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-1 rounded-md border border-dashed border-sky-500/40 bg-sky-500/5 p-2 opacity-90">
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
-                Auto-download Steam Workshop mods for the official Workshop layout. Connect a Steam account in{' '}
-                <span className="font-medium">Panel Settings → Steam</span> to enable it — it needs an account that{' '}
-                <span className="font-medium">owns Palworld</span> (a dedicated secondary account is recommended).
-              </p>
-            </div>
-          )}
-        </section>
-
-        {/* ── Manual Upload — upload a file directly, no external account. ── */}
-        <section className="flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <UploadIcon className="size-4" /> Manual Upload
-          </div>
-
-          <form onSubmit={install} className="flex flex-col gap-3">
-            {/* Three gated kinds (spec §3): pak always, UE4SS needs an active
-                loader, PalSchema needs the experimental build. */}
-            <div className="grid grid-cols-3 gap-2">
-              {(
-                [
-                  ['pak', 'Pak mod'],
-                  ['ue4ss', 'UE4SS mod'],
-                  ['palschema', 'PalSchema mod'],
-                ] as const
-              ).map(([kind, label]) => {
-                const gate = kindGate[kind]
-                return (
-                  <button
-                    key={kind}
-                    type="button"
-                    disabled={gate.disabled}
-                    title={gate.disabled ? gate.reason : undefined}
-                    onClick={() => setInstallKind(kind)}
-                    className={`rounded-md border px-2 py-1 text-xs ${
-                      installKind === kind
-                        ? 'border-primary/60 bg-primary/10 text-primary'
-                        : 'text-muted-foreground'
-                    } disabled:cursor-not-allowed disabled:opacity-40`}
-                  >
-                    {label}
-                  </button>
-                )
-              })}
-            </div>
-
-            {selectedGate.disabled && (
-              <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
-                {selectedGate.reason}
-              </p>
-            )}
-
-            {!selectedGate.disabled && installKind === 'ue4ss' && (
-              <Input
-                placeholder="Mod folder name (optional — defaults to the zip's filename)"
-                value={installModName}
-                onChange={(e) => setInstallModName(e.target.value)}
-              />
-            )}
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={installKind === 'pak' ? '.pak' : '.zip'}
-              className="text-sm file:mr-3 file:rounded-md file:border file:bg-muted file:px-2 file:py-1 file:text-sm"
-            />
-
-            <p className="text-xs text-muted-foreground">
-              {installKind === 'pak'
-                ? 'The .pak file is placed directly in Paks/~mods/.'
-                : installKind === 'palschema'
-                  ? 'A zip of one PalSchema mod folder (JSON/JSONC). Any bundled .pak assets are split out to Paks/~mods/ (hybrid mods).'
-                  : 'The zip should contain the mod’s files directly (main.lua etc.) at its root, not nested in an extra folder.'}
-            </p>
-
-            <Button type="submit" disabled={installing} className="w-fit">
-              {installing ? <Spinner className="mr-2 size-4" /> : <UploadIcon className="mr-2 size-4" />}
-              {installing ? 'Installing…' : 'Install'}
-            </Button>
-          </form>
-        </section>
-      </div>
-      )}
-
       {/* Extra confirmation specifically for disabling a UE4SS framework default */}
       <AlertDialog
         open={!!disableWarnTarget}
@@ -2046,55 +1101,6 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
               {pendingId ? <Spinner className="mr-2 size-4" /> : null}
               Remove
             </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Guard the Official-build swaps — they're footguns for Palworld. */}
-      <AlertDialog open={confirmSwap !== null} onOpenChange={(o) => !o && setConfirmSwap(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Swap to {confirmSwap === 'beta' ? 'UE4SS (Experimental)' : 'UE4SS (Stable)'}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This build runs classic UE4SS Lua/Blueprint mods, but does{' '}
-              <span className="font-medium">not support PalSchema</span> (it lacks Palworld&apos;s{' '}
-              <span className="font-mono">MemberVariableLayout.ini</span>) — any PalSchema mods stop loading until you
-              swap back to <span className="font-medium">UE4SS (PalSchema)</span>. Heads-up: installing a flat-layout
-              build through this swapper isn&apos;t fully reliable yet and can fail to inject; if that happens, roll
-              back below. Your current build is backed up first. Continue?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                const s = confirmSwap
-                setConfirmSwap(null)
-                if (s) void downloadUe4ss(s)
-              }}
-            >
-              Continue
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Step 2 of 2 after a PalSchema-build UE4SS swap — wording is deliberately
-          explicit that PalSchema itself is NOT yet installed. */}
-      <AlertDialog open={offerPalSchema} onOpenChange={setOfferPalSchema}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>UE4SS ready — PalSchema is not installed yet</AlertDialogTitle>
-            <AlertDialogDescription>
-              That installed the <span className="font-medium">UE4SS build</span> PalSchema needs — step 1 of 2.
-              PalSchema itself is <span className="font-medium">not installed</span>, so PalSchema mods won&apos;t
-              work until you add it. Install PalSchema {palschemaTag} now? (You can also do it later from the
-              PalSchema section.)
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Not now</AlertDialogCancel>
-            <AlertDialogAction onClick={installPalSchemaNow}>Install PalSchema {palschemaTag}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -2242,23 +1248,6 @@ export function GameModsPanel({ hideInstall = false, hideLoader = false, reloadK
           )}
         </SheetContent>
       </Sheet>
-
-      {fomodUrl && config && (
-        <FomodPicker
-          url={fomodUrl}
-          config={config}
-          onClose={() => setFomodUrl(null)}
-          onInstalled={(note) => {
-            toast.success(note)
-            setFomodUrl(null)
-            setNexusResolved(null)
-            setNexusUrl('')
-            setNexusFileId('')
-            void load()
-            void loadNexus()
-          }}
-        />
-      )}
     </div>
   )
 }

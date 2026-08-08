@@ -262,9 +262,12 @@ async function includeFramework(win64Dest: string, modsDir: string): Promise<boo
   if (!(await exists(join(liveWin64, 'dwmapi.dll'))) || !(await isDir(liveUe4ss))) return false
   await mkdir(join(win64Dest, 'ue4ss'), { recursive: true })
   await cp(join(liveWin64, 'dwmapi.dll'), join(win64Dest, 'dwmapi.dll'))
-  // ue4ss/ core: everything except the Mods tree (handled below) and the log.
+  // ue4ss/ core: everything except the Mods tree (handled below), the log, and crash
+  // artifacts. Crash dumps (crash_*.dmp) + logs accumulate in the live server's ue4ss dir
+  // and must NEVER ship to clients — that dragged 150+ server dumps into friend bundles.
   for (const e of await readdir(liveUe4ss, { withFileTypes: true })) {
     if (e.name === 'Mods' || e.name === 'UE4SS.log') continue
+    if (/\.(dmp|log)$/i.test(e.name)) continue // crash dumps / logs — server junk, not client files
     await cp(join(liveUe4ss, e.name), join(win64Dest, 'ue4ss', e.name), { recursive: true })
   }
   // Framework Mods the client needs: `shared` (runtime lib) + the bundled defaults.

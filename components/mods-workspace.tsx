@@ -71,7 +71,7 @@ export function ModsWorkspace() {
       <div className="min-h-0 flex-1 overflow-y-auto lg:overflow-hidden">
         <ScrollArea className="h-full lg:h-auto lg:flex-1">
           {sub === 'server' ? (
-            <GameModsPanel hideInstall hideLoader reloadKey={reloadKey} />
+            <GameModsPanel reloadKey={reloadKey} />
           ) : (
             <>
               <ClientModsPanel hideUploader reloadKey={reloadKey} />
