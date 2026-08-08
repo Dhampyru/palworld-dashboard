@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         wget \
         gnupg2 \
         ca-certificates \
+        xvfb \
     && rm -rf /var/lib/apt/lists/*
 ## ---- RCON CLI (gorcon/rcon-cli) ---------------------------------------------
 ARG RCON_VERSION=0.10.3

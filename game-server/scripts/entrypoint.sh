@@ -385,6 +385,16 @@ start_server() {
     mkdir -p "${XDG_RUNTIME_DIR}"
     chmod 0700 "${XDG_RUNTIME_DIR}"
     chown steam:steam "${XDG_RUNTIME_DIR}"
+    ## PATCH (not upstream, 2026-08-08): recent Palworld builds require a display
+    ## for graphics/RHI init even as a dedicated server under Wine (headless boot
+    ## fails with wine "nodrv_CreateWindow: no driver could be loaded" +
+    ## "Failed to get a GL context" -> access violation). Provide a headless
+    ## virtual X display. -ac disables access control so the `steam` user can use
+    ## the root-started display.
+    export DISPLAY=:99
+    rm -f /tmp/.X99-lock 2>/dev/null || true
+    Xvfb :99 -screen 0 1024x768x24 -ac -nolisten tcp >/tmp/xvfb.log 2>&1 &
+    for _i in 1 2 3 4 5 6 7 8 9 10; do [ -S /tmp/.X11-unix/X99 ] && break; sleep 0.5; done
     echo "Launch command: wine ${SERVER_EXE}${args}"
     cd "${WIN64_DIR}"
     ## PATCH (not upstream): tee combined stdout+stderr to a file on the
