@@ -827,8 +827,17 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     const active = new Map<string, boolean>()
     if (includedUe4ss) for (const name of UE4SS_FRAMEWORK_DEFAULTS.keys()) active.set(name, ENABLED_FRAMEWORK.has(name))
     for (const name of [...new Set(luaMods)]) active.set(name, true)
-    // Enable PalSchema last so it loads after Lua mods and then applies its own submods.
+    // Enable PalSchema so it loads and applies its own submods.
     if (await isDir(join(modsDir, 'PalSchema'))) active.set('PalSchema', true)
+    // Keybinds MUST be the last entry — it registers other mods' keybindings, UE4SS's own
+    // default marks it "do not move up", and native C++ mods explicitly require being ABOVE
+    // it (anything after Keybinds may not load). Move it to the end regardless of where the
+    // framework-default order placed it.
+    if (active.has('Keybinds')) {
+      const v = active.get('Keybinds') ?? false
+      active.delete('Keybinds')
+      active.set('Keybinds', v)
+    }
     if (active.size) await writeFile(join(modsDir, 'mods.txt'), serializeModsTxt(active), 'utf8')
 
     // Pre-config overlays: runtime config files an admin captured from a configured client
