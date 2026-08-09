@@ -1087,8 +1087,9 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {removeTarget?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently deletes the mod's files from the server. This can't be undone — takes effect on
-              the next server restart.
+              This permanently deletes the mod's files from the server — including any paks it shipped — and can't
+              be undone (takes effect on the next server restart). If the same mod is also staged for clients, that
+              client copy is removed too.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -706,7 +706,12 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
           <AlertDialogHeader>
             <AlertDialogTitle>Remove this client mod?</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmRemove ? `"${confirmRemove.name}" will be removed from the client-mod set and won't ship in the loadout. This does not affect the server.` : ''}
+              {confirmRemove
+                ? `"${confirmRemove.name}" will be removed from the client-mod set and won't ship in the loadout.` +
+                  ((confirmRemove.source === 'nexus' || confirmRemove.source === 'steam') && confirmRemove.sourceId
+                    ? ` If the same mod is installed on the server (same ${confirmRemove.source === 'nexus' ? 'Nexus' : 'Steam'} source), it will be removed there too.`
+                    : ' This does not affect the server.')
+                : ''}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
