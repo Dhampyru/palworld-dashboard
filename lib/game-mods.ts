@@ -987,6 +987,21 @@ export async function installUe4ssModArchive(
     list.push({ rel: m[2], entry: e })
     mods.set(m[1], list)
   }
+  // Legacy UE4SS location (pre-ue4ss-subdir): old mods ship the full game path
+  // Pal/Binaries/Win64/Mods/<name>/… (no `ue4ss/`, e.g. Nexus 607). Anchor on that too so the
+  // mod folder lands in the CURRENT ue4ss/Mods — otherwise a Content/ sibling stops the
+  // wrapper-peel and the whole tree is dumped under one folder (Scripts buried → never loads).
+  if (mods.size === 0) {
+    const legacyAnchor = /(?:^|\/)Win64\/Mods\/([^/]+)\/(.+)$/i
+    for (const e of nonPak) {
+      const m = norm(e.entryName).match(legacyAnchor)
+      if (!m) continue
+      if (/^(palschema|shared)$/i.test(m[1])) continue
+      const list = mods.get(m[1]) ?? []
+      list.push({ rel: m[2], entry: e })
+      mods.set(m[1], list)
+    }
+  }
   if (mods.size === 0) {
     // `eff(e)` is the entry path with any peeled wrapper prefix removed (see the peel
     // loop below); all detection runs against it. A top folder is a UE4SS mod if it holds
