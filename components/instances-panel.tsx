@@ -112,11 +112,40 @@ export function InstancesPanel() {
     return () => clearInterval(t)
   }, [load])
 
+  // After a start, poll the instance list until it reports running so the toast can confirm
+  // it actually came ONLINE — a start (esp. first boot / SteamCMD) takes a while, and a bare
+  // "queued" reads as nothing happening. Fire-and-forget; the row's status dot updates from
+  // the same fetched data. Falls back to a heads-up on timeout rather than hanging forever.
+  const waitForOnline = useCallback(
+    async (row: InstanceRow, toastId: string | number) => {
+      const deadline = Date.now() + 180_000
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 5000))
+        try {
+          const res = await fetch('/api/instances', { headers: headers(), cache: 'no-store' })
+          const json = await res.json()
+          const rowsNow = (json.instances as InstanceRow[]) ?? []
+          setRows(rowsNow)
+          setDisk((json.disk as DiskInfo | null) ?? null)
+          if (rowsNow.find((r) => r.id === row.id)?.running === true) {
+            toast.success(`${row.displayName} is online`, { id: toastId })
+            return
+          }
+        } catch {
+          /* transient fetch error — keep polling */
+        }
+      }
+      toast.warning(`${row.displayName} is still starting — watch the status dot`, { id: toastId })
+    },
+    [headers],
+  )
+
   const lifecycle = useCallback(
     async (row: InstanceRow, action: 'start' | 'stop' | 'restart') => {
       const key = `${action}:${row.id}`
+      const verb = `${action[0].toUpperCase()}${action.slice(1)}`
       setBusy(key)
-      const toastId = toast.loading(`${action[0].toUpperCase()}${action.slice(1)}ing ${row.displayName}…`)
+      const toastId = toast.loading(`${verb}ing ${row.displayName}…`)
       try {
         // stop/restart use a short countdown so the daemon/units broadcast a
         // warning to any players before disconnecting them; start is immediate.
@@ -128,15 +157,21 @@ export function InstancesPanel() {
         })
         const json = await res.json()
         if (!res.ok) throw new Error(json.error ?? res.statusText)
-        toast.success(`${action} queued for ${row.displayName}`, { id: toastId })
-        setTimeout(() => void load(), 1500)
+        if (action === 'start') {
+          // Keep the toast live and track until the server is actually online.
+          toast.loading(`Starting ${row.displayName} — waiting for it to come online…`, { id: toastId })
+          void waitForOnline(row, toastId)
+        } else {
+          toast.success(`${verb} queued for ${row.displayName}`, { id: toastId })
+          setTimeout(() => void load(), 1500)
+        }
       } catch (e) {
         toast.error(e instanceof Error ? e.message : `Failed to ${action}`, { id: toastId })
       } finally {
         setBusy(null)
       }
     },
-    [headers, load],
+    [headers, load, waitForOnline],
   )
 
   const confirmDelete = useCallback(async () => {

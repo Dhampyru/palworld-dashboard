@@ -474,24 +474,37 @@ export function SavesPanel() {
     [worldData],
   )
 
-  const load = useCallback(async () => {
-    if (!config) return
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await fetch('/api/saves', { headers: buildPalworldProxyHeaders(config), cache: 'no-store' })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? res.statusText)
-      setData(json as SavesData)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load saves')
-    } finally {
-      setLoading(false)
-    }
-  }, [config])
+  const load = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!config) return
+      if (!opts?.silent) {
+        setLoading(true)
+        setError(null)
+      }
+      try {
+        const res = await fetch('/api/saves', { headers: buildPalworldProxyHeaders(config), cache: 'no-store' })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.error ?? res.statusText)
+        setData(json as SavesData)
+      } catch (err) {
+        // A background (silent) poll must not blow away the current view with a transient
+        // error — only surface load errors from the foreground fetch.
+        if (!opts?.silent) setError(err instanceof Error ? err.message : 'Failed to load saves')
+      } finally {
+        if (!opts?.silent) setLoading(false)
+      }
+    },
+    [config],
+  )
 
   useEffect(() => {
-    load()
+    void load()
+    // Keep the view fresh while it's open so a freshly-generated world (after a restart),
+    // new auto-backups, or player-save changes appear without a manual reload — and the
+    // "restart required" ghost row clears itself once the world exists on disk. Silent = no
+    // spinner, so the periodic refresh is invisible.
+    const t = setInterval(() => void load({ silent: true }), 20_000)
+    return () => clearInterval(t)
   }, [load])
 
   // Load the auto-backup schedule settings once on mount.
@@ -702,7 +715,7 @@ export function SavesPanel() {
             {busy === 'backup' ? <Spinner className="size-4" /> : <ArchiveIcon className="size-3.5" />}
             Back up now
           </Button>
-          <Button variant="outline" size="sm" onClick={load} disabled={loading} className="gap-1.5">
+          <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading} className="gap-1.5">
             <RefreshCwIcon className={loading ? 'size-3.5 animate-spin' : 'size-3.5'} /> Refresh
           </Button>
         </div>
@@ -916,6 +929,28 @@ export function SavesPanel() {
                 <PlusIcon className="size-3.5" /> New world
               </Button>
             </div>
+            {/* Ghost row: a freshly-created active world that doesn't exist on disk yet.
+                createWorld() only points DedicatedServerName at a new id; the game generates
+                the folder on next boot — so without this the new world is invisible (and no
+                row shows as active), which reads as "nothing happened". */}
+            {data?.activeWorldId && !data.worlds.some((w) => w.id === data.activeWorldId) && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed border-amber-500/50 bg-amber-500/5 p-3">
+                <div className="flex min-w-0 flex-col">
+                  <div className="flex items-center gap-2">
+                    <code className="truncate font-mono text-xs text-muted-foreground">{data.activeWorldId}</code>
+                    <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">
+                      active
+                    </Badge>
+                    <Badge className="bg-amber-500/15 text-[10px] text-amber-600 dark:text-amber-400">
+                      restart required
+                    </Badge>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">
+                    New world — not generated yet. Restart the server to create it, then it appears here.
+                  </span>
+                </div>
+              </div>
+            )}
             {data?.worlds.length ? (
               data.worlds.map((w) => (
                 <div key={w.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
