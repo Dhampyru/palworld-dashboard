@@ -7,7 +7,6 @@ import { ClientModsPanel } from '@/components/client-mods-panel'
 import { ClientConfigsPanel } from '@/components/client-configs-panel'
 import { UnifiedModUploader } from '@/components/unified-mod-uploader'
 import { Ue4ssLoaderCard } from '@/components/ue4ss-loader-card'
-import { PalSchemaEditor } from '@/components/palschema-editor'
 import { ServerIcon, MonitorIcon } from 'lucide-react'
 
 // PATCH (not upstream): the Mods page. ONE uploader (UnifiedModUploader) sits ABOVE the two
@@ -72,12 +71,7 @@ export function ModsWorkspace() {
       <div className="min-h-0 flex-1 overflow-y-auto lg:overflow-hidden">
         <ScrollArea className="h-full lg:h-auto lg:flex-1">
           {sub === 'server' ? (
-            <>
-              <GameModsPanel reloadKey={reloadKey} />
-              <div className="p-3 pt-0">
-                <PalSchemaEditor />
-              </div>
-            </>
+            <GameModsPanel reloadKey={reloadKey} />
           ) : (
             <>
               <ClientModsPanel hideUploader reloadKey={reloadKey} />

@@ -17,7 +17,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
-import { DownloadIcon, LayersIcon, ShieldAlertIcon, ShieldCheckIcon, Trash2Icon } from 'lucide-react'
+import { ChevronDownIcon, ChevronRightIcon, DownloadIcon, LayersIcon, ShieldAlertIcon, ShieldCheckIcon, Trash2Icon } from 'lucide-react'
+import { PalSchemaSubmodEditor } from '@/components/palschema-editor'
 
 // PATCH (not upstream): PalSchema section (docs/specs/palschema-support.md). A
 // distinct Mods-tab section, deliberately not folded into the UE4SS handling.
@@ -71,6 +72,7 @@ export function PalSchemaSection({
   const [pinnedTag, setPinnedTag] = useState('0.6.1')
   const [busy, setBusy] = useState<string | null>(null)
   const [removeTarget, setRemoveTarget] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<string | null>(null) // submod whose data files are open
 
   const load = useCallback(async () => {
     if (!config) return
@@ -245,31 +247,46 @@ export function PalSchemaSection({
             ) : (
               <ul className="flex flex-col divide-y rounded-md border">
                 {submods.map((m) => (
-                  <li key={m.name} className="flex items-center justify-between gap-2 px-3 py-2">
-                    <div className="min-w-0">
-                      {/* A "PalSchema" badge (parallel to the main list's pak/UE4SS
-                          badges) so a mod that ships BOTH a .pak and a PalSchema
-                          data-table (e.g. William_MoreHairs_P) isn't mistaken here
-                          for its .pak — this row is the JSON data-table component. */}
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="gap-1 border-sky-500/50 text-sky-600 dark:text-sky-400">
-                          <LayersIcon className="size-3" /> PalSchema
-                        </Badge>
-                        <span className="truncate text-sm font-medium">{m.name}</span>
+                  <li key={m.name} className="flex flex-col gap-1 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        {/* A "PalSchema" badge (parallel to the main list's pak/UE4SS
+                            badges) so a mod that ships BOTH a .pak and a PalSchema
+                            data-table (e.g. William_MoreHairs_P) isn't mistaken here
+                            for its .pak — this row is the JSON data-table component. */}
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="gap-1 border-sky-500/50 text-sky-600 dark:text-sky-400">
+                            <LayersIcon className="size-3" /> PalSchema
+                          </Badge>
+                          <span className="truncate text-sm font-medium">{m.name}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {m.fileCount} file{m.fileCount === 1 ? '' : 's'} · {formatBytes(m.sizeBytes)} ·{' '}
+                          {formatDate(m.modifiedAt)}
+                        </div>
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {m.fileCount} file{m.fileCount === 1 ? '' : 's'} · {formatBytes(m.sizeBytes)} ·{' '}
-                        {formatDate(m.modifiedAt)}
+                      <div className="flex shrink-0 items-center gap-1">
+                        {/* Edit this submod's data files (items/recipes/tech-tree JSON). Edits
+                            apply to the server (restart) and ship to clients via the loadout. */}
+                        <button
+                          onClick={() => setExpanded((e) => (e === m.name ? null : m.name))}
+                          title="Edit data files"
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >
+                          {expanded === m.name ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
+                          Edit data
+                        </button>
+                        <button
+                          onClick={() => setRemoveTarget(m.name)}
+                          disabled={!!busy}
+                          title="Remove (backed up first)"
+                          className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-30"
+                        >
+                          {busy === `rm:${m.name}` ? <Spinner className="size-4" /> : <Trash2Icon className="size-4" />}
+                        </button>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setRemoveTarget(m.name)}
-                      disabled={!!busy}
-                      title="Remove (backed up first)"
-                      className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-30"
-                    >
-                      {busy === `rm:${m.name}` ? <Spinner className="size-4" /> : <Trash2Icon className="size-4" />}
-                    </button>
+                    {expanded === m.name && <PalSchemaSubmodEditor submod={m.name} />}
                   </li>
                 ))}
               </ul>
