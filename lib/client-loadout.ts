@@ -10,6 +10,7 @@ import { UE4SS_FRAMEWORK_DEFAULTS } from '@/lib/ue4ss-framework-defaults'
 import { clientModStorePath, listClientMods, type ClientMod } from '@/lib/client-mods'
 import { readClientModConfigOverrides } from '@/lib/client-mod-config'
 import { overlayClientConfigsInto } from '@/lib/client-configs'
+import { overlayPalSchemaInto } from '@/lib/palschema-config'
 
 const execFileP = promisify(execFile)
 
@@ -43,6 +44,7 @@ export type LoadoutSummary = {
   parityPaks: number // server ~mods/LogicMods paks folded in for client-server parity
   palSchemaMods: number // PalSchema submods shipped (server parity + client-only payloads)
   preConfigFiles: number // admin-captured runtime config files overlaid into the game tree
+  palSchemaEdits: number // admin PalSchema data edits overlaid onto client submods (parity)
   engineTweaks: string[] // mods whose Engine.ini settings were folded into recommended-engine-ini.txt
   sizeBytes: number
   generatedAt: string
@@ -759,6 +761,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     const seenPalSchema = new Set<string>()
     let palSchemaMods = 0
     let preConfigFiles = 0
+    let palSchemaEdits = 0
     const engineIniTweaks: { name: string; text: string }[] = []
 
     const luaMods: string[] = []
@@ -934,7 +937,14 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
 
     // PalSchema loader framework — shipped only if a client mod contributed a submod, so we
     // never ship an empty/orphan PalSchema (and never the host's server-only submods).
-    if (palSchemaMods > 0) await includePalSchemaFramework(modsDir)
+    if (palSchemaMods > 0) {
+      await includePalSchemaFramework(modsDir)
+      // CLIENT PARITY: apply admin PalSchema data edits onto the placed submods, so the
+      // client bundle carries the same tech-tree/recipe/item data as the server (matched by
+      // submod name; only submods present in this bundle are touched).
+      palSchemaEdits = await overlayPalSchemaInto(palSchemaModsDir)
+      preConfigFiles += palSchemaEdits
+    }
 
     // Generate mods.txt: enabled framework defaults + every client Lua mod + PalSchema.
     const active = new Map<string, boolean>()
@@ -988,6 +998,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       parityPaks,
       palSchemaMods,
       preConfigFiles,
+      palSchemaEdits,
       engineTweaks: engineIniTweaks.map((t) => t.name),
       sizeBytes: 0,
       generatedAt,
