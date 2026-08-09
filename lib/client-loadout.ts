@@ -166,6 +166,13 @@ async function collectPaksRouted(
 // common Nexus packaging that ships the whole game path
 // (`Pal/Binaries/Win64/ue4ss/Mods/<name>/…`). A dir that IS a mod isn't descended into,
 // so we never mistake a mod's own Scripts/dlls subfolder for another mod.
+// A path segment naming a NON-Windows/Steam platform variant. Many Nexus archives ship both
+// a Steam/Win64 build and an Xbox/Gamepass (WinGDK) build side by side, e.g.
+// `(STEAM)/…/Win64/…/<mod>` + `(XBOX)/…/WinGDK/…/<mod>`. Placing both gives a duplicate mod
+// (e.g. UniPalUI + UniPalUI-2) — and a duplicated C++ mod double-registers native hooks and
+// crashes the client on launch. We keep the Windows/Steam side and skip these.
+const NON_WINDOWS_VARIANT = /(?:^|[^a-z0-9])(xbox|wingdk|win_?gdk|gamepass|gdk)(?:[^a-z0-9]|$)/i
+
 async function findLuaModRoots(scratch: string, fallbackName: string): Promise<{ name: string; dir: string }[]> {
   if (await dirIsMod(scratch)) return [{ name: safeName(fallbackName), dir: scratch }]
   const mods: { name: string; dir: string }[] = []
@@ -178,6 +185,7 @@ async function findLuaModRoots(scratch: string, fallbackName: string): Promise<{
     }
     for (const e of entries) {
       if (!e.isDirectory()) continue
+      if (NON_WINDOWS_VARIANT.test(e.name)) continue // skip Xbox/GDK/Gamepass platform variants
       const full = join(dir, e.name)
       if (await dirIsMod(full)) mods.push({ name: safeName(e.name), dir: full })
       else await rec(full)
@@ -598,18 +606,21 @@ try {
     $p = Join-Path $pal ($rel -replace '/','\')
     if (Test-Path $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force; $removed++ }
   }
-  # Remove the mod FOLDERS this bundle created under ue4ss\Mods wholesale — even if a mod wrote
-  # runtime files (caches/configs) into them after launch, which aren't in the manifest and would
-  # otherwise leave the folder behind. Only folders listed in installed-files.txt are touched, so
-  # the player's OTHER mods are never removed.
-  $modRoots = @{}
+  # Remove the mod FOLDERS this bundle created wholesale — even if a mod wrote runtime files
+  # (caches, configs, generated JSON) into them after launch, which aren't in the manifest and
+  # would otherwise leave the folder behind. Covers UE4SS Lua/C++ mods under ue4ss\Mods
+  # (incl. PalSchema and its mods\ submods) AND folder-based LogicMods. Only names listed in
+  # installed-files.txt are touched, so the player's OTHER mods are never removed.
+  $roots = @{}
   foreach ($line in Get-Content $listFile) {
     $rel = $line.Trim() -replace '/','\'
-    if ($rel -match '^Pal\\Binaries\\Win64\\ue4ss\\Mods\\([^\\]+)\\') { $modRoots[$Matches[1]] = $true }
+    if ($rel -match '^(Pal\\Binaries\\Win64\\ue4ss\\Mods|Pal\\Content\\Paks\\LogicMods)\\([^\\]+)\\') {
+      $roots[(Join-Path $Matches[1] $Matches[2])] = $true
+    }
   }
-  foreach ($name in $modRoots.Keys) {
-    $p = Join-Path $pal ("Pal\Binaries\Win64\ue4ss\Mods\" + $name)
-    if (Test-Path $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
+  foreach ($r in $roots.Keys) {
+    $p = Join-Path $pal $r
+    if (Test-Path $p -PathType Container) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
   }
   foreach ($d in @("Pal\Binaries\Win64\ue4ss","Pal\Content\Paks\~mods","Pal\Content\Paks\LogicMods")) {
     $dir = Join-Path $pal $d
