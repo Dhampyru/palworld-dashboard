@@ -88,6 +88,7 @@ function detectSource(u: string): 'nexus' | 'steam' | null {
 export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploader?: boolean; reloadKey?: number } = {}) {
   const { config, requestTab } = useServer()
   const [mods, setMods] = useState<ClientMod[]>([])
+  const [showDisabled, setShowDisabled] = useState(false) // collapse the disabled (not-in-loadout) block
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [catalogAvailable, setCatalogAvailable] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -358,6 +359,64 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   }, [suggestions, filter])
 
   const keptCount = mods.filter((m) => m.keep).length
+  const activeMods = mods.filter((m) => m.keep)
+  const disabledMods = mods.filter((m) => !m.keep)
+
+  // One staged-mod row — reused by the Active list and the Disabled block.
+  const renderRow = (m: ClientMod) => (
+    <li key={m.id} className="flex items-center justify-between gap-2 px-3 py-2">
+      <label className="flex min-w-0 items-center gap-2">
+        <input
+          type="checkbox"
+          checked={m.keep}
+          disabled={busy === m.id}
+          onChange={() => toggleKeep(m)}
+          title={m.keep ? 'In the friend loadout — click to exclude' : 'Excluded — click to include'}
+          className="size-4 shrink-0 accent-primary"
+        />
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className={`truncate text-sm ${m.keep ? 'font-medium' : 'text-muted-foreground line-through'}`}>{m.name}</span>
+            {m.url && (
+              <a href={m.url} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-primary">
+                <ExternalLinkIcon className="size-3" />
+              </a>
+            )}
+            {m.warn && (
+              <span title={m.warn} className="text-amber-500">
+                <AlertTriangleIcon className="size-3.5" />
+              </span>
+            )}
+          </div>
+          <div className="truncate text-xs text-muted-foreground">
+            {SOURCE_LABEL[m.source] ?? m.source} · {m.kind}
+            {m.version ? ` · v${m.version}` : ''} · {formatBytes(m.sizeBytes)}
+            {m.warn ? <span className="text-amber-500"> · won’t ship to clients</span> : ''}
+          </div>
+        </div>
+      </label>
+      <div className="flex items-center gap-1.5">
+        {m.kind !== 'pak' && (
+          <button
+            onClick={() => openConfig(m)}
+            title="Edit this mod's config (ships in the loadout)"
+            className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-primary/10 hover:text-primary"
+          >
+            <SlidersHorizontalIcon className="size-3.5" />
+            Config
+          </button>
+        )}
+        <button
+          onClick={() => setConfirmRemove(m)}
+          disabled={busy === m.id}
+          title="Remove from the client-mod set"
+          className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+        >
+          {busy === m.id ? <Spinner className="size-3.5" /> : <Trash2Icon className="size-3.5" />}
+        </button>
+      </div>
+    </li>
+  )
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -498,68 +557,23 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
       </>
       )}
 
-      {/* Staged list */}
+      {/* Staged list — active (in the loadout) then a collapsible disabled block */}
       {mods.length > 0 && (
         <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium">Staged for friends ({mods.length})</span>
-          <ul className="flex flex-col divide-y rounded-md border">
-            {mods.map((m) => (
-              <li key={m.id} className="flex items-center justify-between gap-2 px-3 py-2">
-                <label className="flex min-w-0 items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={m.keep}
-                    disabled={busy === m.id}
-                    onChange={() => toggleKeep(m)}
-                    title={m.keep ? 'In the friend loadout — click to exclude' : 'Excluded — click to include'}
-                    className="size-4 shrink-0 accent-primary"
-                  />
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`truncate text-sm ${m.keep ? 'font-medium' : 'text-muted-foreground line-through'}`}>
-                        {m.name}
-                      </span>
-                      {m.url && (
-                        <a href={m.url} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-primary">
-                          <ExternalLinkIcon className="size-3" />
-                        </a>
-                      )}
-                      {m.warn && (
-                        <span title={m.warn} className="text-amber-500">
-                          <AlertTriangleIcon className="size-3.5" />
-                        </span>
-                      )}
-                    </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {SOURCE_LABEL[m.source] ?? m.source} · {m.kind}
-                      {m.version ? ` · v${m.version}` : ''} · {formatBytes(m.sizeBytes)}
-                      {m.warn ? <span className="text-amber-500"> · won’t ship to clients</span> : ''}
-                    </div>
-                  </div>
-                </label>
-                <div className="flex items-center gap-1.5">
-                  {m.kind !== 'pak' && (
-                    <button
-                      onClick={() => openConfig(m)}
-                      title="Edit this mod's config (ships in the loadout)"
-                      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-primary/10 hover:text-primary"
-                    >
-                      <SlidersHorizontalIcon className="size-3.5" />
-                      Config
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setConfirmRemove(m)}
-                    disabled={busy === m.id}
-                    title="Remove from the client-mod set"
-                    className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
-                  >
-                    {busy === m.id ? <Spinner className="size-3.5" /> : <Trash2Icon className="size-3.5" />}
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <span className="text-sm font-medium">Staged for friends ({activeMods.length})</span>
+          {activeMods.length > 0 && <ul className="flex flex-col divide-y rounded-md border">{activeMods.map(renderRow)}</ul>}
+          {disabledMods.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <button
+                onClick={() => setShowDisabled((s) => !s)}
+                className="flex items-center gap-1.5 self-start text-sm font-medium text-muted-foreground hover:text-foreground"
+              >
+                <ChevronDownIcon className={showDisabled ? 'size-4 rotate-180 transition-transform' : 'size-4 transition-transform'} />
+                Disabled — excluded from the loadout ({disabledMods.length})
+              </button>
+              {showDisabled && <ul className="flex flex-col divide-y rounded-md border opacity-70">{disabledMods.map(renderRow)}</ul>}
+            </div>
+          )}
         </div>
       )}
 
