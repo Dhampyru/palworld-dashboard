@@ -1,6 +1,7 @@
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
+import AdmZip from 'adm-zip'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { currentGameDir } from '@/lib/instances'
@@ -199,6 +200,29 @@ async function findLuaModRoots(scratch: string, fallbackName: string): Promise<{
 // dir). Big paks (500MB+) never touch process memory this way.
 async function unpack(archivePath: string, destDir: string): Promise<void> {
   await mkdir(destDir, { recursive: true })
+  // Zips: extract per-entry with adm-zip (mirrors the SERVER installer). This is robust to
+  // archives with malformed directory entries — e.g. a 0-byte "Pal" entry WITHOUT a trailing
+  // slash that unar turns into a FILE, then fails every subdir with "Could not create
+  // directory" AND still exits 0 (so the loadout couldn't even detect it). OathrBGM ships
+  // exactly this on both its steam and gamepass files. unar stays the fallback for rar/7z,
+  // which adm-zip can't read (client payloads are normalized to zip on staging, so the zip
+  // path is the norm).
+  if (/\.zip$/i.test(archivePath)) {
+    const entries = new AdmZip(archivePath).getEntries()
+    const names = entries.map((e) => e.entryName.replace(/\\/g, '/'))
+    // A phantom dir: a 0-byte entry (no trailing slash) that is the path-prefix of another
+    // entry — meant to be a directory. Skip it; its children recreate the dirs.
+    const isPhantomDir = (n: string) => names.some((o) => o !== n && o.startsWith(n + '/'))
+    for (const e of entries) {
+      const name = e.entryName.replace(/\\/g, '/')
+      if (e.isDirectory || name.endsWith('/') || isPhantomDir(name)) continue
+      const dest = join(destDir, name)
+      if (dest !== destDir && !dest.startsWith(destDir + sep)) continue // path-escape guard
+      await mkdir(dirname(dest), { recursive: true })
+      await writeFile(dest, e.getData())
+    }
+    return
+  }
   await execFileP('unar', ['-D', '-f', '-o', destDir, archivePath], { maxBuffer: 8 * 1024 * 1024 })
 }
 
