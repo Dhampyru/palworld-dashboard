@@ -24,12 +24,14 @@ type BulkRow = { scope: 'server' | 'client'; label: string; ok: boolean; note: s
 // Conservative cap on Steam URLs per bulk — each is a separate SteamCMD pull, and Steam
 // rate-limits anonymous Workshop downloads (no hard figure known; 10 is a safe default).
 const STEAM_BULK_MAX = 10
+type NexusFileOption = { fileId: number; name: string; version: string | null; category: string | null }
 type ScanResult = {
   source: 'upload' | 'nexus' | 'steam'
   token?: string
   url?: string
   modId?: number
   fileId?: number | null
+  files?: NexusFileOption[] // Nexus: selectable versions for the picker
   itemId?: string // Steam workshop id (for reject-purge of its cache)
   modName: string
   analysis: ModAnalysis
@@ -139,6 +141,28 @@ export function UnifiedModUploader({ onInstalled }: { onInstalled?: () => void }
     setScanning(true)
     try {
       const res = await fetch('/api/game-mods/scan', { method: 'POST', headers: jsonHeaders(config), body: JSON.stringify({ url: urlInput.trim() }) })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Scan failed')
+      applyScan(data as ScanResult)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Scan failed')
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  // Re-scan a Nexus mod at a specific file/version (the version picker) — re-analyzes the
+  // chosen file so the target preview reflects that exact version, and threads its fileId
+  // into the install.
+  async function rescanVersion(fileId: number) {
+    if (!config || !scan?.url || fileId === scan.fileId) return
+    setScanning(true)
+    try {
+      const res = await fetch('/api/game-mods/scan', {
+        method: 'POST',
+        headers: jsonHeaders(config),
+        body: JSON.stringify({ url: scan.url, fileId }),
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Scan failed')
       applyScan(data as ScanResult)
@@ -389,6 +413,27 @@ export function UnifiedModUploader({ onInstalled }: { onInstalled?: () => void }
 
           <p className="text-xs text-muted-foreground">{a.reason}</p>
           {a.warn && <p className="text-xs text-amber-600 dark:text-amber-500">⚠ {a.warn}</p>}
+
+          {scan.source === 'nexus' && scan.files && scan.files.length > 1 && (
+            <div>
+              <div className="mb-1 text-xs font-medium text-muted-foreground">Version:</div>
+              <select
+                value={scan.fileId ?? ''}
+                onChange={(e) => rescanVersion(Number(e.target.value))}
+                disabled={scanning || installing}
+                className="h-8 w-full max-w-xs rounded-md border border-border/60 bg-background px-2 text-sm disabled:opacity-50"
+              >
+                {scan.files.map((f) => (
+                  <option key={f.fileId} value={f.fileId}>
+                    {f.version ? `${f.version} — ` : ''}
+                    {f.name}
+                    {f.category && f.category.toUpperCase() !== 'MAIN' ? ` [${f.category}]` : ''}
+                  </option>
+                ))}
+              </select>
+              {scanning && <span className="ml-2 text-xs text-muted-foreground">re-scanning…</span>}
+            </div>
+          )}
 
           <div>
             <div className="mb-1 text-xs font-medium text-muted-foreground">Install to:</div>

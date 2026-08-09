@@ -46,7 +46,7 @@ async function _POST(request: NextRequest) {
 
   // ── Nexus / Steam URL: analyze the mod PAGE (description keywords), no download ──
   if (contentType.includes('application/json')) {
-    let body: { url?: string }
+    let body: { url?: string; fileId?: number }
     try {
       body = await request.json()
     } catch {
@@ -111,11 +111,17 @@ async function _POST(request: NextRequest) {
     if (!modId) return NextResponse.json({ error: 'Paste a valid Nexus mod URL or id' }, { status: 400 })
     const [info, files] = await Promise.all([getModInfo(modId), getModFiles(modId).catch(() => [] as NexusFile[])])
     if (!info) return NextResponse.json({ error: 'Could not read this mod from Nexus (is the API key set?)' }, { status: 400 })
-    // Resolve the main file so a "server" commit can install it directly (mirrors the
-    // panel's resolve step). Newest MAIN, else newest of any.
+    // Resolve the file to install. Default = newest MAIN (else newest of any); if the caller
+    // picked a specific version via the dropdown, honor that fileId. Expose the full file
+    // list so the UI can offer the version picker (newest first).
     const main = files.filter((f) => (f.category ?? '').toUpperCase() === 'MAIN')
     const pool = main.length ? main : files
-    const fileId = pool.length ? pool[pool.length - 1].fileId : null
+    const autoFileId = pool.length ? pool[pool.length - 1].fileId : null
+    const requestedFileId = typeof body.fileId === 'number' ? body.fileId : null
+    const fileId = requestedFileId && files.some((f) => f.fileId === requestedFileId) ? requestedFileId : autoFileId
+    const fileOptions = [...files]
+      .sort((a, b) => b.fileId - a.fileId)
+      .map((f) => ({ fileId: f.fileId, name: f.displayName || f.name, version: f.version ?? null, category: f.category ?? null }))
 
     const hint = analyzeDescription(`${info.summary ?? ''} ${info.description ?? ''}`)
 
@@ -147,7 +153,7 @@ async function _POST(request: NextRequest) {
       }
     }
     const analysis = applyDescriptionHint(base, hint)
-    return NextResponse.json({ source: 'nexus', url: info.url, modId, fileId, modName: analysis.modName || info.name, analysis })
+    return NextResponse.json({ source: 'nexus', url: info.url, modId, fileId, files: fileOptions, modName: analysis.modName || info.name, analysis })
   }
 
   // ── File upload: full content analysis + stash for commit ───────────────────
