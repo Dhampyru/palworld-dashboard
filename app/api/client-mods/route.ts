@@ -124,6 +124,7 @@ async function _POST(request: NextRequest) {
     keep?: boolean
     cfg?: string
     content?: string
+    fileId?: number // Nexus: stage a specific file/version (from the version picker)
   }
   try {
     body = (await request.json()) as typeof body
@@ -179,7 +180,7 @@ async function _POST(request: NextRequest) {
         return NextResponse.json({ cleared: body.cfg })
       }
       case 'addNexus': {
-        const mod = await addClientModFromNexus(String(body.url ?? ''))
+        const mod = await addClientModFromNexus(String(body.url ?? ''), typeof body.fileId === 'number' ? body.fileId : undefined)
         return NextResponse.json({ mod, note: `Staged ${mod.name} for clients.` })
       }
       case 'addSteam': {

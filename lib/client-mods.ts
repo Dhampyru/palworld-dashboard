@@ -263,13 +263,15 @@ export function clientModStorePath(id: string): string {
 }
 
 // Stage a Nexus mod for clients. Premium-gated (downloadNexusFile throws otherwise);
-// the route surfaces that. Downloads the newest MAIN file, normalizes it to a zip, and
-// records the detected kind — but never touches the server's mod dirs.
-export async function addClientModFromNexus(url: string): Promise<ClientMod> {
+// the route surfaces that. Downloads the chosen file (fileId from the version picker) or
+// the newest MAIN, normalizes it to a zip, and records the detected kind — but never
+// touches the server's mod dirs. fileId matters for platform-split mods (e.g. 607 ships a
+// steam/Win64 file AND an xbox/WinGDK file) so the client gets the same build as the server.
+export async function addClientModFromNexus(url: string, fileId?: number): Promise<ClientMod> {
   const modId = parseNexusModId(url)
   if (!modId) throw new Error('Paste a valid Nexus mod URL or id')
   const [info, files] = await Promise.all([getModInfo(modId), getModFiles(modId)])
-  const file = pickFile(files)
+  const file = (fileId != null ? files.find((f) => f.fileId === fileId) : null) ?? pickFile(files)
   if (!file) throw new Error('No downloadable file found on Nexus (Premium key required for auto-download)')
   const raw = await downloadNexusFile(modId, file.fileId)
   let buffer: Buffer

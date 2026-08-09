@@ -230,7 +230,13 @@ export function UnifiedModUploader({ onInstalled }: { onInstalled?: () => void }
     if (wantClient) {
       try {
         const action = s.source === 'nexus' ? 'addNexus' : 'addSteam'
-        const r = await fetch('/api/client-mods', { method: 'POST', headers: jsonHeaders(config), body: JSON.stringify({ action, url: s.url }) })
+        // Thread the picked fileId so the client gets the SAME build as the server (matters
+        // for platform-split mods, e.g. steam vs xbox files); Steam add ignores it.
+        const r = await fetch('/api/client-mods', {
+          method: 'POST',
+          headers: jsonHeaders(config),
+          body: JSON.stringify({ action, url: s.url, fileId: s.source === 'nexus' ? s.fileId ?? undefined : undefined }),
+        })
         const j = await r.json()
         if (!r.ok) throw new Error(j.error ?? 'failed')
         oks.push('client')
