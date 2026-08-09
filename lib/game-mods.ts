@@ -2,6 +2,7 @@ import { cp, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } fro
 import { basename, dirname, join, sep } from 'node:path'
 import { writeConfigFileWithBackup } from '@/lib/config-write'
 import { currentGameDir, currentInstanceId, DEFAULT_INSTANCE_ID, resolveLifecyclePaths } from '@/lib/instances'
+import { nexusKeysForModId, nexusModIdForKey, removeNexusAssoc } from '@/lib/nexus'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import AdmZip from 'adm-zip'
@@ -1223,6 +1224,90 @@ export async function removeFromSteamMods(modKey: string): Promise<void> {
     delete l[modKey]
     await writeSteamMods(l)
   }
+}
+
+// Remove a pak file by basename from wherever it lives (~mods or LogicMods), including a
+// `.disabled` variant. Best-effort — a missing file is fine.
+async function removePakFile(name: string): Promise<void> {
+  for (const dir of [pakModsDir(), logicModsDir()]) {
+    await rm(join(dir, name), { force: true }).catch(() => {})
+    await rm(join(dir, `${name}.disabled`), { force: true }).catch(() => {})
+  }
+}
+
+// Fully remove a server-installed mod and EVERYTHING it shipped: the mod folder / pak
+// file, its mods.txt entry, any GROUPED child pak FILES (hybrid Lua+pak mods), and all
+// tracking rows (Nexus + Steam + group map). Returns the source ids so the caller can
+// cascade the delete to a paired client stage. Does NOT cascade itself (avoids a loop).
+export async function removeServerMod(
+  id: string,
+): Promise<{ nexusModId: number | null; steamItemId: string | null }> {
+  const [kind, ...rest] = id.split(':')
+  const name = rest.join(':')
+  if ((kind !== 'ue4ss' && kind !== 'pak') || !name) throw new Error('Invalid mod id')
+
+  // Capture source ids BEFORE stripping tracking, so the caller can find the counterpart.
+  const nexusModId = await nexusModIdForKey(id)
+  const steam = await readSteamMods()
+  const steamItemId = steam[id]?.itemId ?? null
+
+  // Grouped child paks (hybrid mods): delete the actual FILES, not just the map entry.
+  const groups = await readModGroups()
+  const children = groups[id] ?? []
+
+  if (kind === 'ue4ss') {
+    const modsDir = await resolveUe4ssModsDir()
+    if (!modsDir) throw new Error('UE4SS Mods directory not found')
+    await rm(join(modsDir, name), { recursive: true, force: true })
+    const modsTxtPath = join(modsDir, 'mods.txt')
+    try {
+      const active = await readModsTxt(modsDir)
+      active.delete(name)
+      const tmp = `${modsTxtPath}.tmp`
+      await writeFile(tmp, serializeModsTxt(active), 'utf8')
+      await rename(tmp, modsTxtPath)
+    } catch {
+      // no mods.txt, or the mod was never listed — nothing to clean up
+    }
+  } else {
+    await removePakFile(name)
+  }
+
+  for (const child of children) {
+    const [ck, ...cr] = child.split(':')
+    const cname = cr.join(':')
+    if (ck === 'pak' && cname) await removePakFile(cname)
+    await removeNexusAssoc(child)
+    await removeFromSteamMods(child)
+  }
+
+  await removeFromModGroups(id)
+  await removeFromSteamMods(id)
+  await removeNexusAssoc(id)
+  return { nexusModId, steamItemId }
+}
+
+// Cascade helper: remove server mods that came from a given source id (Nexus modId /
+// Steam itemId) — used when a client-side delete should also drop the server copy.
+export async function removeServerModsBySource(source: 'nexus' | 'steam', sourceId: string): Promise<string[]> {
+  let keys: string[] = []
+  if (source === 'nexus') {
+    const n = Number(sourceId)
+    if (Number.isFinite(n)) keys = await nexusKeysForModId(n)
+  } else {
+    const s = await readSteamMods()
+    keys = Object.keys(s).filter((k) => s[k].itemId === sourceId)
+  }
+  const removed: string[] = []
+  for (const k of keys) {
+    try {
+      await removeServerMod(k)
+      removed.push(k)
+    } catch {
+      /* best-effort — keep going */
+    }
+  }
+  return removed
 }
 
 // ── Workshop-layout swap engine (spec official-workshop-mods.md §5, Inc 2) ───

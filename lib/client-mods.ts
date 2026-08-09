@@ -456,6 +456,15 @@ export async function removeClientMod(id: string): Promise<void> {
   if (existed) await rm(join(STORE_DIR, id), { recursive: true, force: true })
 }
 
+// Remove every staged client mod that came from a given source id (Nexus modId / Steam
+// itemId) — cascades a server-side delete to the paired client stage. Returns removed names.
+export async function removeClientModsBySource(source: 'nexus' | 'steam', sourceId: string): Promise<string[]> {
+  const idx = await readIndex()
+  const victims = Object.values(idx).filter((m) => m.source === source && m.sourceId === sourceId)
+  for (const m of victims) await removeClientMod(m.id)
+  return victims.map((m) => m.name)
+}
+
 // Recompute `configMenu` from a stored payload on disk (size-capped so a big payload never
 // bloats memory). Used by add (in-memory variants) and backfill.
 async function detectConfigMenuOnDisk(dir: string, payload: string): Promise<boolean> {

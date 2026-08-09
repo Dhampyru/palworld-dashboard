@@ -17,6 +17,7 @@ import {
   type ClientMod,
 } from '@/lib/client-mods'
 import { clearClientModConfig, listClientModConfigs, saveClientModConfig } from '@/lib/client-mod-config'
+import { removeServerModsBySource } from '@/lib/game-mods'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -143,8 +144,15 @@ async function _POST(request: NextRequest) {
       }
       case 'remove': {
         if (typeof body.id !== 'string') return NextResponse.json({ error: 'id required' }, { status: 400 })
+        // Capture the source BEFORE removing so we can cascade to the paired SERVER install
+        // (default: delete both sides — a per-side install is chosen at add time).
+        const target = (await listClientMods()).find((m) => m.id === body.id)
         await removeClientMod(body.id)
-        return NextResponse.json({ removed: body.id })
+        let cascadedServer: string[] = []
+        if (target && (target.source === 'nexus' || target.source === 'steam') && target.sourceId) {
+          cascadedServer = await removeServerModsBySource(target.source, target.sourceId)
+        }
+        return NextResponse.json({ removed: body.id, cascadedServer })
       }
       case 'backfillWarnings': {
         const r = await backfillClientWarnings()

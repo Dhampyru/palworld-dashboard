@@ -293,6 +293,30 @@ async function writeAssocs(a: Assocs): Promise<void> {
   await rename(tmp, MODS_FILE)
 }
 
+// Drop a server mod's Nexus tracking row — called on delete so a removed mod leaves no
+// phantom "update available" entry (the leftover that motivated this).
+export async function removeNexusAssoc(modKey: string): Promise<void> {
+  const a = await readAssocs()
+  if (a[modKey]) {
+    delete a[modKey]
+    await writeAssocs(a)
+  }
+}
+
+// The Nexus modId a tracked server mod key came from (null if untracked) — lets a delete
+// find the paired client stage.
+export async function nexusModIdForKey(modKey: string): Promise<number | null> {
+  const a = await readAssocs()
+  return a[modKey]?.modId ?? null
+}
+
+// Server mod keys (ue4ss:X / pak:Y) tracked as coming from this Nexus modId — lets a
+// client-side delete find the paired server install(s).
+export async function nexusKeysForModId(modId: number): Promise<string[]> {
+  const a = await readAssocs()
+  return Object.keys(a).filter((k) => a[k].modId === modId)
+}
+
 // The Nexus association for a single installed mod, or null if it isn't linked.
 // Used by the update flow to resolve which Nexus mod a row points at.
 export async function getLinkedModId(

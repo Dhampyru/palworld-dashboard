@@ -14,11 +14,11 @@ import {
   readPalDefenderState,
   setPalDefenderEnabled,
   readModGroups,
-  removeFromModGroups,
   readSteamMods,
-  removeFromSteamMods,
+  removeServerMod,
 } from '@/lib/game-mods'
 import { modHasEditableConfig } from '@/lib/mod-config'
+import { removeClientModsBySource } from '@/lib/client-mods'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -265,37 +265,21 @@ async function _DELETE(request: NextRequest) {
     return NextResponse.json({ success: true, id, dryRun: true })
   }
 
+  // removeServerMod deletes the folder/pak, its mods.txt entry, any GROUPED child pak files
+  // (hybrid mods), and every tracking row (Nexus/Steam/group map) — no leftovers. It returns
+  // the source ids so we can cascade to the paired CLIENT stage (default: delete both sides;
+  // a per-side install is chosen at add-time via the target override).
+  let cascadedClient: string[] = []
   try {
-    if (kind === 'ue4ss') {
-      const modsDir = await resolveUe4ssModsDir()
-      if (!modsDir) throw new Error('UE4SS Mods directory not found')
-      // Remove the mod's own folder...
-      await rm(join(modsDir, name), { recursive: true, force: true })
-      // ...and its mods.txt entry, so a stale reference doesn't linger.
-      const modsTxtPath = join(modsDir, 'mods.txt')
-      try {
-        const active = await readModsTxt(modsDir)
-        active.delete(name)
-        const tmp = `${modsTxtPath}.tmp`
-        await writeFile(tmp, serializeModsTxt(active), 'utf8')
-        await rename(tmp, modsTxtPath)
-      } catch {
-        // no mods.txt, or mod was never listed in it — nothing to clean up
-      }
-    } else {
-      // Remove whichever variant (enabled or disabled) actually exists.
-      await rm(join(pakModsDir(), name), { force: true })
-      await rm(join(pakModsDir(), `${name}.disabled`), { force: true })
-    }
+    const { nexusModId, steamItemId } = await removeServerMod(id)
+    if (nexusModId != null) cascadedClient = await removeClientModsBySource('nexus', String(nexusModId))
+    else if (steamItemId) cascadedClient = await removeClientModsBySource('steam', steamItemId)
   } catch (error) {
     return NextResponse.json(
       { error: `Failed to remove mod: ${error instanceof Error ? error.message : 'unknown error'}` },
-      { status: 500 }
+      { status: 500 },
     )
   }
 
-  // Keep the hybrid-mod grouping map from pointing at a deleted mod.
-  await removeFromModGroups(id)
-  await removeFromSteamMods(id)
-  return NextResponse.json({ success: true, id })
+  return NextResponse.json({ success: true, id, cascadedClient })
 }
