@@ -202,6 +202,59 @@ async function unpack(archivePath: string, destDir: string): Promise<void> {
   await execFileP('unar', ['-D', '-f', '-o', destDir, archivePath], { maxBuffer: 8 * 1024 * 1024 })
 }
 
+// Structure-based placement for a Workshop item with NO Info.json (mirrors the server's
+// installWorkshopByStructure): Scripts/dlls/enabled.txt → a ue4ss/Mods/<pkg> folder, and
+// paks routed by path (LogicMods/ → LogicMods, else → ~mods). Without this a no-manifest
+// Workshop mod installs on the server but is silently dropped from the client bundle.
+async function placeWorkshopByStructure(
+  contentDir: string,
+  pkg: string,
+  paths: { modsDir: string; pakDir: string; logicDir: string },
+  luaMods: string[],
+  seenPaks: Set<string>,
+  uniqueMod: (base: string) => string,
+  produced: string[],
+): Promise<string[]> {
+  let entries: import('node:fs').Dirent[]
+  try {
+    entries = await readdir(contentDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const META = new Set(['thumbnail.png', '.workshop.json', 'info.json'])
+  const SUBDIRS = new Set(['logicmods', 'palschema']) // paks routed below; PalSchema via collectSteamPalSchema
+  const placed: string[] = []
+
+  const codeEntries = entries.filter((e) => {
+    const low = e.name.toLowerCase()
+    if (e.isDirectory()) return !SUBDIRS.has(low)
+    return !META.has(low) && !PAK_RE.test(e.name)
+  })
+  const hasLua = codeEntries.some((e) => {
+    const low = e.name.toLowerCase()
+    return (
+      (e.isDirectory() && (low === 'scripts' || low === 'dlls')) ||
+      /\.lua$/i.test(e.name) ||
+      low === 'enabled.txt' ||
+      low === 'main.dll'
+    )
+  })
+  if (hasLua) {
+    const name = uniqueMod(safeName(pkg))
+    const dest = join(paths.modsDir, name)
+    await mkdir(dest, { recursive: true })
+    for (const e of codeEntries) await cp(join(contentDir, e.name), join(dest, e.name), { recursive: true })
+    luaMods.push(name)
+    produced.push(name)
+    placed.push(`ue4ss/Mods/${name}`)
+  }
+
+  const routed = await collectPaksRouted([contentDir], paths.pakDir, paths.logicDir, seenPaks)
+  if (routed.paks.length) placed.push(`~mods (${routed.paks.length})`)
+  if (routed.logic.length) placed.push(`LogicMods (${routed.logic.length})`)
+  return placed
+}
+
 // Steam Workshop InstallRule placement for a client (mirrors game-mods.installWorkshop
 // PackageToProxy, but CLIENT rules and into the bundle). Returns where things landed.
 async function placeWorkshop(
@@ -215,9 +268,11 @@ async function placeWorkshop(
 ): Promise<string[]> {
   let info: { InstallRule?: unknown; PackageName?: string }
   try {
-    info = JSON.parse(await readFile(join(contentDir, 'Info.json'), 'utf8'))
+    info = JSON.parse((await readFile(join(contentDir, 'Info.json'), 'utf8')).replace(/^\uFEFF/, ''))
   } catch {
-    return []
+    // No Info.json manifest — place by STRUCTURE (mirrors the server's fallback) so a
+    // no-manifest Workshop mod still ships to clients instead of being silently dropped.
+    return placeWorkshopByStructure(contentDir, pkg, paths, luaMods, seenPaks, uniqueMod, produced)
   }
   // Prefer the item's own PackageName for the mod folder (ASCII, stable) over the display
   // name (which may be non-ASCII → a generic folder name).
@@ -325,7 +380,7 @@ async function collectSteamPalSchema(
   if (!(await isDir(wrapper))) return null
   let pkg = safeName(fallbackName)
   try {
-    const info = JSON.parse(await readFile(join(contentDir, 'Info.json'), 'utf8')) as { PackageName?: unknown }
+    const info = JSON.parse((await readFile(join(contentDir, 'Info.json'), 'utf8')).replace(/^\uFEFF/, '')) as { PackageName?: unknown }
     if (typeof info.PackageName === 'string' && info.PackageName.trim()) pkg = safeName(info.PackageName.trim())
   } catch {
     /* fall back to the mod name */

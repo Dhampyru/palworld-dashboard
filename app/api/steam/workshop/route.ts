@@ -89,8 +89,8 @@ async function _POST(request: NextRequest) {
         continue
       }
       try {
-        const { contentDir } = await downloadWorkshopItem(id)
-        const result = await installWorkshopPackageToProxy(contentDir, id)
+        const { contentDir, modName } = await downloadWorkshopItem(id)
+        const result = await installWorkshopPackageToProxy(contentDir, id, modName ?? undefined)
         results.push({ url: raw, itemId: id, ok: true, name: result.modName ?? result.packageName })
       } catch (error) {
         results.push({ url: raw, itemId: id, ok: false, error: error instanceof Error ? error.message : 'Install failed' })
@@ -117,8 +117,8 @@ async function _POST(request: NextRequest) {
   try {
     // Download to the staging content dir, then place its server parts into the
     // proxy layout the running UE4SS/PalSchema already load from (Option B).
-    const { contentDir } = await downloadWorkshopItem(itemId)
-    const result = await installWorkshopPackageToProxy(contentDir, itemId)
+    const { contentDir, modName } = await downloadWorkshopItem(itemId)
+    const result = await installWorkshopPackageToProxy(contentDir, itemId, modName ?? undefined)
     const name = result.modName ?? result.packageName
     const where = result.installed.map((i) => i.type).join(' + ')
     const note = `Installed ${name} into your UE4SS setup (${where}) — restart the server to load it.${

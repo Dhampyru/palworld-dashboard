@@ -1641,18 +1641,108 @@ export type WorkshopProxyInstall = {
   skipped: string[]
 }
 
+// Fallback for a Workshop item with NO Info.json manifest: place its files by STRUCTURE.
+// Many Workshop mods ship Scripts/dlls/enabled.txt + paks at the root with no manifest.
+// Mirrors the manifest path's placement — Lua/C++ → ue4ss/Mods/<pkg>, LogicMods paks →
+// Paks/LogicMods, loose paks → ~mods, a PalSchema/ wrapper → PalSchema/mods/<pkg> — and
+// records the Steam source link the same way.
+async function installWorkshopByStructure(
+  contentDir: string,
+  itemId: string,
+  nameHint?: string,
+): Promise<WorkshopProxyInstall> {
+  const linkName = nameHint?.trim() || null
+  const cleaned = cleanModName(linkName || `workshop_${itemId}`)
+  const pkg = isSafeModFolderName(cleaned) ? cleaned : `workshop_${itemId}`
+  const proxy = await resolveRegimePaths('proxy')
+  const entries = await readdir(contentDir, { withFileTypes: true })
+  const isPak = (n: string) => /\.(pak|utoc|ucas)$/i.test(n)
+  const META = new Set(['thumbnail.png', '.workshop.json', 'info.json'])
+  const SUBDIRS = new Set(['logicmods', 'palschema'])
+  const installed: { type: string; where: string }[] = []
+
+  // 1. Lua/C++ mod folder: everything EXCEPT paks, the LogicMods/PalSchema subtrees, and meta.
+  const codeEntries = entries.filter((e) => {
+    const low = e.name.toLowerCase()
+    if (e.isDirectory()) return !SUBDIRS.has(low)
+    return !META.has(low) && !isPak(e.name)
+  })
+  const hasLua = codeEntries.some((e) => {
+    const low = e.name.toLowerCase()
+    return (
+      (e.isDirectory() && (low === 'scripts' || low === 'dlls')) ||
+      /\.lua$/i.test(e.name) ||
+      low === 'enabled.txt' ||
+      low === 'main.dll'
+    )
+  })
+  let luaInstalled = false
+  if (hasLua) {
+    const dest = join(proxy.ue4ssModsDir, pkg)
+    await rm(dest, { recursive: true, force: true })
+    await mkdir(dest, { recursive: true })
+    for (const e of codeEntries) await cp(join(contentDir, e.name), join(dest, e.name), { recursive: true })
+    const active = await readModsTxt(proxy.ue4ssModsDir)
+    active.set(pkg, true)
+    const modsTxt = join(proxy.ue4ssModsDir, 'mods.txt')
+    const tmp = `${modsTxt}.tmp`
+    await writeFile(tmp, serializeModsTxt(active), 'utf8')
+    await rename(tmp, modsTxt)
+    luaInstalled = true
+    installed.push({ type: 'Lua', where: `ue4ss/Mods/${pkg}` })
+  }
+
+  // 2. LogicMods paks → Paks/LogicMods. 3. Loose root paks → ~mods.
+  const hasLogic = entries.some((e) => e.isDirectory() && e.name.toLowerCase() === 'logicmods')
+  const logicPaks = hasLogic ? await copyPaksFlat(contentDir, ['LogicMods'], logicModsDir()) : []
+  if (logicPaks.length) installed.push({ type: 'LogicMods', where: `Paks/LogicMods (${logicPaks.length})` })
+  const loosePaks: string[] = []
+  for (const e of entries) {
+    if (!e.isFile() || !isPak(e.name)) continue
+    await mkdir(proxy.pakModsDir, { recursive: true })
+    await cp(join(contentDir, e.name), join(proxy.pakModsDir, e.name))
+    if (/\.pak$/i.test(e.name)) loosePaks.push(e.name)
+  }
+  if (loosePaks.length) installed.push({ type: 'Paks', where: `~mods (${loosePaks.length})` })
+
+  // 4. PalSchema/ wrapper → PalSchema/mods/<pkg> (flatten strips the wrapper).
+  let palSchemaInstalled = false
+  if (entries.some((e) => e.isDirectory() && e.name.toLowerCase() === 'palschema')) {
+    await copyTargets(contentDir, ['PalSchema'], join(proxy.palSchemaModsDir, pkg), true)
+    palSchemaInstalled = true
+    installed.push({ type: 'PalSchema', where: `PalSchema/mods/${pkg}` })
+  }
+
+  if (!installed.length) {
+    throw new Error('This Workshop item has no Info.json and no recognizable UE4SS / pak / PalSchema files.')
+  }
+
+  const allPaks = [...logicPaks, ...loosePaks]
+  if (luaInstalled) {
+    await setSteamMod(`ue4ss:${pkg}`, { itemId, name: linkName })
+    if (allPaks.length) await setModGroup(`ue4ss:${pkg}`, allPaks.map((p) => `pak:${p}`))
+  } else if (allPaks.length) {
+    for (const p of allPaks) await setSteamMod(`pak:${p}`, { itemId, name: linkName })
+  } else if (palSchemaInstalled) {
+    await setSteamMod(`palschema:${pkg}`, { itemId, name: linkName })
+  }
+  return { packageName: pkg, modName: linkName, installed, skipped: [] }
+}
+
 // Read a downloaded Workshop item's Info.json and place its server parts into the
 // proxy layout. Prefers rules marked IsServer:true; if none, uses all rules
 // best-effort (and the caller can warn it may be client-only).
 export async function installWorkshopPackageToProxy(
   contentDir: string,
   itemId: string,
+  nameHint?: string,
 ): Promise<WorkshopProxyInstall> {
   let info: { PackageName?: string; ModName?: string; InstallRule?: unknown }
   try {
-    info = JSON.parse(await readFile(join(contentDir, 'Info.json'), 'utf8'))
+    info = JSON.parse((await readFile(join(contentDir, 'Info.json'), 'utf8')).replace(/^\uFEFF/, ''))
   } catch {
-    throw new Error('This Workshop item has no Info.json — not a server-installable mod package.')
+    // No Info.json manifest — fall back to structure-based placement (bare-archive layout).
+    return installWorkshopByStructure(contentDir, itemId, nameHint)
   }
   const packageName = typeof info.PackageName === 'string' ? info.PackageName.trim() : ''
   if (!packageName || !isSafeModFolderName(packageName)) {

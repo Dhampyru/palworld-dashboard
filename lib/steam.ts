@@ -192,7 +192,7 @@ export async function downloadWorkshopItem(
   let packageName: string | null = null
   let modName: string | null = null
   try {
-    const info = JSON.parse(await readFile(join(contentDir, 'Info.json'), 'utf8')) as {
+    const info = JSON.parse((await readFile(join(contentDir, 'Info.json'), 'utf8')).replace(/^\uFEFF/, '')) as {
       PackageName?: string
       ModName?: string
     }
@@ -296,7 +296,7 @@ export async function fetchWorkshopDetails(input: string): Promise<{ title: stri
 // Lua/Paks/LogicMods = client-installable; PalSchema/UE4SS = server-side.
 export async function readWorkshopInstallTypes(contentDir: string): Promise<string[]> {
   try {
-    const info = JSON.parse(await readFile(join(contentDir, 'Info.json'), 'utf8')) as { InstallRule?: { Type?: string }[] }
+    const info = JSON.parse((await readFile(join(contentDir, 'Info.json'), 'utf8')).replace(/^\uFEFF/, '')) as { InstallRule?: { Type?: string }[] }
     return (Array.isArray(info.InstallRule) ? info.InstallRule : []).map((r) => String(r?.Type ?? '')).filter(Boolean)
   } catch {
     return []

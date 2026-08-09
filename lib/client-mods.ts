@@ -183,7 +183,7 @@ async function warnFromZipPath(zipPath: string, kind: ClientModKind): Promise<st
 
 async function warnFromContent(contentDir: string): Promise<string | null> {
   try {
-    const info = JSON.parse(await readFile(join(contentDir, 'Info.json'), 'utf8')) as { InstallRule?: { Type?: string }[] }
+    const info = JSON.parse((await readFile(join(contentDir, 'Info.json'), 'utf8')).replace(/^\uFEFF/, '')) as { InstallRule?: { Type?: string }[] }
     const types = (Array.isArray(info.InstallRule) ? info.InstallRule : []).map((r) => String(r?.Type ?? ''))
     if (types.some((t) => t === 'Lua' || t === 'Paks' || t === 'LogicMods')) return null
     if (types.some((t) => t === 'PalSchema' || t === 'UE4SS')) return SERVER_SIDE_WARN
