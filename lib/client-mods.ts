@@ -57,11 +57,33 @@ async function readIndex(): Promise<Index> {
   }
 }
 
+let writeSeq = 0
 async function writeIndex(idx: Index): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true })
-  const tmp = `${INDEX_FILE}.tmp`
+  // Unique temp per write so two concurrent writers never share/clobber the same .tmp.
+  const tmp = `${INDEX_FILE}.${process.pid}.${++writeSeq}.tmp`
   await writeFile(tmp, JSON.stringify(idx, null, 2) + '\n', 'utf8')
   await rename(tmp, INDEX_FILE)
+}
+
+// Serialize index read-modify-write. Every mutation reads the CURRENT index, applies its
+// change, and writes — all under one in-process chain — so concurrent callers (e.g. rapid
+// keep-toggles or an add landing mid-toggle) can't clobber each other via last-write-wins,
+// which showed up as the loadout "lagging behind" the selection. Heavy work (downloads)
+// must stay OUTSIDE this — only the read→mutate→write belongs here.
+let indexChain: Promise<unknown> = Promise.resolve()
+function mutateIndex<T>(fn: (idx: Index) => T | Promise<T>): Promise<T> {
+  const run = indexChain.then(async () => {
+    const idx = await readIndex()
+    const result = await fn(idx)
+    await writeIndex(idx)
+    return result
+  })
+  indexChain = run.then(
+    () => {},
+    () => {},
+  ) // keep the chain alive regardless of this op's outcome
+  return run
 }
 
 // Bytes on disk under a path (recursive). Best-effort — an unreadable entry counts 0.
@@ -281,8 +303,11 @@ export async function addClientModFromNexus(url: string): Promise<ClientMod> {
     warn: warnFromZip(buffer, kind),
     configMenu: zipUsesModConfig(buffer),
   }
-  idx[id] = rec
-  await writeIndex(idx)
+  // Commit through the mutex so this insert can't clobber a keep-toggle that lands during
+  // the download above (re-reads the current index, adds only this record).
+  await mutateIndex((cur) => {
+    cur[id] = rec
+  })
   return rec
 }
 
@@ -319,8 +344,11 @@ export async function addClientModFromSteam(url: string): Promise<ClientMod> {
     warn: await warnFromContent(dest),
     configMenu: await contentUsesModConfig(dest),
   }
-  idx[id] = rec
-  await writeIndex(idx)
+  // Commit through the mutex so this insert can't clobber a keep-toggle that lands during
+  // the download above (re-reads the current index, adds only this record).
+  await mutateIndex((cur) => {
+    cur[id] = rec
+  })
   return rec
 }
 
@@ -369,8 +397,11 @@ export async function addClientModUpload(fileName: string, buffer: Buffer): Prom
     warn: isPak ? null : warnFromZip(stored, kind),
     configMenu: isPak ? bufHasConfigSig(stored) : zipUsesModConfig(stored),
   }
-  idx[id] = rec
-  await writeIndex(idx)
+  // Commit through the mutex so this insert can't clobber a keep-toggle that lands during
+  // the download above (re-reads the current index, adds only this record).
+  await mutateIndex((cur) => {
+    cur[id] = rec
+  })
   return rec
 }
 
@@ -408,20 +439,21 @@ export async function addClientModsBulk(inputs: string[]): Promise<BulkResult[]>
 }
 
 export async function setClientModKeep(id: string, keep: boolean): Promise<ClientMod> {
-  const idx = await readIndex()
-  const rec = idx[id]
-  if (!rec) throw new Error('No such client mod')
-  rec.keep = keep
-  await writeIndex(idx)
-  return rec
+  return mutateIndex((idx) => {
+    const rec = idx[id]
+    if (!rec) throw new Error('No such client mod')
+    rec.keep = keep
+    return rec
+  })
 }
 
 export async function removeClientMod(id: string): Promise<void> {
-  const idx = await readIndex()
-  if (!idx[id]) return
-  delete idx[id]
-  await writeIndex(idx)
-  await rm(join(STORE_DIR, id), { recursive: true, force: true })
+  const existed = await mutateIndex((idx) => {
+    if (!idx[id]) return false
+    delete idx[id]
+    return true
+  })
+  if (existed) await rm(join(STORE_DIR, id), { recursive: true, force: true })
 }
 
 // Recompute `configMenu` from a stored payload on disk (size-capped so a big payload never
@@ -441,23 +473,33 @@ async function detectConfigMenuOnDisk(dir: string, payload: string): Promise<boo
 // Recompute `warn` + `configMenu` for every staged mod (for entries added before those
 // existed). `warn` uses disk-safe listing (lsar / Info.json); `configMenu` reads small paks.
 export async function backfillClientWarnings(): Promise<{ updated: number; flagged: { name: string; warn: string }[] }> {
-  const idx = await readIndex()
-  let updated = 0
+  // Compute the slow disk scans OUTSIDE the index mutex so a keep-toggle isn't blocked while
+  // this runs; apply the results under the mutex (re-reads, touches only still-present mods).
+  const snapshot = await readIndex()
+  const computed = new Map<string, { warn: string | null; configMenu: boolean }>()
   const flagged: { name: string; warn: string }[] = []
-  for (const [id, m] of Object.entries(idx)) {
+  for (const [id, m] of Object.entries(snapshot)) {
     const dir = join(STORE_DIR, id)
     let warn: string | null
     if (m.payload === 'content') warn = await warnFromContent(join(dir, 'content'))
     else if (m.payload === 'payload.pak') warn = null
     else warn = await warnFromZipPath(join(dir, 'payload.zip'), m.kind)
     const configMenu = await detectConfigMenuOnDisk(dir, m.payload)
-    if ((m.warn ?? null) !== warn || (m.configMenu ?? false) !== configMenu) {
-      m.warn = warn
-      m.configMenu = configMenu
-      updated++
-    }
+    computed.set(id, { warn, configMenu })
     if (warn) flagged.push({ name: m.name, warn })
   }
-  await writeIndex(idx)
+  const updated = await mutateIndex((idx) => {
+    let n = 0
+    for (const [id, c] of computed) {
+      const m = idx[id]
+      if (!m) continue // removed while we were scanning
+      if ((m.warn ?? null) !== c.warn || (m.configMenu ?? false) !== c.configMenu) {
+        m.warn = c.warn
+        m.configMenu = c.configMenu
+        n++
+      }
+    }
+    return n
+  })
   return { updated, flagged }
 }
