@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { ModConfigForm, hasModConfigSchema, type ConfigJson } from '@/components/modconfig-form'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -113,6 +114,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   const [configSel, setConfigSel] = useState<string | null>(null)
   const [configDraft, setConfigDraft] = useState('')
   const [configBusy, setConfigBusy] = useState(false)
+  const [configView, setConfigView] = useState<'form' | 'raw'>('form') // .modconfig.json → form by default
 
   const load = useCallback(async () => {
     if (!config) return
@@ -292,6 +294,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
       setConfigFiles([])
       setConfigSel(null)
       setConfigDraft('')
+      setConfigView('form')
       setConfigLoading(true)
       try {
         const json = await postJson({ action: 'configList', id: m.id })
@@ -316,6 +319,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
       if (!f) return
       setConfigSel(id)
       setConfigDraft(f.content)
+      setConfigView('form')
     },
     [configFiles],
   )
@@ -669,18 +673,59 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
                   ))}
                 </select>
               )}
-              {configSel && (
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span className="font-mono">{configSel}</span>
-                  <span>{configFiles.find((f) => f.id === configSel)?.format}</span>
-                </div>
-              )}
-              <textarea
-                value={configDraft}
-                onChange={(e) => setConfigDraft(e.target.value)}
-                spellCheck={false}
-                className="min-h-0 flex-1 resize-none rounded-md border bg-muted/20 p-3 font-mono text-xs"
-              />
+              {(() => {
+                // A .modconfig.json (DekModConfigMenu) is self-describing → render typed
+                // widgets (sliders/toggles). Anything else, or unparseable JSON, stays raw.
+                const selFile = configFiles.find((f) => f.id === configSel)
+                let parsed: ConfigJson | null = null
+                if (selFile && /\.modconfig\.json$/i.test(selFile.relWithin || configSel || '')) {
+                  try {
+                    const p = JSON.parse(configDraft)
+                    if (hasModConfigSchema(p)) parsed = p as ConfigJson
+                  } catch {
+                    /* not valid JSON → raw only */
+                  }
+                }
+                const formable = !!parsed
+                const showForm = formable && configView === 'form'
+                return (
+                  <>
+                    <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span className="truncate font-mono">{configSel}</span>
+                      {formable ? (
+                        <div className="inline-flex shrink-0 overflow-hidden rounded-md border">
+                          <button
+                            onClick={() => setConfigView('form')}
+                            className={`px-2 py-0.5 ${showForm ? 'bg-primary/15 text-primary' : 'hover:bg-muted'}`}
+                          >
+                            Form
+                          </button>
+                          <button
+                            onClick={() => setConfigView('raw')}
+                            className={`px-2 py-0.5 ${!showForm ? 'bg-primary/15 text-primary' : 'hover:bg-muted'}`}
+                          >
+                            Raw JSON
+                          </button>
+                        </div>
+                      ) : (
+                        <span>{selFile?.format}</span>
+                      )}
+                    </div>
+                    {showForm && parsed ? (
+                      <div className="min-h-0 flex-1 overflow-y-auto rounded-md border bg-muted/20 p-3">
+                        <ModConfigForm json={parsed} onChange={(next) => setConfigDraft(JSON.stringify(next, null, 2))} />
+                      </div>
+                    ) : (
+                      <textarea
+                        value={configDraft}
+                        onChange={(e) => setConfigDraft(e.target.value)}
+                        spellCheck={false}
+                        className="min-h-0 flex-1 resize-none rounded-md border bg-muted/20 p-3 font-mono text-xs"
+                      />
+                    )}
+                  </>
+                )
+              })()}
               <div className="flex items-center gap-2">
                 <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={saveConfig} disabled={configBusy}>
                   {configBusy ? <Spinner className="size-3.5" /> : null}

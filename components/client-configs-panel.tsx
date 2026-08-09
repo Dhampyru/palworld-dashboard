@@ -4,9 +4,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { useServer } from '@/lib/server-context'
 import { buildPalworldProxyHeaders } from '@/lib/palworld'
+import { ModConfigForm } from '@/components/modconfig-form'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Switch } from '@/components/ui/switch'
 import { Spinner } from '@/components/ui/spinner'
 import { SlidersHorizontal, Upload, Trash2, Save } from 'lucide-react'
 
@@ -15,24 +14,9 @@ import { SlidersHorizontal, Upload, Trash2, Save } from 'lucide-react'
 // (each setting carries type/desc/opts/init/live). We render a form from that schema, edit the
 // `live` values, and save — the loadout overlays the file so friends install pre-configured.
 
-type Opts = { min?: number; max?: number; step?: number }
-type Setting = { type?: string; desc?: string; opts?: Opts; init?: unknown; live?: unknown }
-type Section = { type?: string; desc?: string; data?: Record<string, Setting> }
 type ConfigJson = Record<string, unknown>
 type ConfigFile = { name: string; json: ConfigJson }
 
-const isSection = (v: unknown): v is Section =>
-  !!v && typeof v === 'object' && (v as Section).type === 'object' && !!(v as Section).data
-
-function rgbToHex(c: { r?: number; g?: number; b?: number }): string {
-  const h = (n: number) => Math.round(Math.max(0, Math.min(1, n)) * 255).toString(16).padStart(2, '0')
-  return `#${h(c.r ?? 0)}${h(c.g ?? 0)}${h(c.b ?? 0)}`
-}
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
-  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex)
-  if (!m) return { r: 1, g: 1, b: 1 }
-  return { r: parseInt(m[1], 16) / 255, g: parseInt(m[2], 16) / 255, b: parseInt(m[3], 16) / 255 }
-}
 
 export function ClientConfigsPanel() {
   const { config } = useServer()
@@ -72,16 +56,6 @@ export function ClientConfigsPanel() {
     setDraft(structuredClone(c.json))
   }
 
-  // Update one setting's `live` value in the draft.
-  const setLive = (section: string, key: string, value: unknown) => {
-    setDraft((prev) => {
-      if (!prev) return prev
-      const next = structuredClone(prev)
-      const sec = next[section] as Section
-      if (sec?.data?.[key]) sec.data[key].live = value
-      return next
-    })
-  }
 
   const upload = async (file: File) => {
     if (!config) return
@@ -146,116 +120,6 @@ export function ClientConfigsPanel() {
     }
   }
 
-  const renderSetting = (section: string, key: string, s: Setting) => {
-    const live = s.live
-    const label = (
-      <div className="min-w-0">
-        <div className="text-sm font-medium">{key}</div>
-        {s.desc ? <div className="text-[11px] leading-tight text-muted-foreground">{s.desc}</div> : null}
-      </div>
-    )
-    if (s.type === 'boolean') {
-      return (
-        <div key={key} className="flex items-center justify-between gap-4 py-2">
-          {label}
-          <Switch checked={!!live} onCheckedChange={(v) => setLive(section, key, v)} />
-        </div>
-      )
-    }
-    if (s.type === 'float' || s.type === 'int') {
-      const n = typeof live === 'number' ? live : Number(live) || 0
-      const min = s.opts?.min ?? 0
-      const max = s.opts?.max ?? 100
-      const step = s.opts?.step ?? (s.type === 'int' ? 1 : 0.1)
-      return (
-        <div key={key} className="flex items-center justify-between gap-4 py-2">
-          {label}
-          <div className="flex shrink-0 items-center gap-2">
-            <input
-              type="range"
-              min={min}
-              max={max}
-              step={step}
-              value={n}
-              onChange={(e) => setLive(section, key, Number(e.target.value))}
-              className="w-32 accent-primary"
-            />
-            <Input
-              type="number"
-              min={min}
-              max={max}
-              step={step}
-              value={n}
-              onChange={(e) => setLive(section, key, Number(e.target.value))}
-              className="h-8 w-24 text-right"
-            />
-          </div>
-        </div>
-      )
-    }
-    if (s.type === 'color' && live && typeof live === 'object') {
-      const c = live as { r?: number; g?: number; b?: number; a?: number }
-      return (
-        <div key={key} className="flex items-center justify-between gap-4 py-2">
-          {label}
-          <div className="flex shrink-0 items-center gap-2">
-            <input
-              type="color"
-              value={rgbToHex(c)}
-              onChange={(e) => setLive(section, key, { ...c, ...hexToRgb(e.target.value) })}
-              className="h-8 w-10 cursor-pointer rounded border bg-transparent"
-            />
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={c.a ?? 1}
-              title="opacity"
-              onChange={(e) => setLive(section, key, { ...c, a: Number(e.target.value) })}
-              className="w-20 accent-primary"
-            />
-          </div>
-        </div>
-      )
-    }
-    if (s.type === 'keybind' && live && typeof live === 'object') {
-      const k = live as { key?: string; bShift?: boolean; bCtrl?: boolean; bAlt?: boolean; bCmd?: boolean }
-      const mod = (name: 'bShift' | 'bCtrl' | 'bAlt' | 'bCmd', txt: string) => (
-        <label className="flex items-center gap-1 text-[11px]">
-          <input type="checkbox" checked={!!k[name]} onChange={(e) => setLive(section, key, { ...k, [name]: e.target.checked })} />
-          {txt}
-        </label>
-      )
-      return (
-        <div key={key} className="flex items-center justify-between gap-4 py-2">
-          {label}
-          <div className="flex shrink-0 items-center gap-2">
-            {mod('bCtrl', 'Ctrl')}
-            {mod('bShift', 'Shift')}
-            {mod('bAlt', 'Alt')}
-            <Input
-              value={k.key ?? ''}
-              onChange={(e) => setLive(section, key, { ...k, key: e.target.value })}
-              className="h-8 w-20"
-              placeholder="Key"
-            />
-          </div>
-        </div>
-      )
-    }
-    // fallback — number or text
-    return (
-      <div key={key} className="flex items-center justify-between gap-4 py-2">
-        {label}
-        <Input
-          value={typeof live === 'object' ? JSON.stringify(live) : String(live ?? '')}
-          onChange={(e) => setLive(section, key, typeof live === 'number' ? Number(e.target.value) : e.target.value)}
-          className="h-8 w-40"
-        />
-      </div>
-    )
-  }
 
   const meta = draft?.meta as { desc?: string; vers?: string } | undefined
 
@@ -366,19 +230,7 @@ export function ClientConfigsPanel() {
             </Button>
           </div>
           <div className="max-h-[60vh] overflow-y-auto p-3">
-            {Object.entries(draft).map(([section, val]) =>
-              isSection(val) ? (
-                <div key={section} className="mb-4">
-                  <div className="mb-1 border-b pb-0.5">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{section}</div>
-                    {val.desc ? <div className="text-[11px] text-muted-foreground/80">{val.desc}</div> : null}
-                  </div>
-                  <div className="divide-y divide-border/40">
-                    {Object.entries(val.data ?? {}).map(([key, s]) => renderSetting(section, key, s))}
-                  </div>
-                </div>
-              ) : null,
-            )}
+            <ModConfigForm json={draft} onChange={setDraft} />
           </div>
         </div>
       )}
