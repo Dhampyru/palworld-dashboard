@@ -1,7 +1,7 @@
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
-import AdmZip from 'adm-zip'
+import { extractZipTolerant } from '@/lib/archive'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { currentGameDir } from '@/lib/instances'
@@ -210,19 +210,7 @@ async function unpack(archivePath: string, destDir: string): Promise<void> {
   // which adm-zip can't read (client payloads are normalized to zip on staging, so the zip
   // path is the norm).
   if (/\.zip$/i.test(archivePath)) {
-    const entries = new AdmZip(archivePath).getEntries()
-    const names = entries.map((e) => e.entryName.replace(/\\/g, '/'))
-    // A phantom dir: a 0-byte entry (no trailing slash) that is the path-prefix of another
-    // entry — meant to be a directory. Skip it; its children recreate the dirs.
-    const isPhantomDir = (n: string) => names.some((o) => o !== n && o.startsWith(n + '/'))
-    for (const e of entries) {
-      const name = e.entryName.replace(/\\/g, '/')
-      if (e.isDirectory || name.endsWith('/') || isPhantomDir(name)) continue
-      const dest = join(destDir, name)
-      if (dest !== destDir && !dest.startsWith(destDir + sep)) continue // path-escape guard
-      await mkdir(dirname(dest), { recursive: true })
-      await writeFile(dest, e.getData())
-    }
+    await extractZipTolerant(archivePath, destDir)
     return
   }
   await execFileP('unar', ['-D', '-f', '-o', destDir, archivePath], { maxBuffer: 8 * 1024 * 1024 })
@@ -907,11 +895,18 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     // ambiguous multi-folder mods are left with their shipped config).
     let configOverrides = 0
     for (const m of kept) {
-      const folders = producedFolders.get(m.id)
-      if (!folders || folders.length !== 1) continue
       const overrides = await readClientModConfigOverrides(m.id).catch(() => [])
+      if (!overrides.length) continue
+      const folders = producedFolders.get(m.id)
       for (const ov of overrides) {
-        const dest = join(modsDir, folders[0], ov.relWithin)
+        // A Mod Config Menu file (…​.modconfig.json) belongs in the client's LogicMods dir
+        // (basename only), NOT nested inside the ue4ss/Mods folder — route it there so the
+        // edit actually applies on the client. An in-folder config (e.g. a Lua mod's
+        // config.lua) goes under the produced mod folder (only when it produced exactly one).
+        let dest: string | null = null
+        if (/\.modconfig\.json$/i.test(ov.relWithin)) dest = join(logicDir, basename(ov.relWithin))
+        else if (folders && folders.length === 1) dest = join(modsDir, folders[0], ov.relWithin)
+        if (!dest) continue
         await mkdir(dirname(dest), { recursive: true })
         await cp(ov.absPath, dest)
         configOverrides++

@@ -1,12 +1,9 @@
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { validateConfigContent, type ModConfigFormat } from '@/lib/mod-config'
+import { extractZipTolerant } from '@/lib/archive'
 import { clientModStorePath, listClientMods } from '@/lib/client-mods'
-
-const execFileP = promisify(execFile)
 
 // PATCH (not upstream): per-client-mod config editing (docs/specs/client-mod-sync.md §2c).
 // Many client mods ship a config file (Scripts/config.lua, config.ini, …). The admin can
@@ -107,14 +104,15 @@ async function modRootFor(file: string, root: string): Promise<string | null> {
 }
 
 // Materialize a mod's files to a temp dir so we can inspect them: steam items are already
-// unpacked (content/), archive payloads are extracted with `unar`. Returns the base dir +
-// a cleanup. Bare paks have no config.
+// unpacked (content/), archive payloads are extracted with the tolerant zip extractor (unar
+// choked on mods that pack malformed dir entries, e.g. OathrBGM). Returns the base dir + a
+// cleanup. Bare paks have no config.
 async function materialize(modId: string, payload: string): Promise<{ base: string; cleanup: () => Promise<void> } | null> {
   const store = clientModStorePath(modId)
   if (payload === 'content') return { base: join(store, 'content'), cleanup: async () => {} }
   if (payload === 'payload.pak') return null
   const dir = await mkdtemp(join(tmpdir(), 'cm-config-'))
-  await execFileP('unar', ['-D', '-f', '-o', dir, join(store, 'payload.zip')], { maxBuffer: 8 * 1024 * 1024 })
+  await extractZipTolerant(join(store, 'payload.zip'), dir)
   return { base: dir, cleanup: async () => void (await rm(dir, { recursive: true, force: true }).catch(() => {})) }
 }
 

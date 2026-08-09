@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, writeFile, rm, readdir, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile, rm, readdir, readFile } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import AdmZip from 'adm-zip'
@@ -15,6 +15,26 @@ const UNAR_BIN = process.env.UNAR_BIN ?? 'unar'
 export type ArchiveFormat = 'zip' | '7z' | 'rar' | 'unknown'
 
 // Sniff by magic bytes, not extension — a Nexus "download" is an opaque buffer.
+// Extract a .zip to destDir per-entry — robust to archives with MALFORMED directory entries
+// (a 0-byte "dir" entry with no trailing slash that unar turns into a FILE, then fails every
+// subdir with "Could not create directory" and still exits 0; some mods, e.g. OathrBGM, ship
+// this). Skips phantom dir entries (a 0-byte entry that's the path-prefix of another), creates
+// each file's parent, path-escape guarded. Preferred over unar for zips.
+export async function extractZipTolerant(zipPath: string, destDir: string): Promise<void> {
+  await mkdir(destDir, { recursive: true })
+  const entries = new AdmZip(zipPath).getEntries()
+  const names = entries.map((e) => e.entryName.replace(/\\/g, '/'))
+  const isPhantomDir = (n: string) => names.some((o) => o !== n && o.startsWith(n + '/'))
+  for (const e of entries) {
+    const name = e.entryName.replace(/\\/g, '/')
+    if (e.isDirectory || name.endsWith('/') || isPhantomDir(name)) continue
+    const dest = join(destDir, name)
+    if (dest !== destDir && !dest.startsWith(destDir + sep)) continue
+    await mkdir(join(dest, '..'), { recursive: true })
+    await writeFile(dest, e.getData())
+  }
+}
+
 export function archiveFormat(buffer: Buffer): ArchiveFormat {
   if (buffer.length < 6) return 'unknown'
   if (buffer[0] === 0x50 && buffer[1] === 0x4b) return 'zip' // "PK"
