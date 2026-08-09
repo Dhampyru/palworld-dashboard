@@ -56,16 +56,18 @@ function toFriendlyValidationMessage(rawMessage: string) {
   return message
 }
 
-async function getApiErrorMessage(response: Response, fallbackMessage: string) {
-  try {
-    const data = await response.json() as { error?: string }
-    return data.error || fallbackMessage
-  } catch {
-    return fallbackMessage
-  }
-}
+// Probe the game via the dashboard proxy. Returns a discriminated result so the caller can
+// tell a BAD PASSWORD (the dashboard rejects with 401/403 before the request ever reaches
+// the game) apart from the GAME being unreachable (the password passed, but the proxy gets a
+// 5xx / network error because the server is stopped). The unreachable case must NOT block
+// login — this panel exists precisely to manage a server that is down; auth then falls back
+// to the game-independent tier oracle (/api/auth-tier).
+type ServerConnResult = { kind: 'ok' | 'auth' | 'unreachable' }
 
-async function validateServerConnection(config: LoginConfigPayload, signal?: AbortSignal) {
+async function validateServerConnection(
+  config: LoginConfigPayload,
+  signal?: AbortSignal,
+): Promise<ServerConnResult> {
   const requestController = new AbortController()
   const timeoutId = window.setTimeout(() => {
     requestController.abort()
@@ -95,20 +97,20 @@ async function validateServerConnection(config: LoginConfigPayload, signal?: Abo
       cache: 'no-store',
       signal: requestController.signal,
     })
-  } catch (error) {
-    if (requestController.signal.aborted && !signal?.aborted) {
-      throw new Error(`Validation timed out after ${VALIDATION_REQUEST_TIMEOUT_MS / 1000} seconds.`)
-    }
-
-    throw error
+  } catch {
+    // Network error or timeout reaching the dashboard/proxy itself — treat as the game being
+    // unreachable so login can still proceed via password-tier auth.
+    return { kind: 'unreachable' }
   } finally {
     window.clearTimeout(timeoutId)
     signal?.removeEventListener('abort', handleExternalAbort)
   }
 
-  if (!infoResponse.ok) {
-    throw new Error(await getApiErrorMessage(infoResponse, 'Failed to connect to server'))
-  }
+  if (infoResponse.ok) return { kind: 'ok' }
+  // 401/403 = the dashboard rejected the PASSWORD before reaching the game. Anything else
+  // (5xx from a refused upstream, etc.) = valid password but the game is down — don't block.
+  if (infoResponse.status === 401 || infoResponse.status === 403) return { kind: 'auth' }
+  return { kind: 'unreachable' }
 }
 
 // Resolve the panel access tier for the entered password. Passwords are only
@@ -279,13 +281,20 @@ export function LoginForm() {
     }
 
     try {
-      await validateServerConnection(normalizedConfig)
+      const conn = await validateServerConnection(normalizedConfig)
+      if (conn.kind === 'auth') {
+        throw new Error('Authentication failed. Check your password and try again.')
+      }
 
-      // validateServerConnection succeeded, so the password is live. Resolve
-      // which tier it authenticated as; 'invalid' at this point means a
-      // directly-entered real game credential the panel env does not list —
-      // that keeps full admin access (passthrough), same as before.
+      // Resolve the tier via the game-INDEPENDENT oracle (/api/auth-tier). When the game was
+      // reachable and validated the password ('ok'), an 'invalid' tier is a directly-entered
+      // game credential the panel env does not list → passthrough admin, as before. When the
+      // game was UNREACHABLE (stopped), /api/auth-tier is the ONLY verifier, so an 'invalid'
+      // tier means we genuinely cannot authenticate → reject rather than wave through.
       const tierResult = await fetchAccessTier(normalizedConfig.adminPassword)
+      if (conn.kind === 'unreachable' && tierResult === 'invalid') {
+        throw new Error('Authentication failed. Check your password and try again.')
+      }
       const accessTier: AccessTier = tierResult === 'mod' ? 'mod' : 'admin'
 
       sessionStorage.setItem(LOGIN_TRANSITION_SESSION_KEY, '1')
