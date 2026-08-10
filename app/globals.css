@@ -605,3 +605,10 @@
    left alone — it's transient (loaders) and stepping a spinner looks broken. */
 .animate-pulse { animation-timing-function: steps(10, end) !important; }
 .animate-ping { animation-timing-function: steps(6, end) !important; }
+
+/* Overview reorder (2026-08-10): the decorative 9-dot flourish in each InfoPanel's top-right
+   read as a drag handle but wasn't one. On a reorderable card, hide it (direct child of the
+   panel root, so card content grids are never touched) — the real grip handle takes its place. */
+.reorderable-card [data-slot="tron-info-panel"] > .pointer-events-none.absolute.right-2.top-2 {
+  display: none !important;
+}

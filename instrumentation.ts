@@ -10,5 +10,7 @@ export async function register() {
     startAutoRestartMonitor()
     const { startBroadcastScheduler } = await import('@/lib/broadcast-schedule')
     startBroadcastScheduler()
+    const { startDeathAnnouncer } = await import('@/lib/death-announce')
+    startDeathAnnouncer()
   }
 }

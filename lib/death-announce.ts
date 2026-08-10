@@ -1,0 +1,329 @@
+// PATCH (not upstream): witty player-death announcements. PalDefender already logs every player
+// death WITH CAUSE (logPlayerDeaths) to its own Pal/Binaries/Win64/PalDefender/Logs/<session>.log
+// — e.g. `[HH:MM:SS][info] 'Name' (UserId=…, IP=…) died to extreme body temperature.`. This
+// tails the newest such log, classifies the cause, and broadcasts an operator-editable witty
+// line via RCON (pgbroadcast). Keep PalDefender's own `announcePlayerDeaths` OFF so the wording
+// isn't duplicated. Same in-process, per-instance, signature-dedup, baseline-on-enable model as
+// the on-join welcome (lib/broadcast-schedule).
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { open, readdir, readFile, stat } from 'node:fs/promises'
+import { Buffer } from 'node:buffer'
+import { dirname, join } from 'node:path'
+import { getRconConfig, runRcon } from '@/lib/rcon-exec'
+import { readPalDefenderState } from '@/lib/game-mods'
+import { DEFAULT_INSTANCE_ID, currentGameDir, listInstances, runWithInstance } from '@/lib/instances'
+
+// Cause categories we classify PalDefender's death phrasings into. {name} = victim everywhere;
+// {killer} for killedBy/towerBoss; {pal} for wildPal.
+export const DEATH_CAUSES = [
+  'wildPal',
+  'killedBy',
+  'towerBoss',
+  'temperature',
+  'poison',
+  'explosion',
+  'noAttacker',
+  'unknown',
+] as const
+export type DeathCause = (typeof DEATH_CAUSES)[number]
+
+export const CAUSE_LABELS: Record<DeathCause, string> = {
+  wildPal: 'Killed by a wild Pal ({pal})',
+  killedBy: 'Killed by someone ({killer})',
+  towerBoss: 'Killed by a tower boss ({killer})',
+  temperature: 'Extreme temperature (cold/heat)',
+  poison: 'Poison',
+  explosion: 'Explosion',
+  noAttacker: 'Died with no attacker (fall/self)',
+  unknown: 'Unknown cause',
+}
+
+export const DEFAULT_TEMPLATES: Record<DeathCause, string[]> = {
+  wildPal: [
+    '{name} was cut down by a wild {pal}. Nature 1, {name} 0.',
+    'A wild {pal} added {name} to its trophy shelf.',
+    '{name} tried to befriend a wild {pal}. It declined.',
+  ],
+  killedBy: [
+    '{killer} sent {name} back to the respawn screen.',
+    '{name} got folded by {killer}.',
+    '{killer} politely uninstalled {name} from the world.',
+  ],
+  towerBoss: [
+    '{name} got flattened by {killer} in the tower. Bosses: still undefeated.',
+    'The tower boss {killer} made an example of {name}.',
+  ],
+  temperature: [
+    '{name} forgot a coat and became a popsicle.',
+    '{name} lost a fight with the weather.',
+    'The elements claimed {name}. Pack layers next time.',
+  ],
+  poison: [
+    '{name} really should have packed antidotes.',
+    '{name} found out which berries were the bad berries.',
+  ],
+  explosion: [
+    '{name} died with a bang. Literally.',
+    '{name} found out what that red barrel does.',
+  ],
+  noAttacker: [
+    '{name} died with no one swinging. Gravity, probably.',
+    '{name} found the ground the hard way.',
+  ],
+  unknown: [
+    '{name} died under mysterious circumstances.',
+    'Something got {name}. We may never know what.',
+  ],
+}
+
+export type DeathSchedule = {
+  enabled: boolean
+  prefix: string
+  templates: Record<DeathCause, string[]>
+  baselined: boolean // scheduler-owned: seeded from the current log once
+  seen: string[] // scheduler-owned: recent `ts|name|phrase` signatures already announced
+  lastAt: string | null
+  lastMessage: string | null
+}
+
+function scheduleFile(id: string): string {
+  if (id === DEFAULT_INSTANCE_ID) return process.env.DEATH_ANNOUNCE_FILE ?? './data/death-announce.json'
+  return `./data/death-announce.${id}.json`
+}
+
+const MAX_TEMPLATES_PER_CAUSE = 20
+const MAX_TEMPLATE_LEN = 200
+const SEEN_CAP = 300
+const PD_LOG_TAIL_BYTES = 256 * 1024
+
+function cleanTemplates(v: unknown): Record<DeathCause, string[]> {
+  const src = (v && typeof v === 'object' ? (v as Record<string, unknown>) : {}) as Record<string, unknown>
+  const out = {} as Record<DeathCause, string[]>
+  for (const cause of DEATH_CAUSES) {
+    const raw = src[cause]
+    const list = Array.isArray(raw)
+      ? raw
+          .map((m) => (typeof m === 'string' ? m.trim() : ''))
+          .filter(Boolean)
+          .slice(0, MAX_TEMPLATES_PER_CAUSE)
+          .map((m) => m.slice(0, MAX_TEMPLATE_LEN))
+      : []
+    // Fall back to the built-in witty defaults for any category the operator cleared/omitted.
+    out[cause] = list.length ? list : [...DEFAULT_TEMPLATES[cause]]
+  }
+  return out
+}
+
+function normalize(s: Partial<DeathSchedule>): DeathSchedule {
+  return {
+    enabled: Boolean(s.enabled),
+    prefix: typeof s.prefix === 'string' ? s.prefix.trim().slice(0, 40) : '',
+    templates: cleanTemplates(s.templates),
+    baselined: Boolean(s.baselined),
+    seen: Array.isArray(s.seen) ? s.seen.filter((x): x is string => typeof x === 'string').slice(-SEEN_CAP) : [],
+    lastAt: s.lastAt ?? null,
+    lastMessage: s.lastMessage ?? null,
+  }
+}
+
+export function readDeathSchedule(id: string = DEFAULT_INSTANCE_ID): DeathSchedule {
+  try {
+    const f = scheduleFile(id)
+    if (existsSync(f)) return normalize(JSON.parse(readFileSync(f, 'utf8')) as Partial<DeathSchedule>)
+  } catch {
+    /* fall through to defaults */
+  }
+  return normalize({})
+}
+
+function writeDeathSchedule(id: string, s: DeathSchedule): void {
+  const f = scheduleFile(id)
+  mkdirSync(dirname(f), { recursive: true })
+  const tmp = `${f}.tmp`
+  writeFileSync(tmp, JSON.stringify(s, null, 2), { mode: 0o600 })
+  renameSync(tmp, f)
+}
+
+// Operator settings only; baselined/seen/last* are scheduler-owned and preserved.
+export function saveDeathSettings(id: string, input: Partial<DeathSchedule>): DeathSchedule {
+  const cur = readDeathSchedule(id)
+  const next = normalize({
+    ...cur,
+    enabled: input.enabled ?? cur.enabled,
+    prefix: input.prefix ?? cur.prefix,
+    templates: input.templates !== undefined ? input.templates : cur.templates,
+    baselined: cur.baselined,
+    seen: cur.seen,
+  })
+  writeDeathSchedule(id, next)
+  return next
+}
+
+// Strip to printable ASCII — non-ASCII (emoji/non-Latin) has hung RCON broadcast for ~10s.
+const toAscii = (s: string): string => s.replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim()
+
+async function sendViaRcon(rcon: NonNullable<ReturnType<typeof getRconConfig>>, text: string): Promise<string> {
+  const ascii = toAscii(text)
+  if (!ascii) return ''
+  const pd = await readPalDefenderState().catch(() => ({ enabled: false }))
+  await runRcon(rcon, pd.enabled ? `pgbroadcast ${ascii}` : `Broadcast ${ascii.replace(/ /g, '_')}`)
+  return ascii
+}
+
+// PalDefender rotates its log per session (one file per boot). Resolve the newest .log by mtime.
+async function newestPdLog(): Promise<string | null> {
+  const dir = join(currentGameDir(), 'Pal', 'Binaries', 'Win64', 'PalDefender', 'Logs')
+  let entries: string[]
+  try {
+    entries = await readdir(dir)
+  } catch {
+    return null
+  }
+  let best: { p: string; m: number } | null = null
+  for (const e of entries) {
+    if (!e.toLowerCase().endsWith('.log')) continue
+    const p = join(dir, e)
+    try {
+      const st = await stat(p)
+      if (st.isFile() && (!best || st.mtimeMs > best.m)) best = { p, m: st.mtimeMs }
+    } catch {
+      /* skip */
+    }
+  }
+  return best ? best.p : null
+}
+
+async function readTail(path: string, limit: number): Promise<string> {
+  const info = await stat(path)
+  if (info.size <= limit) return readFile(path, 'utf8')
+  const handle = await open(path, 'r')
+  try {
+    const buffer = Buffer.alloc(limit)
+    const { bytesRead } = await handle.read(buffer, 0, limit, info.size - limit)
+    const text = buffer.toString('utf8', 0, bytesRead)
+    const nl = text.indexOf('\n')
+    return nl >= 0 ? text.slice(nl + 1) : text
+  } finally {
+    await handle.close()
+  }
+}
+
+// A PalDefender death line: `[HH:MM:SS][info] 'Name' (UserId=…, IP=…) <phrase>.`
+const DEATH_LINE_RE = /^\[([^\]]+)\]\[info\]\s+'([^']+)'\s+\(UserId=[^)]*\)\s+(.+?)\.?\s*$/
+
+type ParsedDeath = { sig: string; name: string; cause: DeathCause; killer?: string; pal?: string }
+
+function classify(phrase: string): { cause: DeathCause; killer?: string; pal?: string } | null {
+  let m: RegExpExecArray | null
+  if ((m = /^attacked by a wild (.+?) and died$/i.exec(phrase))) return { cause: 'wildPal', pal: m[1]!.trim() }
+  if ((m = /got killed by (.+?) in a tower boss battle$/i.exec(phrase)))
+    return { cause: 'towerBoss', killer: m[1]!.replace(/\s+and\s+/gi, ' & ').trim() }
+  if ((m = /^has been killed by (.+)$/i.exec(phrase))) return { cause: 'killedBy', killer: m[1]!.trim() }
+  if (/extreme body temperature/i.test(phrase)) return { cause: 'temperature' }
+  if (/poison/i.test(phrase)) return { cause: 'poison' }
+  if (/with a bang/i.test(phrase)) return { cause: 'explosion' }
+  if (/without being attacked/i.test(phrase)) return { cause: 'noAttacker' }
+  // "died due to an unknown reason", "was killed from an unknown attack", "invalid player", etc.
+  if (/died|killed/i.test(phrase)) return { cause: 'unknown' }
+  return null // not a death line
+}
+
+function parseDeaths(log: string): ParsedDeath[] {
+  const out: ParsedDeath[] = []
+  for (const raw of log.split('\n')) {
+    const line = raw.trim()
+    const m = DEATH_LINE_RE.exec(line)
+    if (!m) continue
+    const phrase = m[3]!.trim()
+    const c = classify(phrase)
+    if (!c) continue
+    out.push({ sig: `${m[1]!.trim()}|${m[2]!.trim()}|${phrase}`, name: m[2]!.trim(), ...c })
+  }
+  return out
+}
+
+// Pick a template for the cause and fill placeholders. `pick` is injectable for testing.
+export function renderDeath(
+  d: ParsedDeath,
+  templates: Record<DeathCause, string[]>,
+  prefix: string,
+  pick: (n: number) => number = (n) => Math.floor(Math.random() * n),
+): string {
+  const list = templates[d.cause]?.length ? templates[d.cause] : DEFAULT_TEMPLATES[d.cause]
+  const tmpl = list[pick(list.length)] ?? list[0]!
+  const body = tmpl
+    .replace(/\{name\}/gi, d.name)
+    .replace(/\{killer\}/gi, d.killer ?? 'something')
+    .replace(/\{pal\}/gi, d.pal ?? 'wild Pal')
+  return prefix ? `${prefix} ${body}` : body
+}
+
+const running = new Map<string, boolean>()
+
+async function runDeath(id: string): Promise<void> {
+  if (running.get(id)) return
+  running.set(id, true)
+  try {
+    await runWithInstance(id, async () => {
+      const s = readDeathSchedule(id)
+      if (!s.enabled) return
+      const path = await newestPdLog()
+      if (!path) return
+      let log = ''
+      try {
+        log = await readTail(path, PD_LOG_TAIL_BYTES)
+      } catch {
+        return
+      }
+      const deaths = parseDeaths(log)
+
+      // First run → seed baseline (mark current deaths seen), don't announce the backlog.
+      if (!s.baselined) {
+        const seed = [...new Set(deaths.map((d) => d.sig))].slice(-SEEN_CAP)
+        writeDeathSchedule(id, { ...readDeathSchedule(id), baselined: true, seen: seed })
+        return
+      }
+
+      const seen = new Set(s.seen)
+      const fresh = deaths.filter((d) => !seen.has(d.sig))
+      if (!fresh.length) return
+
+      const rcon = getRconConfig(id)
+      if (!rcon) return
+      let lastMsg = ''
+      for (const d of fresh) {
+        const sent = await sendViaRcon(rcon, renderDeath(d, s.templates, s.prefix))
+        if (sent) lastMsg = sent
+        seen.add(d.sig)
+      }
+      const cur = readDeathSchedule(id)
+      writeDeathSchedule(id, {
+        ...cur,
+        seen: [...seen].slice(-SEEN_CAP),
+        lastAt: new Date().toISOString(),
+        lastMessage: lastMsg || cur.lastMessage,
+      })
+    })
+  } catch {
+    /* best-effort — never let a death tick throw kill the interval */
+  } finally {
+    running.set(id, false)
+  }
+}
+
+let started = false
+
+// Ticks faster than the broadcast scheduler (deaths are momentary; a minute-late "X died" reads
+// oddly). Reading a 256KB log tail every 20s is cheap. Started once from instrumentation.
+export function startDeathAnnouncer(): void {
+  if (started) return
+  started = true
+  setInterval(() => {
+    void (async () => {
+      for (const inst of listInstances()) {
+        const s = readDeathSchedule(inst.id)
+        if (s.enabled) await runDeath(inst.id)
+      }
+    })()
+  }, 20_000)
+}

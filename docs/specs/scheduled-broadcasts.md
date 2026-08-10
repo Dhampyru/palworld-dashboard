@@ -39,6 +39,30 @@ Event-driven, independent of the interval rotation. When a new player joins, bro
 - Runs every tick regardless of the interval (a join can arrive any minute); a per-id
   `welcoming` guard prevents overlap. Same RCON send path as the rotation (`sendViaRcon`).
 
+## Death announcements (witty, cause-aware — same broadcast family)
+Separate module (`lib/death-announce.ts` + `app/api/death-announce` + a **Death announcements**
+card on the Chat tab), but the same in-process, per-instance, signature-dedup, baseline-on-enable
+model.
+- **Source:** PalDefender already logs every player death WITH CAUSE (`logPlayerDeaths`, on by
+  default here) to its own rotating `Pal/Binaries/Win64/PalDefender/Logs/<session>.log` — e.g.
+  `[HH:MM:SS][info] 'Name' (UserId=…, IP=…) died to extreme body temperature.`. The announcer
+  tails the NEWEST such log (resolved by mtime), reads a bounded 256KB tail.
+- **Classify:** `DEATH_LINE_RE` extracts (ts, victim, phrase); `classify()` buckets the phrase
+  into 8 causes and pulls the killer/Pal name where present:
+  `attacked by a wild {pal} and died` → **wildPal** (the "cut down by a Bushi" case),
+  `has been killed by {killer}` → **killedBy**, `got killed by {a} [and {b}] in a tower boss
+  battle` → **towerBoss**, plus **temperature/poison/explosion/noAttacker/unknown**. (Vocabulary
+  taken from the PalDefender binary's death format strings.)
+- **Wording:** operator-editable witty templates per cause (multiple lines → one random pick),
+  with `{name}`/`{killer}`/`{pal}` placeholders. Built-in `DEFAULT_TEMPLATES` ship the wit;
+  a category cleared in the UI falls back to its default. Sent via the same `pgbroadcast`/
+  `Broadcast` path.
+- **Keep PalDefender's own `announcePlayerDeaths` OFF** so the wording isn't duplicated — the
+  dashboard owns it.
+- **Cadence:** ticks every 20s (faster than the 60s broadcast loop — a minute-late death message
+  reads oddly). No Test action (deaths are real events; nothing safe to synthesize).
+- Baseline seeds `seen` from the current log on first enable, so past deaths aren't announced.
+
 ## Pieces
 - `lib/broadcast-schedule.ts` — schedule read/write, `runBroadcast`, `startBroadcastScheduler`.
 - `app/api/broadcast-schedule/route.ts` — admin-only, instance-scoped GET/POST(save|test).

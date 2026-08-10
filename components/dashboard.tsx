@@ -27,6 +27,7 @@ import {
   SettingsCard
 } from '@/components/server-control-cards'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { ReorderableCards, type OverviewCard } from '@/components/reorderable-cards'
 import { useServer } from '@/lib/server-context'
 
 const ACTIVE_TAB_STORAGE_KEY = 'activeDashboardTab'
@@ -140,21 +141,24 @@ export function Dashboard() {
                           <MetricsCard />
                         </div>
 
-                        {/* Top row: live feeds, kept tall (feeds have no intrinsic height). */}
-                        <div className="grid gap-4 [grid-auto-rows:1fr] md:grid-cols-2 xl:grid-cols-3">
-                          <BanManagementCard />
-                          <ConsolePanel />
-                          <ChatPanel />
-                        </div>
-
-                        {/* Bottom row: config/controls sized to their own content — lines
-                            up with the Announcements card (Config Snapshot JSON flexes). */}
-                        <div className="mt-4 grid gap-4 [grid-auto-rows:1fr] md:grid-cols-2 xl:grid-cols-3">
-                          <SettingsCard />
-                          <ServerManagementCard />
-                          <AnnouncementCard />
-                          <EnabledModsCard />
-                        </div>
+                        {/* Reorderable Overview grid (2026-08-10): one unified grid, drag any
+                            card by its grip handle to reorder; order persists per instance.
+                            Default order preserves the old two-row split (live feeds, then
+                            config/controls). */}
+                        <ReorderableCards
+                          storageKey={`overviewCardOrder:${activeInstanceId ?? 'default'}`}
+                          cards={
+                            [
+                              { id: 'ban', node: <BanManagementCard /> },
+                              { id: 'console', node: <ConsolePanel /> },
+                              { id: 'chat', node: <ChatPanel /> },
+                              { id: 'settings', node: <SettingsCard /> },
+                              { id: 'server', node: <ServerManagementCard /> },
+                              { id: 'announcements', node: <AnnouncementCard /> },
+                              { id: 'mods', node: <EnabledModsCard /> },
+                            ] satisfies OverviewCard[]
+                          }
+                        />
                       </div>
                     </ScrollArea>
                   </div>
