@@ -10,6 +10,8 @@ import { HUDCornerFrame } from '@/components/hud-corner-frame'
 import { LiveMap } from '@/components/live-map'
 import { ModsWorkspace } from '@/components/mods-workspace'
 import { EnabledModsCard } from '@/components/enabled-mods-card'
+import { ScheduledBroadcastsCard } from '@/components/scheduled-broadcasts-card'
+import { DeathAnnounceCard } from '@/components/death-announce-card'
 import { RestartAutomationChip } from '@/components/restart-automation-chip'
 import { WorldSettingsPanel } from '@/components/world-settings-panel'
 import { RconConsoleModal } from '@/components/rcon-console-modal'
@@ -156,6 +158,8 @@ export function Dashboard() {
                               { id: 'server', node: <ServerManagementCard /> },
                               { id: 'announcements', node: <AnnouncementCard /> },
                               { id: 'mods', node: <EnabledModsCard /> },
+                              { id: 'broadcasts', node: <ScheduledBroadcastsCard /> },
+                              { id: 'deaths', node: <DeathAnnounceCard /> },
                             ] satisfies OverviewCard[]
                           }
                         />

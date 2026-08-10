@@ -7,7 +7,8 @@ import { buildPalworldProxyHeaders } from '@/lib/palworld'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import { ChevronDownIcon, ChevronRightIcon, SkullIcon, RotateCcwIcon } from 'lucide-react'
+import { PanelSection } from '@/components/server-control-cards'
+import { RotateCcwIcon } from 'lucide-react'
 
 // PATCH (not upstream): witty player-death announcements (docs/specs/scheduled-broadcasts.md).
 // PalDefender logs deaths with cause; the dashboard tails that log and broadcasts an editable
@@ -36,8 +37,6 @@ type Schedule = {
 
 export function DeathAnnounceCard() {
   const { config } = useServer()
-  const [open, setOpen] = useState(false)
-  const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
   const [enabled, setEnabled] = useState(false)
   const [prefix, setPrefix] = useState('')
@@ -74,14 +73,13 @@ export function DeathAnnounceCard() {
       if (r.ok && j.defaults) setDefaults(j.defaults as Record<string, string[]>)
     } catch {
       /* leave defaults */
-    } finally {
-      setLoaded(true)
     }
   }, [config, headers])
 
+  // Own always-open card now (was a collapsible) — load on mount / when the server changes.
   useEffect(() => {
-    if (open && !loaded) void load()
-  }, [open, loaded, load])
+    void load()
+  }, [load])
 
   const save = useCallback(async () => {
     if (!config) return
@@ -122,16 +120,8 @@ export function DeathAnnounceCard() {
   if (config?.accessTier !== 'admin') return null
 
   return (
-    <div className="shrink-0 rounded-md border border-border/60 bg-card/40">
-      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm">
-        {open ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
-        <SkullIcon className="size-4 text-primary" />
-        <span className="font-medium">Death announcements</span>
-        <span className="ml-auto text-[11px] text-muted-foreground">{enabled ? 'on' : 'off'}</span>
-      </button>
-
-      {open && (
-        <div className="flex flex-col gap-3 border-t border-border/50 p-3">
+    <PanelSection title="Death Announcements" subtitle="RIP Feed" status={enabled ? 'active' : 'complete'}>
+        <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-4">
             <label className="flex items-center gap-2 text-sm">
               <Switch checked={enabled} onCheckedChange={setEnabled} />
@@ -179,7 +169,6 @@ export function DeathAnnounceCard() {
             </p>
           )}
         </div>
-      )}
-    </div>
+    </PanelSection>
   )
 }

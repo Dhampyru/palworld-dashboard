@@ -7,7 +7,8 @@ import { buildPalworldProxyHeaders } from '@/lib/palworld'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import { ChevronDownIcon, ChevronRightIcon, MegaphoneIcon, SendIcon } from 'lucide-react'
+import { PanelSection } from '@/components/server-control-cards'
+import { SendIcon } from 'lucide-react'
 
 // PATCH (not upstream): scheduled/recurring broadcasts (docs/specs/scheduled-broadcasts.md).
 // Cycles through a message list on an interval via RCON (pgbroadcast when PalDefender is on,
@@ -29,8 +30,6 @@ type Schedule = {
 
 export function ScheduledBroadcastsCard() {
   const { config } = useServer()
-  const [open, setOpen] = useState(false)
-  const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState<null | 'save' | 'test'>(null)
   const [enabled, setEnabled] = useState(false)
   const [interval, setIntervalMin] = useState(15)
@@ -70,14 +69,13 @@ export function ScheduledBroadcastsCard() {
       if (r.ok && j.schedule) apply(j.schedule as Schedule)
     } catch {
       /* leave defaults */
-    } finally {
-      setLoaded(true)
     }
   }, [config, headers])
 
+  // Own always-open card now (was a collapsible) — load on mount / when the server changes.
   useEffect(() => {
-    if (open && !loaded) void load()
-  }, [open, loaded, load])
+    void load()
+  }, [load])
 
   const settings = () => ({
     enabled,
@@ -123,26 +121,10 @@ export function ScheduledBroadcastsCard() {
   // Admin-only surface.
   if (config?.accessTier !== 'admin') return null
   const count = messagesText.split('\n').filter((m) => m.trim()).length
-  const welcomeCount = welcomeText.split('\n').filter((m) => m.trim()).length
-  const summary =
-    [enabled ? `every ${interval}m · ${count} msg${count === 1 ? '' : 's'}` : null, welcomeEnabled && welcomeCount ? 'welcome on' : null]
-      .filter(Boolean)
-      .join(' · ') || 'off'
 
   return (
-    <div className="shrink-0 rounded-md border border-border/60 bg-card/40">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm"
-      >
-        {open ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
-        <MegaphoneIcon className="size-4 text-primary" />
-        <span className="font-medium">Scheduled broadcasts</span>
-        <span className="ml-auto text-[11px] text-muted-foreground">{summary}</span>
-      </button>
-
-      {open && (
-        <div className="flex flex-col gap-3 border-t border-border/50 p-3">
+    <PanelSection title="Scheduled Broadcasts" subtitle="Auto Messages" status={enabled ? 'active' : 'complete'}>
+        <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-4">
             <label className="flex items-center gap-2 text-sm">
               <Switch checked={enabled} onCheckedChange={setEnabled} />
@@ -236,7 +218,6 @@ export function ScheduledBroadcastsCard() {
             </p>
           )}
         </div>
-      )}
-    </div>
+    </PanelSection>
   )
 }

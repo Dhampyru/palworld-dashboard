@@ -98,7 +98,10 @@ export function ReorderableCards({
   const byId = new Map(cards.map((c) => [c.id, c.node]))
 
   return (
-    <div className={cn('grid gap-4 [grid-auto-rows:1fr] md:grid-cols-2 xl:grid-cols-3', className)}>
+    // items-start + content-sized rows (no grid-auto-rows:1fr): expanding a collapsible card
+    // grows ONLY that card. With equal-height rows, one card expanding stretched every card in
+    // the grid (chat/logs included). Cards keep their own min-heights, so feeds stay tall.
+    <div className={cn('grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3', className)}>
       {order.map((id) => {
         const node = byId.get(id)
         if (!node) return null

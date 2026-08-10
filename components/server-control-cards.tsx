@@ -29,8 +29,6 @@ import {
   SearchIcon,
   DownloadCloudIcon
 } from 'lucide-react'
-import { ScheduledBroadcastsCard } from '@/components/scheduled-broadcasts-card'
-import { DeathAnnounceCard } from '@/components/death-announce-card'
 
 // The visible window is the sampler's (FPS_WINDOW_MINUTES), delivered per-snapshot
 // as `windowMs` and passed into the chart as a prop — no hardcoded window here.
@@ -255,11 +253,6 @@ export function AnnouncementCard() {
             ))}
           </div>
         </div>
-
-        {/* Automated broadcast tooling — moved here from the Chat card (2026-08-10): these
-            belong with the Broadcast Channel, not the live chat feed. */}
-        <ScheduledBroadcastsCard />
-        <DeathAnnounceCard />
     </PanelSection>
   )
 }

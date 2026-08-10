@@ -5,6 +5,7 @@ import { promisify } from 'node:util'
 import { classifyPassword } from '@/lib/access-tier'
 import { getAnnounceEchoes, recordAnnounceEcho } from '@/lib/announce-echo'
 import { chatLogFile, readChatLog } from '@/lib/chat-source'
+import { readPalDefenderChatEvents } from '@/lib/paldefender-log'
 import { DEMO_MODE } from '@/lib/demo-mode'
 import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
@@ -91,7 +92,18 @@ async function getChat(request: NextRequest) {
     m = LEAVE_RE.exec(line)
     if (m) { events.push({ type: 'leave', ts: m[1]!, name: m[2]!.trim() }) }
   }
-  const merged = [...events, ...getAnnounceEchoes()].sort((a, b) => a.ts.localeCompare(b.ts))
+  // On a PalDefender server the game emits no `[CHAT]` to console.log — PalDefender captures
+  // player chat/join/leave into its own log instead. Merge those so player chat shows.
+  const pdEvents = await readPalDefenderChatEvents().catch(() => [] as ChatEvent[])
+
+  // PalDefender stamps time-only (HH:MM:SS); echoes use ISO. Sort/dedup on the time-of-day so
+  // both sources interleave correctly (same day, same clock).
+  const timeKey = (ts: string) => ts.match(/\d\d:\d\d:\d\d/)?.[0] ?? ts
+  const dedup = new Map<string, ChatEvent>()
+  for (const e of [...events, ...pdEvents, ...getAnnounceEchoes()]) {
+    dedup.set(`${e.type}|${timeKey(e.ts)}|${e.name}|${e.text ?? ''}`, e)
+  }
+  const merged = [...dedup.values()].sort((a, b) => timeKey(a.ts).localeCompare(timeKey(b.ts)))
   return NextResponse.json({ events: merged.slice(-120) })
 }
 

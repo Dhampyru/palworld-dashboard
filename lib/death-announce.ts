@@ -213,12 +213,30 @@ const DEATH_LINE_RE = /^\[([^\]]+)\]\[info\]\s+'([^']+)'\s+\(UserId=[^)]*\)\s+(.
 
 type ParsedDeath = { sig: string; name: string; cause: DeathCause; killer?: string; pal?: string }
 
+// Names appear quoted with an internal id in the real log: 'Sheepball' (ID: Sheepball). Strip the
+// quotes + (ID: …) and normalise a multi-killer "and" join. NOTE: Pal names are the game's
+// INTERNAL names — Lamball logs as "Sheepball", Cattiva as "PinkCat", etc. A friendly-name map
+// would need an operator-supplied Pal dataset (clean-room: we ship none), so {pal} shows the
+// internal name until data/pals.json is populated (see the internal-name follow-up).
+function cleanNames(s: string): string {
+  return s
+    .replace(/\(ID:[^)]*\)/gi, '')
+    .replace(/'/g, '')
+    .replace(/\s+and\s+/gi, ' & ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Match the real PalDefender phrasings, which wrap names in quotes+(ID:…) and add "was "/"has
+// been " prefixes the base format strings don't show. Regexes are unanchored + tolerant.
 function classify(phrase: string): { cause: DeathCause; killer?: string; pal?: string } | null {
   let m: RegExpExecArray | null
-  if ((m = /^attacked by a wild (.+?) and died$/i.exec(phrase))) return { cause: 'wildPal', pal: m[1]!.trim() }
-  if ((m = /got killed by (.+?) in a tower boss battle$/i.exec(phrase)))
-    return { cause: 'towerBoss', killer: m[1]!.replace(/\s+and\s+/gi, ' & ').trim() }
-  if ((m = /^has been killed by (.+)$/i.exec(phrase))) return { cause: 'killedBy', killer: m[1]!.trim() }
+  // "(was) attacked by a wild 'Pal' (ID: Pal) and died"
+  if ((m = /attacked by a wild (.+?) and died/i.exec(phrase))) return { cause: 'wildPal', pal: cleanNames(m[1]!) }
+  // "(got) killed by X [and Y] in a tower boss battle"
+  if ((m = /killed by (.+?) in a tower boss battle/i.exec(phrase))) return { cause: 'towerBoss', killer: cleanNames(m[1]!) }
+  // "(has been|was) killed by X" — but NOT "killed from an unknown attack"
+  if (!/unknown/i.test(phrase) && (m = /killed by (.+?)\.?\s*$/i.exec(phrase))) return { cause: 'killedBy', killer: cleanNames(m[1]!) }
   if (/extreme body temperature/i.test(phrase)) return { cause: 'temperature' }
   if (/poison/i.test(phrase)) return { cause: 'poison' }
   if (/with a bang/i.test(phrase)) return { cause: 'explosion' }
