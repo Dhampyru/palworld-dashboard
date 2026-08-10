@@ -21,6 +21,10 @@ type Schedule = {
   lastStatus: 'ok' | 'skipped-empty' | 'error' | null
   lastMessage: string | null
   lastCheckAt: string | null
+  welcomeEnabled: boolean
+  welcomeMessages: string[]
+  welcomeLastMessage: string | null
+  welcomeLastAt: string | null
 }
 
 export function ScheduledBroadcastsCard() {
@@ -33,7 +37,10 @@ export function ScheduledBroadcastsCard() {
   const [messagesText, setMessagesText] = useState('')
   const [prefix, setPrefix] = useState('')
   const [skipWhenEmpty, setSkipWhenEmpty] = useState(true)
+  const [welcomeEnabled, setWelcomeEnabled] = useState(false)
+  const [welcomeText, setWelcomeText] = useState('')
   const [status, setStatus] = useState<Pick<Schedule, 'lastStatus' | 'lastMessage' | 'lastCheckAt'> | null>(null)
+  const [welcomeStatus, setWelcomeStatus] = useState<Pick<Schedule, 'welcomeLastMessage' | 'welcomeLastAt'> | null>(null)
 
   const headers = useCallback(
     (json = false) => ({
@@ -49,7 +56,10 @@ export function ScheduledBroadcastsCard() {
     setMessagesText((s.messages ?? []).join('\n'))
     setPrefix(s.prefix ?? '')
     setSkipWhenEmpty(s.skipWhenEmpty)
+    setWelcomeEnabled(s.welcomeEnabled ?? false)
+    setWelcomeText((s.welcomeMessages ?? []).join('\n'))
     setStatus({ lastStatus: s.lastStatus, lastMessage: s.lastMessage, lastCheckAt: s.lastCheckAt })
+    setWelcomeStatus({ welcomeLastMessage: s.welcomeLastMessage, welcomeLastAt: s.welcomeLastAt })
   }
 
   const load = useCallback(async () => {
@@ -75,6 +85,8 @@ export function ScheduledBroadcastsCard() {
     messages: messagesText.split('\n').map((m) => m.trim()).filter(Boolean),
     prefix,
     skipWhenEmpty,
+    welcomeEnabled,
+    welcomeMessages: welcomeText.split('\n').map((m) => m.trim()).filter(Boolean),
   })
 
   const post = useCallback(
@@ -105,12 +117,17 @@ export function ScheduledBroadcastsCard() {
         setBusy(null)
       }
     },
-    [config, headers, enabled, interval, messagesText, prefix, skipWhenEmpty],
+    [config, headers, enabled, interval, messagesText, prefix, skipWhenEmpty, welcomeEnabled, welcomeText],
   )
 
   // Admin-only surface.
   if (config?.accessTier !== 'admin') return null
   const count = messagesText.split('\n').filter((m) => m.trim()).length
+  const welcomeCount = welcomeText.split('\n').filter((m) => m.trim()).length
+  const summary =
+    [enabled ? `every ${interval}m · ${count} msg${count === 1 ? '' : 's'}` : null, welcomeEnabled && welcomeCount ? 'welcome on' : null]
+      .filter(Boolean)
+      .join(' · ') || 'off'
 
   return (
     <div className="shrink-0 rounded-md border border-border/60 bg-card/40">
@@ -121,9 +138,7 @@ export function ScheduledBroadcastsCard() {
         {open ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
         <MegaphoneIcon className="size-4 text-primary" />
         <span className="font-medium">Scheduled broadcasts</span>
-        <span className="ml-auto text-[11px] text-muted-foreground">
-          {enabled ? `every ${interval}m · ${count} msg${count === 1 ? '' : 's'}` : 'off'}
-        </span>
+        <span className="ml-auto text-[11px] text-muted-foreground">{summary}</span>
       </button>
 
       {open && (
@@ -168,6 +183,30 @@ export function ScheduledBroadcastsCard() {
             <span className="shrink-0 text-xs text-muted-foreground">Prefix (optional)</span>
             <Input value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="[Server]" className="h-8 max-w-[12rem]" />
           </label>
+
+          {/* On-join welcome — event-driven, separate from the interval rotation. */}
+          <div className="flex flex-col gap-2 rounded-md border border-border/50 bg-muted/10 p-2.5">
+            <label className="flex items-center gap-2 text-sm">
+              <Switch checked={welcomeEnabled} onCheckedChange={setWelcomeEnabled} />
+              Welcome new players on join
+            </label>
+            <textarea
+              value={welcomeText}
+              onChange={(e) => setWelcomeText(e.target.value)}
+              rows={3}
+              placeholder={'Welcome, {name}!\nType /help for commands'}
+              className="w-full resize-y rounded-md border bg-muted/20 p-2 font-mono text-xs"
+            />
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              Broadcast to everyone in order when a player joins. Use <code>{'{name}'}</code> for the joining
+              player&apos;s name. Enabling starts fresh — already-connected players aren&apos;t welcomed.
+            </p>
+            {welcomeStatus?.welcomeLastMessage && (
+              <p className="text-[11px] break-words text-emerald-600 dark:text-emerald-400" title={welcomeStatus.welcomeLastAt ?? ''}>
+                Last welcome: {welcomeStatus.welcomeLastMessage}
+              </p>
+            )}
+          </div>
 
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             Sent via <code>pgbroadcast</code> (PalDefender — supports spaces) when available, else vanilla{' '}
