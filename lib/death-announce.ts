@@ -11,6 +11,7 @@ import { Buffer } from 'node:buffer'
 import { dirname, join } from 'node:path'
 import { getRconConfig, runRcon } from '@/lib/rcon-exec'
 import { readPalDefenderState } from '@/lib/game-mods'
+import { friendlyPalName } from '@/lib/pal-names'
 import { DEFAULT_INSTANCE_ID, currentGameDir, listInstances, runWithInstance } from '@/lib/instances'
 
 // Cause categories we classify PalDefender's death phrasings into. {name} = victim everywhere;
@@ -310,6 +311,11 @@ async function runDeath(id: string): Promise<void> {
       if (!rcon) return
       let lastMsg = ''
       for (const d of fresh) {
+        // Map the game's internal names to friendly ones (Sheepball → Lamball) when the operator
+        // has a Pal dataset; no-ops to the internal name otherwise. Single-killer only — a
+        // "X & Y" tower join isn't a lookup key.
+        if (d.pal) d.pal = await friendlyPalName(d.pal)
+        if (d.killer && !d.killer.includes('&')) d.killer = await friendlyPalName(d.killer)
         const sent = await sendViaRcon(rcon, renderDeath(d, s.templates, s.prefix))
         if (sent) lastMsg = sent
         seen.add(d.sig)
