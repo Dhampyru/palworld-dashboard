@@ -4,6 +4,7 @@ import 'nextra-theme-docs/style.css'
 import './globals.css'
 import { AppProviders } from './providers'
 import { CircuitBackground } from '@/components/circuit-background'
+import { Toaster } from '@/components/ui/sonner'
 
 const geistSans = Geist({
   subsets: ['latin'],
@@ -56,6 +57,14 @@ export default function RootLayout({
             {children}
           </AppProviders>
         </div>
+        {/* Toaster lives OUTSIDE the z-10 wrapper (its own stacking context) so toasts render
+            above Sheets/Dialogs that portal to <body> at z-50 — inside the wrapper they were
+            trapped below those overlays. */}
+        <Toaster
+          position="top-right"
+          theme="dark"
+          className="z-[100] !bottom-20 !top-auto !left-1/2 !-translate-x-1/2 sm:!top-4 sm:!right-4 sm:!bottom-auto sm:!left-auto sm:!translate-x-0"
+        />
       </body>
     </html>
   )
