@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PanelSection } from '@/components/server-control-cards'
+import { ScheduledBroadcastsCard } from '@/components/scheduled-broadcasts-card'
 import { useServer } from '@/lib/server-context'
 import {
   PALWORLD_PROXY_HEADERS,
@@ -281,6 +282,7 @@ export function ChatPanel() {
           <span className="hidden sm:inline">Send</span>
         </Button>
       </form>
+      <ScheduledBroadcastsCard />
       {confirmDialog}
     </PanelSection>
   )

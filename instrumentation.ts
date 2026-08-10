@@ -8,5 +8,7 @@ export async function register() {
     startBackupScheduler()
     const { startAutoRestartMonitor } = await import('@/lib/auto-restart')
     startAutoRestartMonitor()
+    const { startBroadcastScheduler } = await import('@/lib/broadcast-schedule')
+    startBroadcastScheduler()
   }
 }
