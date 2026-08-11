@@ -287,6 +287,54 @@ async function loadPalMessages(): Promise<Map<string, string[]>> {
   return m
 }
 
+// Raw per-pal file text for the editor — pretty-printed if valid JSON, '{}' when absent.
+export async function readPalMessagesRaw(): Promise<string> {
+  try {
+    const raw = await readFile(PAL_MESSAGES_FILE, 'utf8')
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2)
+    } catch {
+      return raw // keep a syntactically-broken file visible so the operator can fix it
+    }
+  } catch {
+    return '{}'
+  }
+}
+
+// Validate + write the per-pal file (atomic temp+rename). Throws on invalid structure. Returns
+// a small summary and clears the in-process cache so the next tick reloads. Shape:
+// { "<friendly Pal name>": ["{name} …", …] }.
+export function writePalMessages(text: string): { pals: number; lines: number } {
+  let obj: unknown
+  try {
+    obj = JSON.parse(text)
+  } catch (e) {
+    throw new Error(`Invalid JSON: ${e instanceof Error ? e.message : 'parse error'}`)
+  }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+    throw new Error('Top level must be an object of "Pal name": ["line", …]')
+  }
+  const clean: Record<string, string[]> = {}
+  let lines = 0
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    if (!Array.isArray(v)) throw new Error(`"${k}" must be an array of strings`)
+    const arr = v
+      .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      .map((x) => x.trim().slice(0, MAX_TEMPLATE_LEN))
+      .slice(0, MAX_TEMPLATES_PER_CAUSE)
+    if (arr.length) {
+      clean[k] = arr
+      lines += arr.length
+    }
+  }
+  mkdirSync(dirname(PAL_MESSAGES_FILE), { recursive: true })
+  const tmp = `${PAL_MESSAGES_FILE}.tmp`
+  writeFileSync(tmp, JSON.stringify(clean, null, 2), { mode: 0o600 })
+  renameSync(tmp, PAL_MESSAGES_FILE)
+  palMsgCache = null
+  return { pals: Object.keys(clean).length, lines }
+}
+
 // Pick a template for the cause and fill placeholders. `pick` is injectable for testing; a
 // per-pal override map (from loadPalMessages) supplies pal-specific wildPal lines when present.
 export function renderDeath(

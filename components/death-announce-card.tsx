@@ -7,8 +7,9 @@ import { buildPalworldProxyHeaders } from '@/lib/palworld'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { PanelSection } from '@/components/server-control-cards'
-import { RotateCcwIcon } from 'lucide-react'
+import { RotateCcwIcon, PencilIcon, SaveIcon } from 'lucide-react'
 
 // PATCH (not upstream): witty player-death announcements (docs/specs/scheduled-broadcasts.md).
 // PalDefender logs deaths with cause; the dashboard tails that log and broadcasts an editable
@@ -43,6 +44,11 @@ export function DeathAnnounceCard() {
   const [text, setText] = useState<Record<string, string>>({})
   const [defaults, setDefaults] = useState<Record<string, string[]>>({})
   const [status, setStatus] = useState<Pick<Schedule, 'lastMessage' | 'lastAt'> | null>(null)
+  // Per-Pal JSON editor (data/death-pal-messages.json).
+  const [palOpen, setPalOpen] = useState(false)
+  const [palText, setPalText] = useState('')
+  const [palBusy, setPalBusy] = useState<null | 'load' | 'save'>(null)
+  const [palDirty, setPalDirty] = useState(false)
 
   const headers = useCallback(
     (json = false) => ({
@@ -117,6 +123,50 @@ export function DeathAnnounceCard() {
     toast.message('Defaults restored — Save to apply')
   }
 
+  const openPalEditor = useCallback(async () => {
+    if (!config) return
+    setPalOpen(true)
+    setPalBusy('load')
+    try {
+      const r = await fetch('/api/death-announce', {
+        method: 'POST',
+        headers: headers(true),
+        body: JSON.stringify({ action: 'loadPalMessages' }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error ?? 'Failed to load')
+      setPalText(typeof j.raw === 'string' ? j.raw : '{}')
+      setPalDirty(false)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load')
+      setPalText('{}')
+    } finally {
+      setPalBusy(null)
+    }
+  }, [config, headers])
+
+  const savePalMessages = useCallback(async () => {
+    if (!config) return
+    setPalBusy('save')
+    const toastId = toast.loading('Saving per-Pal messages…')
+    try {
+      const r = await fetch('/api/death-announce', {
+        method: 'POST',
+        headers: headers(true),
+        body: JSON.stringify({ action: 'savePalMessages', raw: palText }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error ?? 'Failed to save')
+      if (typeof j.raw === 'string') setPalText(j.raw)
+      setPalDirty(false)
+      toast.success(`Saved — ${j.pals} Pals, ${j.lines} lines`, { id: toastId })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save', { id: toastId })
+    } finally {
+      setPalBusy(null)
+    }
+  }, [config, headers, palText])
+
   if (config?.accessTier !== 'admin') return null
 
   return (
@@ -160,9 +210,12 @@ export function DeathAnnounceCard() {
             ))}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" onClick={() => void save()} disabled={busy}>
               {busy ? 'Saving…' : 'Save'}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void openPalEditor()} className="gap-1.5">
+              <PencilIcon className="size-3.5" /> Edit per-Pal JSON
             </Button>
           </div>
           {status?.lastMessage && (
@@ -171,6 +224,38 @@ export function DeathAnnounceCard() {
             </p>
           )}
         </div>
+
+        <Sheet open={palOpen} onOpenChange={(o) => !o && palBusy !== 'save' && setPalOpen(false)}>
+          <SheetContent side="right" className="flex w-full flex-col gap-3 sm:max-w-2xl">
+            <SheetHeader>
+              <SheetTitle>Per-Pal death messages</SheetTitle>
+            </SheetHeader>
+            <p className="text-xs text-muted-foreground">
+              JSON map of <code>&quot;Friendly Pal Name&quot;: [&quot;line&quot;, …]</code>. Used for wild-Pal deaths when the
+              killing Pal is listed; others fall back to the generic &ldquo;wild Pal&rdquo; lines. Use <code>{'{name}'}</code>{' '}
+              for the victim. Validated on save; effective on the next death.
+            </p>
+            <textarea
+              value={palText}
+              onChange={(e) => {
+                setPalText(e.target.value)
+                setPalDirty(true)
+              }}
+              spellCheck={false}
+              disabled={palBusy === 'load'}
+              placeholder={palBusy === 'load' ? 'Loading…' : '{\n  "Lamball": ["{name} was rolled by a fluffy Lamball."]\n}'}
+              className="min-h-0 flex-1 rounded-md border bg-muted/20 p-3 font-mono text-xs"
+            />
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={() => void savePalMessages()} disabled={palBusy !== null || !palDirty} className="gap-1.5">
+                <SaveIcon className="size-3.5" /> {palBusy === 'save' ? 'Saving…' : 'Save'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setPalOpen(false)} disabled={palBusy === 'save'}>
+                Close
+              </Button>
+            </div>
+          </SheetContent>
+        </Sheet>
     </PanelSection>
   )
 }

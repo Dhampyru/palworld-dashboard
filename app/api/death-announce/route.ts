@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { classifyPassword, tierForClass } from '@/lib/access-tier'
 import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
-import { DEFAULT_TEMPLATES, readDeathSchedule, saveDeathSettings, type DeathSchedule } from '@/lib/death-announce'
+import {
+  DEFAULT_TEMPLATES,
+  readDeathSchedule,
+  readPalMessagesRaw,
+  saveDeathSettings,
+  writePalMessages,
+  type DeathSchedule,
+} from '@/lib/death-announce'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -38,7 +45,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const denied = requireAdmin(request)
   if (denied) return denied
-  let body: { action?: unknown; settings?: Partial<DeathSchedule> }
+  let body: { action?: unknown; settings?: Partial<DeathSchedule>; raw?: unknown }
   try {
     body = (await request.json()) as typeof body
   } catch {
@@ -46,6 +53,19 @@ export async function POST(request: NextRequest) {
   }
   if (body.action === 'save') {
     return NextResponse.json({ schedule: saveDeathSettings(instanceOf(request), body.settings ?? {}) })
+  }
+  // Per-Pal message file (shared across instances): load raw for the editor, or validate+save.
+  if (body.action === 'loadPalMessages') {
+    return NextResponse.json({ raw: await readPalMessagesRaw() })
+  }
+  if (body.action === 'savePalMessages') {
+    if (typeof body.raw !== 'string') return NextResponse.json({ error: 'Missing JSON body' }, { status: 400 })
+    try {
+      const summary = writePalMessages(body.raw)
+      return NextResponse.json({ ok: true, ...summary, raw: await readPalMessagesRaw() })
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : 'Invalid content' }, { status: 400 })
+    }
   }
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
 }
