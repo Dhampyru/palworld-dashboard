@@ -21,8 +21,11 @@ async function loadMap(): Promise<Map<string, string>> {
     const arr = JSON.parse(raw) as { id?: unknown; name?: unknown }[]
     if (Array.isArray(arr)) {
       for (const p of arr) {
-        if (typeof p?.id === 'string' && typeof p?.name === 'string' && p.name && p.name !== 'en_text') {
-          m.set(p.id.toLowerCase(), p.name)
+        // Trim: some dataset names carry a stray trailing space (e.g. "Tetroise ") that would
+        // otherwise break the per-pal message lookup.
+        const name = typeof p?.name === 'string' ? p.name.trim() : ''
+        if (typeof p?.id === 'string' && name && name !== 'en_text') {
+          m.set(p.id.toLowerCase(), name)
         }
       }
     }

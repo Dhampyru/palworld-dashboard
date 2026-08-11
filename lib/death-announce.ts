@@ -266,7 +266,7 @@ function parseDeaths(log: string): ParsedDeath[] {
 // When the killing Pal has its own lines they win over the generic wildPal templates; keyed
 // lowercased since names are matched after friendlyPalName(). Clean-room: shipped empty/absent.
 const PAL_MESSAGES_FILE = join(process.env.DASHBOARD_DATA_DIR ?? './data', 'death-pal-messages.json')
-const ELEMENTAL_SUFFIX = / (noct|cryst|ignis|terra|lux|aqua)$/
+const ELEMENTAL_SUFFIX = / (noct|cryst|ignis|terra|lux|aqua|botan|gild|ryu|primo)$/
 let palMsgCache: Map<string, string[]> | null = null
 
 async function loadPalMessages(): Promise<Map<string, string[]>> {
@@ -277,7 +277,7 @@ async function loadPalMessages(): Promise<Map<string, string[]>> {
     for (const [k, v] of Object.entries(obj)) {
       if (Array.isArray(v)) {
         const lines = v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map((x) => x.trim().slice(0, MAX_TEMPLATE_LEN))
-        if (lines.length) m.set(k.toLowerCase(), lines)
+        if (lines.length) m.set(k.trim().toLowerCase(), lines)
       }
     }
   } catch {
