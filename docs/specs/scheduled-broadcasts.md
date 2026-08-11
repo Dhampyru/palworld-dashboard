@@ -57,6 +57,12 @@ model.
   with `{name}`/`{killer}`/`{pal}` placeholders. Built-in `DEFAULT_TEMPLATES` ship the wit;
   a category cleared in the UI falls back to its default. Sent via the same `pgbroadcast`/
   `Broadcast` path.
+- **Per-Pal overrides (optional):** `<DASHBOARD_DATA_DIR>/death-pal-messages.json`,
+  `{ "<friendly Pal name>": ["{name} …", …] }`. For a wild-Pal death, the killing Pal's own
+  lines win over the generic `wildPal` templates; keyed lowercased (matched after
+  `friendlyPalName()`), with an elemental-suffix strip (Noct/Cryst/Ignis/Terra/Lux/Aqua → base)
+  so variants share the base Pal's set. Clean-room: absent by default → generic lines. Friendly
+  names come from `friendlyPalName()` (lib/pal-names.ts, needs an operator Pal dataset).
 - **Keep PalDefender's own `announcePlayerDeaths` OFF** so the wording isn't duplicated — the
   dashboard owns it.
 - **Cadence:** ticks every 20s (faster than the 60s broadcast loop — a minute-late death message

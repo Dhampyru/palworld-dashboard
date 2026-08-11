@@ -139,6 +139,8 @@ export function DeathAnnounceCard() {
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             One witty line per row — a random one is picked per death. Deaths are read from
             PalDefender&apos;s own log (it must be running). Enabling starts fresh; past deaths aren&apos;t announced.
+            Per-Pal lines (a specific set per Pal) can be supplied in <code>data/death-pal-messages.json</code>
+            and take precedence over the generic &ldquo;wild Pal&rdquo; lines below.
           </p>
 
           <div className="flex flex-col gap-2.5">

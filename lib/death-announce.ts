@@ -261,14 +261,47 @@ function parseDeaths(log: string): ParsedDeath[] {
   return out
 }
 
-// Pick a template for the cause and fill placeholders. `pick` is injectable for testing.
+// Optional per-pal wild-Pal messages, operator-supplied at
+// <DASHBOARD_DATA_DIR>/death-pal-messages.json: { "<friendly Pal name>": ["{name} …", …] }.
+// When the killing Pal has its own lines they win over the generic wildPal templates; keyed
+// lowercased since names are matched after friendlyPalName(). Clean-room: shipped empty/absent.
+const PAL_MESSAGES_FILE = join(process.env.DASHBOARD_DATA_DIR ?? './data', 'death-pal-messages.json')
+const ELEMENTAL_SUFFIX = / (noct|cryst|ignis|terra|lux|aqua)$/
+let palMsgCache: Map<string, string[]> | null = null
+
+async function loadPalMessages(): Promise<Map<string, string[]>> {
+  if (palMsgCache) return palMsgCache
+  const m = new Map<string, string[]>()
+  try {
+    const obj = JSON.parse(await readFile(PAL_MESSAGES_FILE, 'utf8')) as Record<string, unknown>
+    for (const [k, v] of Object.entries(obj)) {
+      if (Array.isArray(v)) {
+        const lines = v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map((x) => x.trim().slice(0, MAX_TEMPLATE_LEN))
+        if (lines.length) m.set(k.toLowerCase(), lines)
+      }
+    }
+  } catch {
+    /* absent/unreadable → no per-pal overrides; wildPal uses the generic templates */
+  }
+  palMsgCache = m
+  return m
+}
+
+// Pick a template for the cause and fill placeholders. `pick` is injectable for testing; a
+// per-pal override map (from loadPalMessages) supplies pal-specific wildPal lines when present.
 export function renderDeath(
   d: ParsedDeath,
   templates: Record<DeathCause, string[]>,
   prefix: string,
   pick: (n: number) => number = (n) => Math.floor(Math.random() * n),
+  perPal?: Map<string, string[]>,
 ): string {
-  const list = templates[d.cause]?.length ? templates[d.cause] : DEFAULT_TEMPLATES[d.cause]
+  let list = templates[d.cause]?.length ? templates[d.cause] : DEFAULT_TEMPLATES[d.cause]
+  if (d.cause === 'wildPal' && d.pal && perPal && perPal.size) {
+    const k = d.pal.toLowerCase()
+    const palLines = perPal.get(k) ?? perPal.get(k.replace(ELEMENTAL_SUFFIX, ''))
+    if (palLines && palLines.length) list = palLines
+  }
   const tmpl = list[pick(list.length)] ?? list[0]!
   const body = tmpl
     .replace(/\{name\}/gi, d.name)
@@ -309,6 +342,7 @@ async function runDeath(id: string): Promise<void> {
 
       const rcon = getRconConfig(id)
       if (!rcon) return
+      const perPal = await loadPalMessages()
       let lastMsg = ''
       for (const d of fresh) {
         // Map the game's internal names to friendly ones (Sheepball → Lamball) when the operator
@@ -316,7 +350,7 @@ async function runDeath(id: string): Promise<void> {
         // "X & Y" tower join isn't a lookup key.
         if (d.pal) d.pal = await friendlyPalName(d.pal)
         if (d.killer && !d.killer.includes('&')) d.killer = await friendlyPalName(d.killer)
-        const sent = await sendViaRcon(rcon, renderDeath(d, s.templates, s.prefix))
+        const sent = await sendViaRcon(rcon, renderDeath(d, s.templates, s.prefix, undefined, perPal))
         if (sent) lastMsg = sent
         seen.add(d.sig)
       }

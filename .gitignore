@@ -56,3 +56,7 @@ game-server/mods/
 # Local-only preview harness (never commit)
 docker-compose.preview.yml
 mod_data/
+
+# Operator-supplied death-announcement content (clean-room: never shipped)
+deathchat/
+data/death-pal-messages.json
