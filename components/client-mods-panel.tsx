@@ -59,6 +59,7 @@ type ClientMod = {
   sizeBytes: number
   keep: boolean
   addedAt: number
+  keepChangedAt?: number
   warn?: string | null
 }
 type Suggestion = {
@@ -79,6 +80,16 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
+function timeAgo(ms: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
+  if (s < 60) return 'just now'
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.round(h / 24)}d ago`
+}
+
 function detectSource(u: string): 'nexus' | 'steam' | null {
   if (/nexusmods\.com/i.test(u)) return 'nexus'
   if (/steamcommunity\.com|[?&]id=/i.test(u)) return 'steam'
@@ -96,6 +107,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null) // id or 'add'/'upload'/'bulk'
   const [confirmRemove, setConfirmRemove] = useState<ClientMod | null>(null)
+  const [lastToggledId, setLastToggledId] = useState<string | null>(null) // highlight the row you just flipped
   const [url, setUrl] = useState('')
   const [bulk, setBulk] = useState('')
   const [bulkResults, setBulkResults] = useState<BulkResult[] | null>(null)
@@ -454,19 +466,38 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
     [config, load],
   )
 
+  const applyKeep = useCallback(
+    async (id: string, keep: boolean) => {
+      await postJson({ action: 'setKeep', id, keep })
+      setMods((prev) => prev.map((x) => (x.id === id ? { ...x, keep, keepChangedAt: Date.now() } : x)))
+      setLastToggledId(id)
+    },
+    [postJson],
+  )
+
   const toggleKeep = useCallback(
     async (m: ClientMod) => {
+      const next = !m.keep
       setBusy(m.id)
       try {
-        await postJson({ action: 'setKeep', id: m.id, keep: !m.keep })
-        setMods((prev) => prev.map((x) => (x.id === m.id ? { ...x, keep: !x.keep } : x)))
+        await applyKeep(m.id, next)
+        if (!next) {
+          // Disabling is easy to do by accident — always offer a one-click undo, and name it so
+          // you can tell WHICH mod changed.
+          toast(`Disabled “${m.name}” — it won't ship in the loadout`, {
+            action: { label: 'Undo', onClick: () => void applyKeep(m.id, true) },
+            duration: 8000,
+          })
+        } else {
+          toast.success(`Enabled “${m.name}”`)
+        }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Update failed')
       } finally {
         setBusy(null)
       }
     },
-    [postJson],
+    [applyKeep],
   )
 
   // Called from the confirm dialog (AlertDialog — replaces window.confirm, which blocked
@@ -562,19 +593,25 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
 
   const keptCount = mods.filter((m) => m.keep).length
   const activeMods = mods.filter((m) => m.keep)
-  const disabledMods = mods.filter((m) => !m.keep)
+  // Disabled block: most-recently-disabled first, so a just-flipped mod is at the top.
+  const disabledMods = mods
+    .filter((m) => !m.keep)
+    .sort((a, b) => (b.keepChangedAt ?? 0) - (a.keepChangedAt ?? 0) || a.name.localeCompare(b.name))
 
   // One staged-mod row — reused by the Active list and the Disabled block.
   const renderRow = (m: ClientMod) => (
-    <li key={m.id} className="flex items-center justify-between gap-2 px-3 py-2">
-      <label className="flex min-w-0 items-center gap-2">
+    <li
+      key={m.id}
+      className={`flex items-center justify-between gap-2 rounded px-3 py-2 ${m.id === lastToggledId ? 'ring-2 ring-amber-500/60' : ''}`}
+    >
+      <div className="flex min-w-0 items-center gap-2">
         <input
           type="checkbox"
           checked={m.keep}
           disabled={busy === m.id}
           onChange={() => toggleKeep(m)}
-          title={m.keep ? 'In the friend loadout — click to exclude' : 'Excluded — click to include'}
-          className="size-4 shrink-0 accent-primary"
+          title={m.keep ? 'In the friend loadout — click the checkbox to exclude' : 'Excluded — click the checkbox to include'}
+          className="size-4 shrink-0 cursor-pointer accent-primary"
         />
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
@@ -594,9 +631,10 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
             {SOURCE_LABEL[m.source] ?? m.source} · {m.kind}
             {m.version ? ` · v${m.version}` : ''} · {formatBytes(m.sizeBytes)}
             {m.warn ? <span className="text-amber-500"> · won’t ship to clients</span> : ''}
+            {!m.keep && m.keepChangedAt ? <span className="text-muted-foreground"> · disabled {timeAgo(m.keepChangedAt)}</span> : ''}
           </div>
         </div>
-      </label>
+      </div>
       <div className="flex items-center gap-1.5">
         {(m.kind === 'ue4ss' || m.kind === 'unknown') && (
           <button

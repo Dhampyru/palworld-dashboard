@@ -41,6 +41,7 @@ export type ClientMod = {
   sizeBytes: number
   keep: boolean // include this mod in the generated friend loadout
   addedAt: number
+  keepChangedAt?: number // when `keep` was last toggled — lets the UI surface the most recent
   warn?: string | null // set when the mod has NO client-installable files (server-side / not a mod)
   configMenu?: boolean // detected: ships an in-game Mod Config Menu → writes a client-side
   // LogicMods/<name>.modconfig.json the admin can capture + pre-configure (client-configs editor)
@@ -445,6 +446,7 @@ export async function setClientModKeep(id: string, keep: boolean): Promise<Clien
     const rec = idx[id]
     if (!rec) throw new Error('No such client mod')
     rec.keep = keep
+    rec.keepChangedAt = Date.now()
     return rec
   })
 }
