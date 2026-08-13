@@ -118,10 +118,10 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   const [configView, setConfigView] = useState<'form' | 'raw'>('form') // .modconfig.json → form by default
 
   // Extra-files editor (upload operator files into a mod folder → ship in the loadout).
-  type OverlayFile = { rel: string; name: string; bytes: number }
+  type OverlayFile = { rel: string; name: string; bytes: number; duplicate?: boolean }
   const [filesMod, setFilesMod] = useState<ClientMod | null>(null)
   const [filesFolders, setFilesFolders] = useState<string[]>([])
-  const [filesOverlay, setFilesOverlay] = useState<{ files: OverlayFile[]; totalBytes: number }>({ files: [], totalBytes: 0 })
+  const [filesOverlay, setFilesOverlay] = useState<{ files: OverlayFile[]; totalBytes: number; duplicates: number }>({ files: [], totalBytes: 0, duplicates: 0 })
   const [filesRel, setFilesRel] = useState('')
   const [filesLoading, setFilesLoading] = useState(false)
   const [filesBusy, setFilesBusy] = useState(false)
@@ -144,7 +144,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
         const json = await res.json()
         if (!res.ok) throw new Error(json.error ?? 'Failed to load')
         setFilesFolders(json.folders ?? [])
-        setFilesOverlay(json.overlay ?? { files: [], totalBytes: 0 })
+        setFilesOverlay(json.overlay ?? { files: [], totalBytes: 0, duplicates: 0 })
         setFilesMax(json.maxBytes ?? 50 * 1024 * 1024)
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to load')
@@ -159,7 +159,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
     (m: ClientMod) => {
       setFilesMod(m)
       setFilesFolders([])
-      setFilesOverlay({ files: [], totalBytes: 0 })
+      setFilesOverlay({ files: [], totalBytes: 0, duplicates: 0 })
       setFilesRel('')
       setFilesSel(new Set())
       void loadFiles(m)
@@ -216,7 +216,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
       })
       const json = await readJson(res)
       if (!res.ok) throw new Error(json.error ?? 'Failed')
-      setFilesOverlay((json.overlay as typeof filesOverlay) ?? { files: [], totalBytes: 0 })
+      setFilesOverlay((json.overlay as typeof filesOverlay) ?? { files: [], totalBytes: 0, duplicates: 0 })
       setFilesSel(new Set())
       setClearAllConfirm(false)
       toast.success('Cleared all extra files — regenerate the loadout to apply')
@@ -1049,6 +1049,18 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
               >
                 <Trash2Icon className="size-3.5" /> Delete selected ({filesSel.size})
               </Button>
+              {filesOverlay.duplicates > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={filesBusy}
+                  onClick={() => setFilesSel(new Set(filesOverlay.files.filter((f) => f.duplicate).map(fileKey)))}
+                  className="h-7 gap-1.5 text-amber-600 hover:text-amber-600 dark:text-amber-400"
+                  title="Select files that duplicate ones the mod already ships"
+                >
+                  <AlertTriangleIcon className="size-3.5" /> Select duplicates ({filesOverlay.duplicates})
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="ghost"
@@ -1084,7 +1096,17 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
                       className="size-3.5 shrink-0"
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs">{f.name}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-xs">{f.name}</span>
+                        {f.duplicate && (
+                          <span
+                            className="shrink-0 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400"
+                            title="Matches a file the mod already ships — usually an accidental whole-folder upload; safe to delete"
+                          >
+                            dupe
+                          </span>
+                        )}
+                      </div>
                       <div className="truncate text-[10px] text-muted-foreground">
                         {f.rel || '(mod root)'} · {formatBytes(f.bytes)}
                       </div>

@@ -95,11 +95,51 @@ export async function listModFolders(modId: string): Promise<string[]> {
   return [...new Set(rel.filter(Boolean))].sort((a, b) => a.localeCompare(b))
 }
 
-export type OverlayFile = { rel: string; name: string; bytes: number }
+// `duplicate` = a file the mod ALREADY ships at the same relative path (so overlaying it just
+// re-ships the mod's own file — usually an accidental whole-folder upload). Informational only.
+export type OverlayFile = { rel: string; name: string; bytes: number; duplicate?: boolean }
 
-// List the operator's stored extra files for a mod (relpath + filename + size), recursively.
-export async function listOverlay(modId: string): Promise<{ files: OverlayFile[]; totalBytes: number }> {
+// Relative file paths (mod-root-relative, wrapper-stripped) the mod's payload already ships —
+// used to flag overlay duplicates. Mirrors listModFolders' enumeration.
+async function listModFiles(modId: string): Promise<Set<string>> {
+  const m = (await listClientMods()).find((x) => x.id === modId)
+  if (!m) return new Set()
+  const store = clientModStorePath(modId)
+  const out = new Set<string>()
+  try {
+    if (m.payload === 'content') {
+      const base = join(store, 'content')
+      const walk = async (rel: string): Promise<void> => {
+        let entries
+        try {
+          entries = await readdir(join(base, rel), { withFileTypes: true })
+        } catch {
+          return
+        }
+        for (const e of entries) {
+          const r = rel ? `${rel}/${e.name}` : e.name
+          if (e.isDirectory()) await walk(r)
+          else out.add(r)
+        }
+      }
+      await walk('')
+    } else if (m.payload === 'payload.zip') {
+      const zip = new AdmZip(join(store, 'payload.zip'))
+      const all = zip.getEntries().filter((e) => !e.isDirectory).map((e) => e.entryName.replace(/\\/g, '/'))
+      const tops = new Set(all.map((p) => p.split('/')[0]).filter(Boolean))
+      const wrap = tops.size === 1 ? [...tops][0]! : ''
+      for (const p of all) out.add(wrap && (p === wrap || p.startsWith(`${wrap}/`)) ? p.slice(wrap.length + 1) : p)
+    }
+  } catch {
+    /* ignore */
+  }
+  return out
+}
+
+// List the operator's stored extra files for a mod (relpath + filename + size + duplicate flag).
+export async function listOverlay(modId: string): Promise<{ files: OverlayFile[]; totalBytes: number; duplicates: number }> {
   const root = join(storeRoot(), modId)
+  const modFiles = await listModFiles(modId)
   const files: OverlayFile[] = []
   const walk = async (rel: string): Promise<void> => {
     let entries
@@ -114,13 +154,14 @@ export async function listOverlay(modId: string): Promise<{ files: OverlayFile[]
       else {
         const info = await stat(join(root, r)).catch(() => null)
         const slash = r.lastIndexOf('/')
-        files.push({ rel: slash >= 0 ? r.slice(0, slash) : '', name: e.name, bytes: info?.size ?? 0 })
+        const relDir = slash >= 0 ? r.slice(0, slash) : ''
+        files.push({ rel: relDir, name: e.name, bytes: info?.size ?? 0, duplicate: modFiles.has(r) })
       }
     }
   }
   await walk('')
   files.sort((a, b) => (a.rel + '/' + a.name).localeCompare(b.rel + '/' + b.name))
-  return { files, totalBytes: files.reduce((s, f) => s + f.bytes, 0) }
+  return { files, totalBytes: files.reduce((s, f) => s + f.bytes, 0), duplicates: files.filter((f) => f.duplicate).length }
 }
 
 export async function addFile(modId: string, rel: string, filename: string, data: Buffer): Promise<OverlayFile> {
