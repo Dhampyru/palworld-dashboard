@@ -296,6 +296,16 @@ export function ServerManagementCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config])
 
+  // Auto-clear the "update available" status after applying it: a restart disconnects then
+  // reconnects, and the appmanifest holds the new buildid by the time the server is back — so
+  // re-check on the reconnect edge instead of leaving a stale tag until a manual re-check.
+  const prevConnRef = useRef(connectionStatus)
+  useEffect(() => {
+    if (connectionStatus === 'connected' && prevConnRef.current !== 'connected') checkForUpdates()
+    prevConnRef.current = connectionStatus
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionStatus])
+
   // A restart with update-specific messaging -- there's no separate "apply"
   // mechanism; ALWAYS_UPDATE_ON_START=true means any restart already checks
   // for and applies a pending update as part of normal boot. This just makes

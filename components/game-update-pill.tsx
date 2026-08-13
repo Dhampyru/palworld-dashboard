@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useServer } from '@/lib/server-context'
 import { buildPalworldProxyHeaders } from '@/lib/palworld'
@@ -27,7 +27,7 @@ type UpdateInfo = { installedBuildId: string; latestBuildId: string; updateAvail
 const RECHECK_MS = 30 * 60 * 1000 // re-check every 30 min (cheap: appmanifest read + one HTTP GET)
 
 export function GameUpdatePill() {
-  const { config } = useServer()
+  const { config, connectionStatus } = useServer()
   const [info, setInfo] = useState<UpdateInfo | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -48,6 +48,14 @@ export function GameUpdatePill() {
     const id = window.setInterval(() => void check(), RECHECK_MS)
     return () => window.clearInterval(id)
   }, [check])
+
+  // Auto-clear the tag after an update: a restart disconnects then reconnects, and by the time
+  // the server is back the appmanifest holds the new buildid — so re-check on the reconnect edge.
+  const prevStatus = useRef(connectionStatus)
+  useEffect(() => {
+    if (connectionStatus === 'connected' && prevStatus.current !== 'connected') void check()
+    prevStatus.current = connectionStatus
+  }, [connectionStatus, check])
 
   const applyUpdate = useCallback(async () => {
     if (!config) return
