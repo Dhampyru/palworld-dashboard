@@ -23,6 +23,7 @@ import {
   AlertTriangleIcon,
   ChevronDownIcon,
   ExternalLinkIcon,
+  FolderPlusIcon,
   MonitorIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -115,6 +116,203 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   const [configDraft, setConfigDraft] = useState('')
   const [configBusy, setConfigBusy] = useState(false)
   const [configView, setConfigView] = useState<'form' | 'raw'>('form') // .modconfig.json → form by default
+
+  // Extra-files editor (upload operator files into a mod folder → ship in the loadout).
+  type OverlayFile = { rel: string; name: string; bytes: number }
+  const [filesMod, setFilesMod] = useState<ClientMod | null>(null)
+  const [filesFolders, setFilesFolders] = useState<string[]>([])
+  const [filesOverlay, setFilesOverlay] = useState<{ files: OverlayFile[]; totalBytes: number }>({ files: [], totalBytes: 0 })
+  const [filesRel, setFilesRel] = useState('')
+  const [filesLoading, setFilesLoading] = useState(false)
+  const [filesBusy, setFilesBusy] = useState(false)
+  const [filesMax, setFilesMax] = useState(50 * 1024 * 1024)
+  const filesInputRef = useRef<HTMLInputElement | null>(null)
+  const zipInputRef = useRef<HTMLInputElement | null>(null)
+  const [filesSel, setFilesSel] = useState<Set<string>>(new Set())
+  const [clearAllConfirm, setClearAllConfirm] = useState(false)
+  const fileKey = (f: OverlayFile) => `${f.rel}|${f.name}`
+
+  const loadFiles = useCallback(
+    async (m: ClientMod) => {
+      if (!config) return
+      setFilesLoading(true)
+      try {
+        const res = await fetch(`/api/client-mod-files?modId=${encodeURIComponent(m.id)}`, {
+          headers: buildPalworldProxyHeaders(config),
+          cache: 'no-store',
+        })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.error ?? 'Failed to load')
+        setFilesFolders(json.folders ?? [])
+        setFilesOverlay(json.overlay ?? { files: [], totalBytes: 0 })
+        setFilesMax(json.maxBytes ?? 50 * 1024 * 1024)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to load')
+      } finally {
+        setFilesLoading(false)
+      }
+    },
+    [config],
+  )
+
+  const openFiles = useCallback(
+    (m: ClientMod) => {
+      setFilesMod(m)
+      setFilesFolders([])
+      setFilesOverlay({ files: [], totalBytes: 0 })
+      setFilesRel('')
+      setFilesSel(new Set())
+      void loadFiles(m)
+    },
+    [loadFiles],
+  )
+
+  // Parse a response as JSON, but turn a non-JSON body (e.g. an HTML error page from the reverse
+  // proxy on an oversized upload) into an honest error instead of "invalid json".
+  const readJson = useCallback(async (res: Response) => {
+    const text = await res.text()
+    try {
+      return JSON.parse(text) as { error?: string; overlay?: unknown; bulk?: unknown }
+    } catch {
+      throw new Error(
+        `Server returned a non-JSON response (HTTP ${res.status}). Large uploads are often blocked by the proxy ` +
+          `(Cloudflare caps request bodies at ~100 MB). Try a smaller zip, upload files individually, or upload over your local network.`,
+      )
+    }
+  }, [])
+
+  const PROXY_LIMIT = 100 * 1024 * 1024
+
+  const deleteSelected = useCallback(async () => {
+    if (!config || !filesMod || filesSel.size === 0) return
+    const items = filesOverlay.files.filter((f) => filesSel.has(fileKey(f))).map((f) => ({ rel: f.rel, filename: f.name }))
+    setFilesBusy(true)
+    try {
+      const res = await fetch('/api/client-mod-files', {
+        method: 'DELETE',
+        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modId: filesMod.id, items }),
+      })
+      const json = await readJson(res)
+      if (!res.ok) throw new Error(json.error ?? 'Delete failed')
+      if (json.overlay) setFilesOverlay(json.overlay as typeof filesOverlay)
+      setFilesSel(new Set())
+      toast.success(`Deleted ${items.length} file(s) — regenerate the loadout to apply`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Delete failed')
+    } finally {
+      setFilesBusy(false)
+    }
+  }, [config, filesMod, filesSel, filesOverlay, readJson])
+
+  const clearAllFiles = useCallback(async () => {
+    if (!config || !filesMod) return
+    setFilesBusy(true)
+    try {
+      const res = await fetch('/api/client-mod-files', {
+        method: 'DELETE',
+        headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modId: filesMod.id, clearAll: true }),
+      })
+      const json = await readJson(res)
+      if (!res.ok) throw new Error(json.error ?? 'Failed')
+      setFilesOverlay((json.overlay as typeof filesOverlay) ?? { files: [], totalBytes: 0 })
+      setFilesSel(new Set())
+      setClearAllConfirm(false)
+      toast.success('Cleared all extra files — regenerate the loadout to apply')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setFilesBusy(false)
+    }
+  }, [config, filesMod, readJson])
+
+  const uploadFiles = useCallback(
+    async (fileList: FileList | null) => {
+      if (!config || !filesMod || !fileList || !fileList.length) return
+      const tooBig = Array.from(fileList).find((f) => f.size > PROXY_LIMIT)
+      if (tooBig) {
+        toast.error(`"${tooBig.name}" is over ~100 MB — the proxy will reject it. Upload it over your local network instead.`)
+        return
+      }
+      setFilesBusy(true)
+      try {
+        for (const f of Array.from(fileList)) {
+          const form = new FormData()
+          form.set('modId', filesMod.id)
+          form.set('rel', filesRel)
+          form.set('file', f)
+          const res = await fetch('/api/client-mod-files', { method: 'POST', headers: buildPalworldProxyHeaders(config), body: form })
+          const json = await readJson(res)
+          if (!res.ok) throw new Error(json.error ?? `Failed: ${f.name}`)
+          if (json.overlay) setFilesOverlay(json.overlay as typeof filesOverlay)
+        }
+        toast.success('Uploaded — regenerate the loadout to ship it')
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Upload failed')
+      } finally {
+        setFilesBusy(false)
+        if (filesInputRef.current) filesInputRef.current.value = ''
+      }
+    },
+    [config, filesMod, filesRel, readJson],
+  )
+
+  const uploadZip = useCallback(
+    async (file: File | null | undefined) => {
+      if (!config || !filesMod || !file) return
+      if (file.size > PROXY_LIMIT) {
+        toast.error(
+          `That zip is ${formatBytes(file.size)} — over the ~100 MB proxy limit. Split it into smaller zips, or upload it over your local network (direct to the dashboard, bypassing Cloudflare).`,
+          { duration: 9000 },
+        )
+        if (zipInputRef.current) zipInputRef.current.value = ''
+        return
+      }
+      setFilesBusy(true)
+      try {
+        const form = new FormData()
+        form.set('modId', filesMod.id)
+        form.set('rel', filesRel)
+        form.set('mode', 'zip')
+        form.set('file', file)
+        const res = await fetch('/api/client-mod-files', { method: 'POST', headers: buildPalworldProxyHeaders(config), body: form })
+        const json = await readJson(res)
+        if (!res.ok) throw new Error(json.error ?? 'Bulk upload failed')
+        if (json.overlay) setFilesOverlay(json.overlay as typeof filesOverlay)
+        const b = json.bulk as { count?: number; skipped?: number } | undefined
+        toast.success(`Extracted ${b?.count ?? 0} file(s)${b?.skipped ? `, skipped ${b.skipped}` : ''} — regenerate the loadout to ship`)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Bulk upload failed')
+      } finally {
+        setFilesBusy(false)
+        if (zipInputRef.current) zipInputRef.current.value = ''
+      }
+    },
+    [config, filesMod, filesRel, readJson],
+  )
+
+  const removeOverlayFile = useCallback(
+    async (rel: string, name: string) => {
+      if (!config || !filesMod) return
+      setFilesBusy(true)
+      try {
+        const res = await fetch('/api/client-mod-files', {
+          method: 'DELETE',
+          headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modId: filesMod.id, rel, filename: name }),
+        })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.error ?? 'Delete failed')
+        if (json.overlay) setFilesOverlay(json.overlay)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Delete failed')
+      } finally {
+        setFilesBusy(false)
+      }
+    },
+    [config, filesMod],
+  )
 
   const load = useCallback(async () => {
     if (!config) return
@@ -400,6 +598,16 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
         </div>
       </label>
       <div className="flex items-center gap-1.5">
+        {(m.kind === 'ue4ss' || m.kind === 'unknown') && (
+          <button
+            onClick={() => openFiles(m)}
+            title="Add extra files (music, textures, data) into a folder inside this mod — ships in the loadout"
+            className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-primary/10 hover:text-primary"
+          >
+            <FolderPlusIcon className="size-3.5" />
+            Files
+          </button>
+        )}
         {m.kind !== 'pak' && (
           <button
             onClick={() => openConfig(m)}
@@ -744,6 +952,181 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Extra-files editor — upload operator files into a mod folder; ships in the loadout. */}
+      <Sheet open={!!filesMod} onOpenChange={(o) => !o && !filesBusy && setFilesMod(null)}>
+        <SheetContent side="right" className="flex w-full flex-col gap-3 sm:max-w-xl">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <FolderPlusIcon className="size-4 text-primary" /> Extra files — {filesMod?.name}
+            </SheetTitle>
+          </SheetHeader>
+          <p className="text-xs text-muted-foreground">
+            Add your own files into a folder inside this mod (e.g. a music track into <code>music/Caelid</code>). They
+            ship in the client loadout, so friends get them on their next install.bat. Max {formatBytes(filesMax)} per file.
+            Or use <b>Bulk .zip</b> to upload a zip mirroring the mod&apos;s folders (e.g. <code>music/Caelid/track.mp3</code>) —
+            it extracts into place; the zip itself isn&apos;t kept.
+          </p>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium">Destination folder (inside the mod)</label>
+            <select
+              value={filesFolders.includes(filesRel) ? filesRel : ''}
+              onChange={(e) => setFilesRel(e.target.value)}
+              className="h-8 rounded-md border bg-background px-2 text-xs"
+            >
+              <option value="">(mod root — or type a path below)</option>
+              {filesFolders.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+            <Input
+              value={filesRel}
+              onChange={(e) => setFilesRel(e.target.value)}
+              placeholder="e.g. music/Caelid"
+              className="h-8 text-xs"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={filesInputRef}
+              type="file"
+              multiple
+              onChange={(e) => void uploadFiles(e.target.files)}
+              disabled={filesBusy}
+              className="hidden"
+            />
+            <Button size="sm" disabled={filesBusy} onClick={() => filesInputRef.current?.click()} className="gap-1.5">
+              {filesBusy ? <Spinner className="size-3.5" /> : <UploadIcon className="size-3.5" />}
+              Upload to “{filesRel || 'mod root'}”
+            </Button>
+            <input
+              ref={zipInputRef}
+              type="file"
+              accept=".zip"
+              onChange={(e) => void uploadZip(e.target.files?.[0])}
+              disabled={filesBusy}
+              className="hidden"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={filesBusy}
+              onClick={() => zipInputRef.current?.click()}
+              className="gap-1.5"
+              title="Upload a .zip that mirrors the mod's folder structure; it extracts into place"
+            >
+              <UploadIcon className="size-3.5" /> Bulk .zip
+            </Button>
+          </div>
+
+          {filesOverlay.files.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={filesOverlay.files.every((f) => filesSel.has(fileKey(f)))}
+                  onChange={() =>
+                    setFilesSel((prev) =>
+                      filesOverlay.files.every((f) => prev.has(fileKey(f)))
+                        ? new Set()
+                        : new Set(filesOverlay.files.map(fileKey)),
+                    )
+                  }
+                  className="size-3.5"
+                />
+                Select all ({filesOverlay.files.length})
+              </label>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={filesBusy || filesSel.size === 0}
+                onClick={() => void deleteSelected()}
+                className="h-7 gap-1.5"
+              >
+                <Trash2Icon className="size-3.5" /> Delete selected ({filesSel.size})
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={filesBusy}
+                onClick={() => setClearAllConfirm(true)}
+                className="ml-auto h-7 text-destructive hover:text-destructive"
+              >
+                Clear all
+              </Button>
+            </div>
+          )}
+          <div className="min-h-0 flex-1 overflow-y-auto rounded-md border">
+            {filesLoading ? (
+              <div className="p-3 text-xs text-muted-foreground">Loading…</div>
+            ) : filesOverlay.files.length === 0 ? (
+              <div className="p-3 text-xs text-muted-foreground">No extra files added yet.</div>
+            ) : (
+              <ul className="divide-y">
+                {filesOverlay.files.map((f) => (
+                  <li key={`${f.rel}/${f.name}`} className="flex items-center gap-2 px-3 py-1.5">
+                    <input
+                      type="checkbox"
+                      checked={filesSel.has(fileKey(f))}
+                      onChange={() =>
+                        setFilesSel((s) => {
+                          const n = new Set(s)
+                          const k = fileKey(f)
+                          if (n.has(k)) n.delete(k)
+                          else n.add(k)
+                          return n
+                        })
+                      }
+                      className="size-3.5 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs">{f.name}</div>
+                      <div className="truncate text-[10px] text-muted-foreground">
+                        {f.rel || '(mod root)'} · {formatBytes(f.bytes)}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => void removeOverlayFile(f.rel, f.name)}
+                      disabled={filesBusy}
+                      title="Remove"
+                      className="text-muted-foreground hover:text-destructive disabled:opacity-40"
+                    >
+                      <Trash2Icon className="size-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Total added: {formatBytes(filesOverlay.totalBytes)} · {filesOverlay.files.length} file(s). Effective after
+            you regenerate the loadout.
+          </p>
+        </SheetContent>
+      </Sheet>
+
+      {/* Clear-all confirm for the extra-files overlay */}
+      <AlertDialog open={clearAllConfirm} onOpenChange={(o) => !o && !filesBusy && setClearAllConfirm(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove all extra files?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This deletes every file you added to “{filesMod?.name}” ({filesOverlay.files.length} file(s),{' '}
+              {formatBytes(filesOverlay.totalBytes)}). The mod itself is untouched; regenerate the loadout to apply.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={filesBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void clearAllFiles()} disabled={filesBusy}>
+              Delete all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Remove confirm — the shared AlertDialog (not window.confirm) */}
       <AlertDialog open={!!confirmRemove} onOpenChange={(o) => !o && setConfirmRemove(null)}>

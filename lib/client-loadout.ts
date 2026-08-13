@@ -11,6 +11,7 @@ import { clientModStorePath, listClientMods, type ClientMod } from '@/lib/client
 import { readClientModConfigOverrides } from '@/lib/client-mod-config'
 import { overlayClientConfigsInto } from '@/lib/client-configs'
 import { overlayPalSchemaInto } from '@/lib/palschema-config'
+import { overlayClientModFilesInto } from '@/lib/client-mod-files'
 
 const execFileP = promisify(execFile)
 
@@ -41,6 +42,7 @@ export type LoadoutSummary = {
   skipped: LoadoutSkip[]
   totalKept: number
   configOverrides: number // admin config edits shipped into the bundle
+  extraFiles: number // operator files added to client mods (music/textures/data) overlaid in
   parityPaks: number // server ~mods/LogicMods paks folded in for client-server parity
   palSchemaMods: number // PalSchema submods shipped (server parity + client-only payloads)
   preConfigFiles: number // admin-captured runtime config files overlaid into the game tree
@@ -913,6 +915,10 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       }
     }
 
+    // Extra operator files added to a client mod (music tracks, textures, data packs, …) —
+    // overlay them onto the mod's produced folder(s) so they ride the loadout to friends.
+    const extraFiles = await overlayClientModFilesInto(modsDir, producedFolders)
+
     // Server-parity paks: what the SERVER actually runs in ~mods / LogicMods. A joining
     // client needs these to match the server's content, regardless of what was staged as a
     // client mod — so fold them into the bundle (deduped against the staged client paks via
@@ -990,6 +996,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       skipped,
       totalKept: kept.length,
       configOverrides,
+      extraFiles,
       parityPaks,
       palSchemaMods,
       preConfigFiles,
