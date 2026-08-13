@@ -17,6 +17,7 @@ import { BookOpenIcon, CheckIcon, CopyIcon, EyeIcon, EyeOffIcon, HomeIcon, Layer
 import { copyToClipboard } from '@/lib/clipboard'
 import { PanelSettingsDialog } from '@/components/panel-settings-dialog'
 import { ServerActionCluster } from '@/components/server-action-cluster'
+import { GameUpdatePill } from '@/components/game-update-pill'
 
 type DashboardTab = 'dashboard' | 'map' | 'mods' | 'world' | 'guilds' | 'engine' | 'paldefender' | 'saves' | 'invite'
 
@@ -98,6 +99,10 @@ export function DashboardHeader({ activeTab = 'dashboard', onTabChange, onPlayer
                   {connectionStatus}
                 </span>
               </div>
+
+              {/* Dashboard-wide game-update alert (renders on every tab; shows only when an
+                  update is available). */}
+              <GameUpdatePill />
               </div>
 
               {/* Row 1 right: icon-only Docs / Theme / Settings, a separator, then
