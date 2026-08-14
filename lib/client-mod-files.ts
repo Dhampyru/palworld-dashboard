@@ -9,6 +9,7 @@
 import AdmZip from 'adm-zip'
 import { cp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join, basename } from 'node:path'
+import { normalizeArchiveToZip } from '@/lib/archive'
 import { clientModStorePath, listClientMods, type ClientMod } from '@/lib/client-mods'
 
 export const MAX_FILE_BYTES = 50 * 1024 * 1024 // ~50 MB/file (owner's choice)
@@ -197,11 +198,13 @@ export async function addZipBulk(
   // mod folder should add only the NEW content, not the mod's own scripts/dlls/etc.).
   const modFiles = await listModFiles(modId)
 
+  // Accept .zip/.7z/.rar/.tar/.gz — normalizeArchiveToZip re-packs non-zip archives (via unar)
+  // to a zip buffer; a real zip passes through untouched.
   let zip: AdmZip
   try {
-    zip = new AdmZip(zipBuffer)
+    zip = new AdmZip(await normalizeArchiveToZip(zipBuffer))
   } catch {
-    throw new Error('Not a valid .zip file')
+    throw new Error('Unsupported or corrupt archive (use .zip, .7z, .rar, .tar, or .gz)')
   }
   const fileEntries = zip.getEntries().filter((e) => !e.isDirectory)
   if (!fileEntries.length) throw new Error('The zip has no files')

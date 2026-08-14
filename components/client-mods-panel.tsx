@@ -1028,9 +1028,10 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
           <p className="text-xs text-muted-foreground">
             Add your own files into a folder inside this mod (e.g. a music track into <code>music/Caelid</code>). They
             ship in the client loadout, so friends get them on their next install.bat. Max {formatBytes(filesMax)} per file.
-            Or use <b>Bulk .zip</b> to upload one or more zips mirroring the mod&apos;s folders (e.g.
-            <code>music/Caelid/track.mp3</code>) — select all the parts of a split archive at once and they upload one at a
-            time (each under the ~100 MB cap); they extract into place and the zips aren&apos;t kept.
+            Or use <b>Bulk archive</b> to upload one or more archives (<code>.zip .7z .rar .tar .gz</code>) mirroring the
+            mod&apos;s folders (e.g. <code>music/Caelid/track.mp3</code>) — select all parts of a split archive at once and
+            they upload one at a time (each under the ~100 MB cap); they extract into place and the archives aren&apos;t kept.
+            (<code>.7z</code>/<code>.rar</code> compress best, so more fits per part.)
           </p>
 
           <div className="flex flex-col gap-1.5">
@@ -1071,7 +1072,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
             <input
               ref={zipInputRef}
               type="file"
-              accept=".zip"
+              accept=".zip,.7z,.rar,.tar,.gz,.tgz"
               multiple
               onChange={(e) => void uploadZip(e.target.files)}
               disabled={filesBusy}
@@ -1083,9 +1084,9 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
               disabled={filesBusy}
               onClick={() => zipInputRef.current?.click()}
               className="gap-1.5"
-              title="Upload one or more .zip parts mirroring the mod's folders; each is extracted in place (parts processed one at a time)"
+              title="Upload one or more archives (.zip/.7z/.rar/.tar/.gz) mirroring the mod's folders; each is extracted in place, processed one at a time"
             >
-              <UploadIcon className="size-3.5" /> Bulk .zip
+              <UploadIcon className="size-3.5" /> Bulk archive
             </Button>
           </div>
 

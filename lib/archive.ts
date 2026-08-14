@@ -12,7 +12,7 @@ const execFileP = promisify(execFile)
 // the formats adm-zip can't read; zip stays in-process. Overridable for tests.
 const UNAR_BIN = process.env.UNAR_BIN ?? 'unar'
 
-export type ArchiveFormat = 'zip' | '7z' | 'rar' | 'unknown'
+export type ArchiveFormat = 'zip' | '7z' | 'rar' | 'tar' | 'gzip' | 'unknown'
 
 // Sniff by magic bytes, not extension — a Nexus "download" is an opaque buffer.
 // Extract a .zip to destDir per-entry — robust to archives with MALFORMED directory entries
@@ -43,6 +43,8 @@ export function archiveFormat(buffer: Buffer): ArchiveFormat {
     buffer[3] === 0xaf && buffer[4] === 0x27 && buffer[5] === 0x1c
   ) return '7z' // 7z\xBC\xAF\x27\x1C
   if (buffer[0] === 0x52 && buffer[1] === 0x61 && buffer[2] === 0x72 && buffer[3] === 0x21) return 'rar' // "Rar!"
+  if (buffer[0] === 0x1f && buffer[1] === 0x8b) return 'gzip' // \x1F\x8B (.gz / .tgz / .tar.gz)
+  if (buffer.length >= 262 && buffer.toString('ascii', 257, 262) === 'ustar') return 'tar' // POSIX/GNU tar magic @257
   return 'unknown'
 }
 
@@ -77,7 +79,9 @@ export async function normalizeArchiveToZip(buffer: Buffer): Promise<Buffer> {
 
   const work = await mkdtemp(join(tmpdir(), 'modarch-'))
   try {
-    const src = join(work, `archive.${fmt}`)
+    // gzip is almost always a .tar.gz here — name it .tgz so unar extracts the inner tar tree
+    // rather than just decompressing one gzip layer to a lone .tar file.
+    const src = join(work, `archive.${fmt === 'gzip' ? 'tgz' : fmt}`)
     const out = join(work, 'out')
     await writeFile(src, buffer)
     // -q quiet, -f force-overwrite, -D never wrap in a containing dir (so `out/`
