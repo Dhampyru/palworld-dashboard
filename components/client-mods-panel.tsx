@@ -142,7 +142,9 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   const zipInputRef = useRef<HTMLInputElement | null>(null)
   const [filesSel, setFilesSel] = useState<Set<string>>(new Set())
   const [clearAllConfirm, setClearAllConfirm] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
   const fileKey = (f: OverlayFile) => `${f.rel}|${f.name}`
+  const ARCHIVE_RE = /\.(zip|7z|rar|tar|gz|tgz)$/i
 
   const loadFiles = useCallback(
     async (m: ClientMod) => {
@@ -240,7 +242,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   }, [config, filesMod, readJson])
 
   const uploadFiles = useCallback(
-    async (fileList: FileList | null) => {
+    async (fileList: FileList | File[] | null) => {
       if (!config || !filesMod || !fileList || !fileList.length) return
       const tooBig = Array.from(fileList).find((f) => f.size > PROXY_LIMIT)
       if (tooBig) {
@@ -273,7 +275,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   // Accepts one OR many .zip parts (a split archive) — each is uploaded SEQUENTIALLY as its own
   // request, so every part stays under the proxy's ~100 MB body cap.
   const uploadZip = useCallback(
-    async (fileList: FileList | null) => {
+    async (fileList: FileList | File[] | null) => {
       if (!config || !filesMod || !fileList || !fileList.length) return
       const zips = Array.from(fileList)
       const tooBig = zips.find((f) => f.size > PROXY_LIMIT)
@@ -350,6 +352,20 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
       }
     },
     [config, filesMod],
+  )
+
+  // Drag-and-drop: archives extract into place, other files land at the chosen destination.
+  const handleDrop = useCallback(
+    async (list: FileList | null) => {
+      const files = Array.from(list ?? [])
+      if (!files.length) return
+      const archives = files.filter((f) => ARCHIVE_RE.test(f.name))
+      const plain = files.filter((f) => !ARCHIVE_RE.test(f.name))
+      if (archives.length) await uploadZip(archives)
+      if (plain.length) await uploadFiles(plain)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [uploadZip, uploadFiles],
   )
 
   const load = useCallback(async () => {
@@ -1056,7 +1072,24 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div
+            onDragOver={(e) => {
+              e.preventDefault()
+              if (!dragOver && !filesBusy) setDragOver(true)
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault()
+              setDragOver(false)
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragOver(false)
+              if (!filesBusy) void handleDrop(e.dataTransfer.files)
+            }}
+            className={`flex flex-wrap items-center gap-2 rounded-md border border-dashed p-3 transition-colors ${
+              dragOver ? 'border-primary bg-primary/5' : 'border-border'
+            }`}
+          >
             <input
               ref={filesInputRef}
               type="file"
@@ -1088,6 +1121,9 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
             >
               <UploadIcon className="size-3.5" /> Bulk archive
             </Button>
+            <span className="w-full text-[11px] text-muted-foreground sm:w-auto">
+              …or <b>drag &amp; drop</b> files/archives here (archives extract in place; files go to “{filesRel || 'mod root'}”).
+            </span>
           </div>
 
           {filesOverlay.files.length > 0 && (
