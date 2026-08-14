@@ -188,11 +188,14 @@ export async function addZipBulk(
   modId: string,
   destRel: string,
   zipBuffer: Buffer,
-): Promise<{ count: number; totalBytes: number; skipped: number }> {
+): Promise<{ count: number; totalBytes: number; skipped: number; skippedDuplicates: number }> {
   const m = (await listClientMods()).find((x) => x.id === modId)
   if (!m) throw new Error('Unknown mod')
   if (!canReceiveFiles(m)) throw new Error('This mod type has no folder to add files to')
   const base = safeRel(destRel)
+  // Files the mod already ships — a bulk zip must never re-place these (e.g. zipping the whole
+  // mod folder should add only the NEW content, not the mod's own scripts/dlls/etc.).
+  const modFiles = await listModFiles(modId)
 
   let zip: AdmZip
   try {
@@ -216,6 +219,7 @@ export async function addZipBulk(
   let count = 0
   let totalBytes = 0
   let skipped = 0
+  let skippedDuplicates = 0
   for (const e of fileEntries) {
     let p = e.entryName.replace(/\\/g, '/')
     if (wrapper && (p === wrapper || p.startsWith(`${wrapper}/`))) p = p.slice(wrapper.length + 1)
@@ -234,6 +238,11 @@ export async function addZipBulk(
       skipped++
       continue
     }
+    // Ignore any file the mod already ships (matched at its mod-root-relative path).
+    if (modFiles.has(relDir ? `${relDir}/${safeN}` : safeN)) {
+      skippedDuplicates++
+      continue
+    }
     const data = e.getData()
     if (!data.length || data.length > MAX_FILE_BYTES) {
       skipped++
@@ -245,8 +254,12 @@ export async function addZipBulk(
     count++
     totalBytes += data.length
   }
-  if (count === 0) throw new Error('Nothing placed — check the zip is structured like the mod folders')
-  return { count, totalBytes, skipped }
+  // count === 0 with duplicates skipped is a valid no-op (the zip was only the mod's own files);
+  // only error when nothing landed AND nothing was recognised as a duplicate (bad structure).
+  if (count === 0 && skippedDuplicates === 0) {
+    throw new Error('Nothing placed — check the zip is structured like the mod folders')
+  }
+  return { count, totalBytes, skipped, skippedDuplicates }
 }
 
 export async function removeFile(modId: string, rel: string, filename: string): Promise<void> {

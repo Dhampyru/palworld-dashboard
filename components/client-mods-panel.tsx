@@ -292,8 +292,11 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
         const json = await readJson(res)
         if (!res.ok) throw new Error(json.error ?? 'Bulk upload failed')
         if (json.overlay) setFilesOverlay(json.overlay as typeof filesOverlay)
-        const b = json.bulk as { count?: number; skipped?: number } | undefined
-        toast.success(`Extracted ${b?.count ?? 0} file(s)${b?.skipped ? `, skipped ${b.skipped}` : ''} — regenerate the loadout to ship`)
+        const b = json.bulk as { count?: number; skipped?: number; skippedDuplicates?: number } | undefined
+        const bits = [`Extracted ${b?.count ?? 0} file(s)`]
+        if (b?.skippedDuplicates) bits.push(`ignored ${b.skippedDuplicates} duplicate(s)`)
+        if (b?.skipped) bits.push(`skipped ${b.skipped}`)
+        toast.success(`${bits.join(', ')} — regenerate the loadout to ship`)
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Bulk upload failed')
       } finally {
