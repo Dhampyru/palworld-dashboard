@@ -270,35 +270,58 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
     [config, filesMod, filesRel, readJson],
   )
 
+  // Accepts one OR many .zip parts (a split archive) — each is uploaded SEQUENTIALLY as its own
+  // request, so every part stays under the proxy's ~100 MB body cap.
   const uploadZip = useCallback(
-    async (file: File | null | undefined) => {
-      if (!config || !filesMod || !file) return
-      if (file.size > PROXY_LIMIT) {
+    async (fileList: FileList | null) => {
+      if (!config || !filesMod || !fileList || !fileList.length) return
+      const zips = Array.from(fileList)
+      const tooBig = zips.find((f) => f.size > PROXY_LIMIT)
+      if (tooBig) {
         toast.error(
-          `That zip is ${formatBytes(file.size)} — over the ~100 MB proxy limit. Split it into smaller zips, or upload it over your local network (direct to the dashboard, bypassing Cloudflare).`,
+          `“${tooBig.name}” is ${formatBytes(tooBig.size)} — over the ~100 MB proxy limit. Split it smaller, or upload over your local network (direct to the dashboard, bypassing Cloudflare).`,
           { duration: 9000 },
         )
         if (zipInputRef.current) zipInputRef.current.value = ''
         return
       }
       setFilesBusy(true)
+      let count = 0
+      let dup = 0
+      let skipped = 0
+      let failed = 0
+      const many = zips.length > 1
+      const progress = many ? toast.loading(`Uploading zip 1 of ${zips.length}…`) : undefined
       try {
-        const form = new FormData()
-        form.set('modId', filesMod.id)
-        form.set('rel', filesRel)
-        form.set('mode', 'zip')
-        form.set('file', file)
-        const res = await fetch('/api/client-mod-files', { method: 'POST', headers: buildPalworldProxyHeaders(config), body: form })
-        const json = await readJson(res)
-        if (!res.ok) throw new Error(json.error ?? 'Bulk upload failed')
-        if (json.overlay) setFilesOverlay(json.overlay as typeof filesOverlay)
-        const b = json.bulk as { count?: number; skipped?: number; skippedDuplicates?: number } | undefined
-        const bits = [`Extracted ${b?.count ?? 0} file(s)`]
-        if (b?.skippedDuplicates) bits.push(`ignored ${b.skippedDuplicates} duplicate(s)`)
-        if (b?.skipped) bits.push(`skipped ${b.skipped}`)
-        toast.success(`${bits.join(', ')} — regenerate the loadout to ship`)
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Bulk upload failed')
+        for (let i = 0; i < zips.length; i++) {
+          const file = zips[i]!
+          if (progress) toast.loading(`Uploading zip ${i + 1} of ${zips.length}: ${file.name}`, { id: progress })
+          try {
+            const form = new FormData()
+            form.set('modId', filesMod.id)
+            form.set('rel', filesRel)
+            form.set('mode', 'zip')
+            form.set('file', file)
+            const res = await fetch('/api/client-mod-files', { method: 'POST', headers: buildPalworldProxyHeaders(config), body: form })
+            const json = await readJson(res)
+            if (!res.ok) throw new Error(json.error ?? 'Bulk upload failed')
+            if (json.overlay) setFilesOverlay(json.overlay as typeof filesOverlay)
+            const b = json.bulk as { count?: number; skipped?: number; skippedDuplicates?: number } | undefined
+            count += b?.count ?? 0
+            dup += b?.skippedDuplicates ?? 0
+            skipped += b?.skipped ?? 0
+          } catch (e) {
+            failed++
+            toast.error(`${file.name}: ${e instanceof Error ? e.message : 'failed'}`)
+          }
+        }
+        const bits = [`Extracted ${count} file(s)${many ? ` from ${zips.length} zips` : ''}`]
+        if (dup) bits.push(`ignored ${dup} duplicate(s)`)
+        if (skipped) bits.push(`skipped ${skipped}`)
+        if (failed) bits.push(`${failed} zip(s) failed`)
+        const msg = `${bits.join(', ')} — regenerate the loadout to ship`
+        if (progress) toast.success(msg, { id: progress })
+        else toast.success(msg)
       } finally {
         setFilesBusy(false)
         if (zipInputRef.current) zipInputRef.current.value = ''
@@ -1005,8 +1028,9 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
           <p className="text-xs text-muted-foreground">
             Add your own files into a folder inside this mod (e.g. a music track into <code>music/Caelid</code>). They
             ship in the client loadout, so friends get them on their next install.bat. Max {formatBytes(filesMax)} per file.
-            Or use <b>Bulk .zip</b> to upload a zip mirroring the mod&apos;s folders (e.g. <code>music/Caelid/track.mp3</code>) —
-            it extracts into place; the zip itself isn&apos;t kept.
+            Or use <b>Bulk .zip</b> to upload one or more zips mirroring the mod&apos;s folders (e.g.
+            <code>music/Caelid/track.mp3</code>) — select all the parts of a split archive at once and they upload one at a
+            time (each under the ~100 MB cap); they extract into place and the zips aren&apos;t kept.
           </p>
 
           <div className="flex flex-col gap-1.5">
@@ -1048,7 +1072,8 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
               ref={zipInputRef}
               type="file"
               accept=".zip"
-              onChange={(e) => void uploadZip(e.target.files?.[0])}
+              multiple
+              onChange={(e) => void uploadZip(e.target.files)}
               disabled={filesBusy}
               className="hidden"
             />
@@ -1058,7 +1083,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
               disabled={filesBusy}
               onClick={() => zipInputRef.current?.click()}
               className="gap-1.5"
-              title="Upload a .zip that mirrors the mod's folder structure; it extracts into place"
+              title="Upload one or more .zip parts mirroring the mod's folders; each is extracted in place (parts processed one at a time)"
             >
               <UploadIcon className="size-3.5" /> Bulk .zip
             </Button>
