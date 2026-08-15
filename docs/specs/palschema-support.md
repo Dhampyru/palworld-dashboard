@@ -111,3 +111,18 @@ with "use the UE4SS section" — e.g. Nexus 5002's *Server* file. Fixed in
 the fix covers every server upload path (Nexus, manual `commit`, `game-mods/palschema`,
 and combined Lua+PalSchema companions). `detectModKind` already never counted
 `enabled.txt` as Lua, so classifier and installer now agree.
+
+## 7. Gotcha — un-wrapped PalSchema mods (raw/ + blueprints/ at the root) (2026-08-15)
+
+Some authors ship a PalSchema mod as just its **innards** — `raw/`, `blueprints/`
+(± `translations/`/`resources/`/a loose `metadata.json`) — at the archive **root**,
+with no `<Name>/` wrapper and no `PalSchema/mods/<name>/` anchor (e.g. Nexus 2720
+"Lyleen Pal Support"). The installer's grouping saw multiple top folders, found no
+single wrapper, and threw "Could not find a PalSchema mod folder." Fixed:
+`installPalSchemaSubmod` now takes an optional `nameHint`, and `isUnwrappedPalSchemaData`
+detects this layout (every top-level entry a known PalSchema data dir or a loose
+`.json`, with at least one of `raw`/`blueprints`) → it wraps the whole thing under the
+supplied mod name, landing at `PalSchema/mods/<name>/`. `nameHint` is threaded from all
+install paths: Nexus (mod name), manual `commit` (scan/`modName`), and `game-mods/palschema`
+(uploaded filename). Fails closed with a clear message if the layout matches but no name is
+available. Verified: Nexus 2720 → `PalSchema/mods/LyleenPalSupportAutomatedRaid/{blueprints,raw}/`.

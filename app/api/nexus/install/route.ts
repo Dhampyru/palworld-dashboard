@@ -137,7 +137,7 @@ async function installModFile(
   let assocKey: string | null = null
   let installedName = ''
   if (kind === 'palschema') {
-    const r = await installPalSchemaSubmod(buffer, replace)
+    const r = await installPalSchemaSubmod(buffer, replace, nameHint)
     installedName = r.name
     if (r.pakFiles.length) assocKey = `pak:${r.pakFiles[0]}` // the client-facing row
   } else if (kind === 'pak') {

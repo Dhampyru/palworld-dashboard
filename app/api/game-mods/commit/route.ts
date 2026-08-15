@@ -76,7 +76,7 @@ async function _POST(request: NextRequest) {
       if (isFomodArchive(buffer)) throw new Error(FOMOD_MESSAGE)
       const kind = detectModKind(buffer)
       if (kind === 'palschema') {
-        const r = await installPalSchemaSubmod(buffer)
+        const r = await installPalSchemaSubmod(buffer, false, name)
         server = { ok: true, detail: `PalSchema: ${r.name ?? name}` }
       } else if (kind === 'pak') {
         const paks = await installPakArchive(buffer)
@@ -84,7 +84,7 @@ async function _POST(request: NextRequest) {
       } else if (kind === 'ue4ss') {
         const r = await installUe4ssModArchive(buffer, name)
         // Combined Lua+PalSchema mod: also install the PalSchema half (best-effort).
-        if (archiveHasPalSchemaData(buffer)) await installPalSchemaSubmod(buffer).catch(() => {})
+        if (archiveHasPalSchemaData(buffer)) await installPalSchemaSubmod(buffer, false, name).catch(() => {})
         server = { ok: true, detail: `Installed: ${r.name}${r.pakFiles.length ? ` (+${r.pakFiles.length} pak)` : ''}` }
       } else {
         throw new Error('Could not detect a UE4SS/pak/PalSchema mod in this archive')

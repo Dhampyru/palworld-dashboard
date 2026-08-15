@@ -204,6 +204,25 @@ function contentRoot(files: ZipFile[]): { prefix: string; topFolder: string | nu
   return { prefix, topFolder }
 }
 
+// A PalSchema mod keeps its data in these subdirs. When an archive's ROOT holds them directly
+// (e.g. raw/ + blueprints/ with no wrapper folder — Nexus 2720 ships this way), it's a single
+// un-wrapped mod: contentRoot sees multiple top folders and gives up, so we detect it here and
+// wrap the whole thing under the supplied mod name. Requires at least one of raw/blueprints, and
+// every top-level entry to be a known data dir or a loose .json (metadata) — so a random archive
+// with several top folders still fails closed.
+const PS_DATA_DIRS = new Set(['raw', 'blueprints', 'translations', 'resources'])
+function isUnwrappedPalSchemaData(files: ZipFile[]): boolean {
+  const tops = new Set(files.map((f) => normalize(f.name).split('/')[0].toLowerCase()))
+  let hasCore = false
+  for (const t of tops) {
+    if (t === 'raw' || t === 'blueprints') hasCore = true
+    else if (PS_DATA_DIRS.has(t)) continue
+    else if (/\.jsonc?$/i.test(t)) continue // a loose metadata.json / *.json at the root
+    else return false
+  }
+  return hasCore
+}
+
 // ── Sub-mod install / remove ──────────────────────────────────────────────────
 
 export type SubmodInstallResult = {
@@ -221,7 +240,7 @@ export type SubmodInstallResult = {
 //     (The old code treated the shared `Pal/` prefix as the mod folder, so a mod
 //     installed as "Pal" with its JSON buried at a wrong nested path.)
 //   - BARE MOD FOLDER: <Name>/<rel> at the zip root (with Mod/Mod flattening).
-export async function installPalSchemaSubmod(buffer: Buffer, replace = false): Promise<SubmodInstallResult> {
+export async function installPalSchemaSubmod(buffer: Buffer, replace = false, nameHint?: string): Promise<SubmodInstallResult> {
   const modsDir = await resolvePalSchemaModsDir()
   if (!modsDir) {
     throw new Error('PalSchema is not installed — install PalSchema first, then add mods to it.')
@@ -256,17 +275,31 @@ export async function installPalSchemaSubmod(buffer: Buffer, replace = false): P
   }
   if (mods.size === 0) {
     const { prefix, topFolder } = contentRoot(nonPak)
-    if (!topFolder) {
+    if (topFolder) {
+      const list: { rel: string; f: ZipFile }[] = []
+      for (const f of nonPak) {
+        const rel = normalize(f.name).slice(prefix.length)
+        if (rel) list.push({ rel, f })
+      }
+      mods.set(topFolder, list)
+    } else if (isUnwrappedPalSchemaData(nonPak)) {
+      // Un-wrapped mod: raw/ + blueprints/ (etc.) at the archive root, no folder. Wrap it under
+      // the mod name so it lands at PalSchema/mods/<name>/ like a normal submod.
+      const name = (nameHint ?? '').trim()
+      if (!name || !isSafeModFolderName(name)) {
+        throw new Error(
+          'This PalSchema mod ships its data (raw/blueprints/…) with no mod-folder name. Install it from Nexus/Steam (which supplies the name), or put the files inside one folder named for the mod and re-upload.',
+        )
+      }
+      mods.set(
+        name,
+        nonPak.map((f) => ({ rel: normalize(f.name), f })),
+      )
+    } else {
       throw new Error(
         'Could not find a PalSchema mod folder — expected a single mod folder of JSON/JSONC, or paths under PalSchema/mods/<name>/.',
       )
     }
-    const list: { rel: string; f: ZipFile }[] = []
-    for (const f of nonPak) {
-      const rel = normalize(f.name).slice(prefix.length)
-      if (rel) list.push({ rel, f })
-    }
-    mods.set(topFolder, list)
   }
 
   // Validate EVERY mod folder before writing anything (fail closed).

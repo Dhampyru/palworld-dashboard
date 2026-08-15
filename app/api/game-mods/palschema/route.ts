@@ -135,7 +135,7 @@ async function _POST(request: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer())
 
     if (target === 'submod') {
-      const result = await installPalSchemaSubmod(buffer)
+      const result = await installPalSchemaSubmod(buffer, false, file.name.replace(/\.[^./]+$/, ''))
       const note = result.hybrid
         ? `Installed ${result.name}. Hybrid mod — pak files placed for the server, but connecting players must install the client files themselves.`
         : `Installed ${result.name} — restart the server to apply.`
