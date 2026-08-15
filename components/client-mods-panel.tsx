@@ -108,6 +108,8 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   const [busy, setBusy] = useState<string | null>(null) // id or 'add'/'upload'/'bulk'
   const [confirmRemove, setConfirmRemove] = useState<ClientMod | null>(null)
   const [lastToggledId, setLastToggledId] = useState<string | null>(null) // highlight the row you just flipped
+  type KeybindScan = { conflicts: { combo: string; mods: string[] }[]; perMod: Record<string, { combo: string; others: string[] }[]> }
+  const [keybinds, setKeybinds] = useState<KeybindScan | null>(null)
   const [url, setUrl] = useState('')
   const [bulk, setBulk] = useState('')
   const [bulkResults, setBulkResults] = useState<BulkResult[] | null>(null)
@@ -383,6 +385,13 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
       setMods(json.mods ?? [])
       setSuggestions(json.suggestions ?? [])
       setCatalogAvailable(Boolean(json.catalogAvailable))
+      // Keybind-conflict scan (cached server-side by the mod set) — fire-and-forget.
+      fetch('/api/client-mods/keybinds', { headers: h, cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((k) => {
+          if (k && Array.isArray(k.conflicts)) setKeybinds(k)
+        })
+        .catch(() => {})
       if (nxRes?.ok) {
         const n = await nxRes.json()
         setNexus({ premium: Boolean(n.valid && n.isPremium), name: n.name ?? null })
@@ -668,6 +677,18 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
                 <AlertTriangleIcon className="size-3.5" />
               </span>
             )}
+            {keybinds?.perMod[m.id]?.length ? (
+              <span
+                title={
+                  'Keybind conflict:\n' +
+                  keybinds.perMod[m.id]!.map((c) => `${c.combo} — also used by: ${c.others.join(', ')}`).join('\n')
+                }
+                className="inline-flex shrink-0 items-center gap-0.5 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400"
+              >
+                <AlertTriangleIcon className="size-3" />
+                {keybinds.perMod[m.id]!.map((c) => c.combo).join(', ')}
+              </span>
+            ) : null}
           </div>
           <div className="truncate text-xs text-muted-foreground">
             {SOURCE_LABEL[m.source] ?? m.source} · {m.kind}
@@ -719,6 +740,15 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
           <h2 className="text-lg font-semibold">Client mods ({mods.length})</h2>
           {mods.length > 0 && keptCount !== mods.length && (
             <span className="text-xs text-muted-foreground">· {keptCount} kept for the loadout</span>
+          )}
+          {keybinds && keybinds.conflicts.length > 0 && (
+            <span
+              title={keybinds.conflicts.map((c) => `${c.combo}: ${c.mods.join(', ')}`).join('\n')}
+              className="inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400"
+            >
+              <AlertTriangleIcon className="size-3.5" />
+              {keybinds.conflicts.length} keybind conflict{keybinds.conflicts.length === 1 ? '' : 's'}
+            </span>
           )}
         </div>
         <button
