@@ -7,6 +7,7 @@ import AdmZip from 'adm-zip'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { clientModStorePath, listClientMods, type ClientMod } from '@/lib/client-mods'
+import { readClientModConfigOverrides } from '@/lib/client-mod-config'
 
 // Recognized UE4SS Key.* tokens (function keys, letters, number-row words, numpad, named keys).
 // Mouse buttons are deliberately excluded — mods hook LMB/RMB contextually (their own UI),
@@ -76,28 +77,27 @@ function extractFromText(name: string, text: string, out: Set<string>): void {
   }
 }
 
-async function combosFromPayloadZip(zipPath: string): Promise<Set<string>> {
-  const out = new Set<string>()
+async function combosFromPayloadZip(zipPath: string, out: Set<string>, skip: (p: string) => boolean): Promise<void> {
   let zip: AdmZip
   try {
     zip = new AdmZip(zipPath)
   } catch {
-    return out
+    return
   }
   for (const e of zip.getEntries()) {
     if (e.isDirectory) continue
     const n = e.entryName.replace(/\\/g, '/')
     if (!/(\.lua|\.modconfig\.json|config\.json)$/i.test(n)) continue
+    if (skip(n)) continue // a config-override replaces this file — scan the override instead
     try {
       extractFromText(n, e.getData().toString('utf8'), out)
     } catch {
       /* skip unreadable entry */
     }
   }
-  return out
 }
 
-async function combosFromContentDir(dir: string, out: Set<string>): Promise<void> {
+async function combosFromContentDir(dir: string, base: string, out: Set<string>, skip: (p: string) => boolean): Promise<void> {
   let entries
   try {
     entries = await readdir(dir, { withFileTypes: true })
@@ -106,8 +106,9 @@ async function combosFromContentDir(dir: string, out: Set<string>): Promise<void
   }
   for (const e of entries) {
     const p = join(dir, e.name)
-    if (e.isDirectory()) await combosFromContentDir(p, out)
+    if (e.isDirectory()) await combosFromContentDir(p, base, out, skip)
     else if (/(\.lua|\.modconfig\.json|config\.json)$/i.test(e.name)) {
+      if (skip(p.slice(base.length + 1).replace(/\\/g, '/'))) continue
       try {
         extractFromText(e.name, await readFile(p, 'utf8'), out)
       } catch {
@@ -117,15 +118,29 @@ async function combosFromContentDir(dir: string, out: Set<string>): Promise<void
   }
 }
 
+// Scan a mod's EFFECTIVE keybinds — the config-overrides that ship in the loadout replace the
+// payload's shipped config, so the conflict view reflects what will actually load (e.g. after an
+// auto/manual remap). A payload config file is skipped when an override targets it (matched by
+// its mod-root-relative path as a path suffix), and the override content is scanned in its place.
 async function combosForMod(m: ClientMod): Promise<Set<string>> {
   const store = clientModStorePath(m.id)
-  if (m.payload === 'payload.zip') return combosFromPayloadZip(join(store, 'payload.zip'))
-  if (m.payload === 'content') {
-    const out = new Set<string>()
-    await combosFromContentDir(join(store, 'content'), out)
-    return out
+  const out = new Set<string>()
+  const overrides = await readClientModConfigOverrides(m.id).catch(() => [])
+  const skip = (p: string) => overrides.some((o) => p === o.relWithin || p.endsWith('/' + o.relWithin))
+
+  if (m.payload === 'payload.zip') await combosFromPayloadZip(join(store, 'payload.zip'), out, skip)
+  else if (m.payload === 'content') await combosFromContentDir(join(store, 'content'), join(store, 'content'), out, skip)
+  else return out
+
+  for (const o of overrides) {
+    if (!/(\.lua|\.modconfig\.json|config\.json)$/i.test(o.relWithin)) continue
+    try {
+      extractFromText(o.relWithin, await readFile(o.absPath, 'utf8'), out)
+    } catch {
+      /* skip */
+    }
   }
-  return new Set()
+  return out
 }
 
 export type KeybindConflict = { combo: string; mods: string[] }
@@ -140,12 +155,21 @@ let cache: { sig: string; scan: KeybindScan } | null = null
 
 export async function scanClientKeybinds(): Promise<KeybindScan> {
   const kept = (await listClientMods()).filter((m) => m.keep)
-  // signature: ids + payload sizes (a re-staged mod changes its size)
+  // signature: ids + payload sizes (a re-staged mod changes its size) + config-override
+  // relWithins (a remap adds/removes an override → the effective binds change).
   const sigParts: string[] = []
   for (const m of kept) {
     const p = m.payload === 'payload.zip' ? join(clientModStorePath(m.id), 'payload.zip') : null
     const size = p ? await stat(p).then((s) => s.size).catch(() => 0) : 0
-    sigParts.push(`${m.id}:${size}`)
+    const ovs = await readClientModConfigOverrides(m.id).catch(() => [])
+    const ov = (
+      await Promise.all(
+        ovs.map(async (o) => `${o.relWithin}@${await stat(o.absPath).then((s) => `${s.size}.${Math.round(s.mtimeMs)}`).catch(() => '0')}`),
+      )
+    )
+      .sort()
+      .join(',')
+    sigParts.push(`${m.id}:${size}:${ov}`)
   }
   const sig = sigParts.join('|')
   if (cache && cache.sig === sig) return cache.scan

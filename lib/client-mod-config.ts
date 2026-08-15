@@ -190,3 +190,24 @@ export async function readClientModConfigOverrides(modId: string): Promise<{ rel
 export async function clientModHasConfig(modId: string): Promise<boolean> {
   return (await listClientModConfigs(modId)).length > 0
 }
+
+// Read ONE mod-internal file (mod-root-relative relWithin) with the override applied if present,
+// else the shipped payload version. Lets a caller base a payload edit (e.g. a keybind remap that
+// rewrites a hardcoded main.lua RegisterKeyBind) on the current content. Returns null if absent.
+export async function readClientModFile(modId: string, relWithin: string): Promise<string | null> {
+  const overridePath = join(overrideRoot(modId), relWithin)
+  if (await exists(overridePath)) return readFile(overridePath, 'utf8').catch(() => null)
+  const mod = await modById(modId)
+  if (!mod) return null
+  const mat = await materialize(modId, mod.payload)
+  if (!mat) return null
+  try {
+    const target = (await walkFiles(mat.base)).find((f) => {
+      const rel = relative(mat.base, f).replace(/\\/g, '/')
+      return rel === relWithin || rel.endsWith('/' + relWithin)
+    })
+    return target ? await readFile(target, 'utf8').catch(() => null) : null
+  } finally {
+    await mat.cleanup()
+  }
+}

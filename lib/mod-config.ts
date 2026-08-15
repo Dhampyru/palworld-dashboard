@@ -203,8 +203,10 @@ export function validateConfigContent(format: ModConfigFormat, content: string):
   } else if (format === 'lua') {
     // Editable, but syntax-checked so a broken edit can't brick the mod. luaparse only
     // PARSES (never runs) the Lua, so an arbitrary config file is safe to validate.
+    // luaVersion 5.3 so bitwise operators (`~`, `&`, `|`, `//`) in real mod configs parse —
+    // the default 5.1 grammar rejects them and would wrongly flag a valid config as broken.
     try {
-      luaparse.parse(content, { comments: false })
+      luaparse.parse(content, { comments: false, luaVersion: '5.3' })
     } catch (e) {
       throw new Error(`Invalid Lua: ${e instanceof Error ? e.message : 'syntax error'}`)
     }
