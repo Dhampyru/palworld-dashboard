@@ -97,3 +97,17 @@ PalSchema mods), do not silently drop or misplace them:
    listing them.
 7. Existing UE4SS mod management untouched (regression: list/toggle/
    install still work).
+
+## 6. Gotcha — `enabled.txt` is NOT a UE4SS discriminator (2026-08-15)
+
+The install-time "is this actually a standard UE4SS mod?" guard (which produces
+the acceptance-#4 redirect message) must key off UE4SS-ONLY signals: a `scripts/`
+or `dlls/` folder, `main.lua`, or a `.lua`/`.dll` file. It must **NOT** treat
+`enabled.txt` as such a signal — **PalSchema mods use an `enabled.txt` toggle too**
+(same on/off convention as UE4SS). A legit PalSchema mod (JSON data + optional pak,
+no scripts/lua/dll) that happens to ship `enabled.txt` was being wrongly rejected
+with "use the UE4SS section" — e.g. Nexus 5002's *Server* file. Fixed in
+`lib/palschema.ts` `installPalSchemaSubmod`; the guard is in the SHARED installer, so
+the fix covers every server upload path (Nexus, manual `commit`, `game-mods/palschema`,
+and combined Lua+PalSchema companions). `detectModKind` already never counted
+`enabled.txt` as Lua, so classifier and installer now agree.
