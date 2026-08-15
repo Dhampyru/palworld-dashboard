@@ -28,7 +28,11 @@ export type RemapEntry = { modId: string; modName: string; pairs: [string, strin
 export const CONFLICT_REMAP: RemapEntry[] = [
   { modId: 'ultra-graphics', modName: 'Ultra Graphics', pairs: [['F8', 'F1'], ['F9', 'F3'], ['F10', 'F4']] },
   { modId: 'ultra-weather---with-volumetric-clouds', modName: 'Ultra Weather', pairs: [['F8', 'F11'], ['PAGE_DOWN', 'F12']] },
-  { modId: 'pal-insight---native-style-pal-inspection-overlay', modName: 'Pal Insight', pairs: [['F7', 'F5']] },
+  // F7 (potential-vision) → F5; Accessory Toggler keeps F7. Plus settingsKey F6 → O: F6 is
+  // double-bound with GuildSight's overlay toggle (GuildSight stores its key as a plain main.lua
+  // field, invisible to the detector). Pal Insight's SETTINGS menu is the rarely-used side, so
+  // it moves; GuildSight keeps the frequent F6 overlay. O = Options mnemonic, unused + game-free.
+  { modId: 'pal-insight---native-style-pal-inspection-overlay', modName: 'Pal Insight', pairs: [['F7', 'F5'], ['F6', 'O']] },
   { modId: 'palvolve---evolve-your-pals', modName: 'Palvolve', pairs: [['F2', 'Y']] },
 ]
 

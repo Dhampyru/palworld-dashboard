@@ -71,7 +71,8 @@ reads back. Overrides only apply when a mod produced **exactly one** ue4ss folde
 | F8/F9/F10 | Ultra Graphics | F1/F3/F4 | Condenser IQ | config |
 | F8 | Ultra Weather (sync) | F11 | Condenser IQ | config |
 | PAGE_DOWN | Ultra Weather (restore) | F12 | Base Automation | config |
-| F7 | Pal Insight | F5 | Accessory Toggler¹ | config |
+| F7 | Pal Insight (potential vision) | F5 | Accessory Toggler¹ | config |
+| F6 | Pal Insight (settings) | O⁵ | GuildSight | config |
 | F2 | Palvolve (evolve-confirm) | Y² | Hotkey Quick Stack | config |
 | C | Base Automation (copy) | **Ctrl+C** | BaseShift³ | payload edit |
 | NUM_4 | Palvolve (radial-cancel) | **disabled**⁴ | Party Hotkey Switcher | payload edit |
@@ -83,6 +84,10 @@ reads back. Overrides only apply when a mod produced **exactly one** ue4ss folde
 it's *meant* to ride the game's C, so Base Automation's copy moved instead.
 ⁴ Palvolve's `NUM_FOUR` radial-cancel was redundant (`FOUR` + `ESCAPE` still
 cancel), so disabling it keeps Party Hotkey Switcher's NUM 1–9 scheme intact.
+⁵ F6 was double-bound with **GuildSight**'s overlay toggle. GuildSight stores its
+key in `config.ini` (which the detector doesn't scan — see limitations), so this
+conflict was invisible to the badges; GuildSight keeps the frequent F6, Pal
+Insight's rarely-used settings menu moved to O.
 
 **API:** `POST /api/client-mods/keybinds` (admin-only, instance-scoped):
 - `{action:'remapPlan'}` → the spec (`CONFLICT_REMAP` + `PAYLOAD_EDITS`), preview only.
@@ -119,5 +124,9 @@ strict improvement (accepts more valid Lua; still parse-only, never executed).
   matched by the static scan.
 - **Game-default collisions aren't detected** — the scan only compares mods to each
   other, not to Palworld's own default binds. (Hence the `Y` caveat above.)
+- **`config.ini` keybinds aren't scanned** — the detector reads `config.lua`/
+  `config.json`/`.modconfig.json`, not `.ini` (GuildSight's `ToggleKey` lives there),
+  so an INI-configured bind can conflict undetected. The remap can still fix it by
+  moving the *other* side if that side is scannable (as F6 → O did).
 - Effective for players after a **loadout rebuild + reinstall** (client mods — no
   game restart needed).
