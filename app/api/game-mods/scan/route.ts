@@ -123,7 +123,7 @@ async function _POST(request: NextRequest) {
       .sort((a, b) => b.fileId - a.fileId)
       .map((f) => ({ fileId: f.fileId, name: f.displayName || f.name, version: f.version ?? null, category: f.category ?? null }))
 
-    const hint = analyzeDescription(`${info.summary ?? ''} ${info.description ?? ''}`)
+    const hint = analyzeDescription(`${info.name ?? ''} ${info.summary ?? ''} ${info.description ?? ''}`)
 
     // Deep scan: download the main file (Premium) and read its ACTUAL structure/type, then
     // fold the description on top (the author's explicit instructions win). The buffer is
@@ -133,7 +133,7 @@ async function _POST(request: NextRequest) {
     if (fileId) {
       try {
         const zip = await normalizeArchiveToZip(await downloadNexusFile(modId, fileId))
-        base = analyzeModArchive(zip, { nameHint: info.name })
+        base = analyzeModArchive(zip, { nameHint: info.name, description: `${info.summary ?? ''} ${info.description ?? ''}` })
       } catch {
         base = null // not Premium / download failed → description-only
       }

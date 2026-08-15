@@ -51,9 +51,20 @@ function zipNames(buffer: Buffer): string[] {
 
 const toClientKind = (k: DetectedKind): ClientModKind => (k === null ? 'unknown' : k)
 
+// Author "this is server-side" labeling, from the mod NAME or description. Catches
+// "serverside" / "server-side" / "server side" / "server only" (the [\s_-]? lets the two words
+// run together, so "(ServerSide Mod)" matches). The file list can't reveal this — a grant/login/
+// admin Lua mod ships Lua files (looks client-installable) but runs authoritative code the client
+// can't: e.g. spawning a Pal on login → `LowLevelFatalError` hard-crash on a dedicated-server
+// client. So when the author says server-side, believe them and keep it off the client.
+const SERVER_ONLY_LABEL_RE = /\bserver[\s_-]?side\b|\bserver[\s_-]?only\b/i
+export function looksServerSideOnly(...texts: (string | null | undefined)[]): boolean {
+  return texts.some((t) => typeof t === 'string' && SERVER_ONLY_LABEL_RE.test(t))
+}
+
 // Analyze a normalized zip buffer. `nameHint` is a filename or Nexus/Workshop title used
 // only to prettify the display name.
-export function analyzeModArchive(buffer: Buffer, opts: { nameHint?: string } = {}): ModAnalysis {
+export function analyzeModArchive(buffer: Buffer, opts: { nameHint?: string; description?: string } = {}): ModAnalysis {
   const names = zipNames(buffer)
   const kind = detectModKind(buffer)
 
@@ -71,7 +82,7 @@ export function analyzeModArchive(buffer: Buffer, opts: { nameHint?: string } = 
   // Reuse the loadout's own placement rule: classifyNames returns null when the mod has
   // files a friend's client installs (Lua / pak / LogicMods), or a warning otherwise.
   const clientWarn = classifyNames(names, toClientKind(kind))
-  const clientInstallable = clientWarn === null
+  let clientInstallable = clientWarn === null
   const serverInstallable = kind !== null
 
   let target: ModTarget
@@ -106,6 +117,16 @@ export function analyzeModArchive(buffer: Buffer, opts: { nameHint?: string } = 
     warn = clientWarn ?? 'No installable mod files detected in this archive.'
   }
 
+  // Author-labeled server-side (name or description) overrides a client-shipping guess. The file
+  // list said "client-installable" (it ships Lua/pak), but a grant/login/admin mod runs authoritative
+  // code the client can't — keep it off the client to avoid a LowLevelFatalError on join.
+  if (clientInstallable && serverInstallable && looksServerSideOnly(opts.nameHint, opts.description)) {
+    clientInstallable = false
+    target = 'server'
+    reason =
+      'Author-labeled server-side — a client can’t run it (grant/login/admin mods hard-crash a dedicated-server client on join), so it stays server-only.'
+  }
+
   const modName = cleanModName(opts.nameHint?.replace(/\.(zip|rar|7z|pak)$/i, '') || 'mod')
 
   return { kind, target, serverInstallable, clientInstallable, signals, modName, reason, warn }
@@ -138,6 +159,7 @@ const SERVER_PHRASES = [
   'only on the server', 'only needs to be on the server', 'only needs installing on the server',
   'dedicated server only', 'no client install', 'no client-side install', 'clients do not need',
   "clients don't need", 'not needed on the client', 'server-side mod', 'server side mod',
+  'serverside only', 'serverside mod', 'serverside-only', '(serverside', 'server side)', 'serverside)',
 ]
 
 function firstMatch(text: string, phrases: string[]): string | null {
@@ -173,5 +195,8 @@ export function applyDescriptionHint(analysis: ModAnalysis, hint: DescriptionHin
     target === hint.target
       ? `Mod page says “${hint.matched[hint.matched.length - 1]}” → ${target}.`
       : `Mod page says “${hint.matched[hint.matched.length - 1]}”, but the archive only supports ${target}.`
-  return { ...analysis, target, reason: `${analysis.reason} ${note}` }
+  // An explicit server placement means it must not ship to a client (covers install paths that
+  // build their analysis without analyzeModArchive, e.g. the Steam InstallRule path).
+  const clientInstallable = target === 'server' ? false : analysis.clientInstallable
+  return { ...analysis, target, clientInstallable, reason: `${analysis.reason} ${note}` }
 }
