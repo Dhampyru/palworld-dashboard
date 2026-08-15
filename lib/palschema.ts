@@ -274,13 +274,15 @@ export async function installPalSchemaSubmod(buffer: Buffer, replace = false): P
     if (!isSafeModFolderName(name)) {
       throw new Error(`Unsafe mod folder name: "${name}"`)
     }
+    // UE4SS-ONLY signals. NOTE: enabled.txt is deliberately NOT here — PalSchema mods use an
+    // enabled.txt toggle too (same convention as UE4SS), so it can't discriminate. A real UE4SS
+    // mod always carries scripts/, dlls/, main.lua, or a .lua/.dll; those still catch it.
     const looksLikeUe4ss = entries.some(({ rel }) => {
       const low = rel.toLowerCase()
       return (
         low.startsWith('scripts/') ||
         low.startsWith('dlls/') ||
         low === 'main.lua' ||
-        low === 'enabled.txt' ||
         low.endsWith('.lua') ||
         low.endsWith('.dll')
       )
