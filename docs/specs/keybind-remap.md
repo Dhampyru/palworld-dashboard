@@ -90,9 +90,13 @@ cancel), so disabling it keeps Party Hotkey Switcher's NUM 1–9 scheme intact.
 - `{action:'remapClear'}` → undo. A ledger (`data/keybind-remap.json`) records every
   override written, so undo removes **only** those (falls back to shipped configs).
 
-There is **no dashboard button yet** — remap is API-only (applied this session via
-the API). A future "Auto-remap conflicts" toggle in the Mods panel is the deferred
-follow-up; the engine + API here are its foundation.
+**UI (2026-08-15):** a **Keybind auto-remap** card in the client-mods panel
+(`components/client-mods-panel.tsx`), shown when there are conflicts to fix or a
+remap is active. Not-applied → an **Auto-remap conflicts** button (`remapApply`);
+applied → an **active** badge + **Undo remap** button (`remapClear`); either way a
+collapsible "What it changes" lists the full mapping. If conflicts remain after a
+remap (both sides hardcode the key, or a mod was added since), the card says so.
+`remapPlan` also returns `applied` so the card knows which state to show.
 
 ## Supporting fix — luaparse 5.3 (`lib/mod-config.ts`)
 

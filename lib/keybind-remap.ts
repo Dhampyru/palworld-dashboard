@@ -155,6 +155,11 @@ export async function applyManualRemap(): Promise<RemapResult> {
   return { applied, skipped }
 }
 
+// Is a remap currently applied? (the ledger exists → overrides are in place).
+export async function isRemapApplied(): Promise<boolean> {
+  return existsSync(stateFile())
+}
+
 // Undo: drop only the overrides this remap wrote (the loadout falls back to shipped files).
 export async function clearRemap(): Promise<number> {
   if (!existsSync(stateFile())) return 0

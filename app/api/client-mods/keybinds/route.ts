@@ -4,7 +4,7 @@ import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { runWithInstance } from '@/lib/instances'
 import { scanClientKeybinds } from '@/lib/keybind-scan'
-import { applyManualRemap, clearRemap, CONFLICT_REMAP, PAYLOAD_EDITS } from '@/lib/keybind-remap'
+import { applyManualRemap, clearRemap, CONFLICT_REMAP, isRemapApplied, PAYLOAD_EDITS } from '@/lib/keybind-remap'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -47,7 +47,8 @@ export async function POST(request: NextRequest) {
   }
   return runWithInstance(request.headers.get(PALWORLD_PROXY_HEADERS.instance), async () => {
     try {
-      if (body.action === 'remapPlan') return NextResponse.json({ remap: CONFLICT_REMAP, payloadEdits: PAYLOAD_EDITS })
+      if (body.action === 'remapPlan')
+        return NextResponse.json({ remap: CONFLICT_REMAP, payloadEdits: PAYLOAD_EDITS, applied: await isRemapApplied() })
       if (body.action === 'remapApply') return NextResponse.json({ ok: true, ...(await applyManualRemap()) })
       if (body.action === 'remapClear') return NextResponse.json({ ok: true, cleared: await clearRemap() })
       return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

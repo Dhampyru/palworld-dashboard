@@ -31,6 +31,7 @@ import {
   SlidersHorizontalIcon,
   Trash2Icon,
   UploadIcon,
+  WandSparklesIcon,
 } from 'lucide-react'
 
 type ClientConfigFile = {
@@ -110,6 +111,15 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   const [lastToggledId, setLastToggledId] = useState<string | null>(null) // highlight the row you just flipped
   type KeybindScan = { conflicts: { combo: string; mods: string[] }[]; perMod: Record<string, { combo: string; others: string[] }[]> }
   const [keybinds, setKeybinds] = useState<KeybindScan | null>(null)
+  // Auto-remap: the fixed spec + whether it's currently applied (overrides in place).
+  type RemapPlan = {
+    remap: { modName: string; pairs: [string, string][] }[]
+    payloadEdits: { modName: string; resolves: string }[]
+    applied: boolean
+  }
+  const [remap, setRemap] = useState<RemapPlan | null>(null)
+  const [remapBusy, setRemapBusy] = useState(false)
+  const [remapOpen, setRemapOpen] = useState(false) // "what it changes" disclosure
   const [url, setUrl] = useState('')
   const [bulk, setBulk] = useState('')
   const [bulkResults, setBulkResults] = useState<BulkResult[] | null>(null)
@@ -392,6 +402,13 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
           if (k && Array.isArray(k.conflicts)) setKeybinds(k)
         })
         .catch(() => {})
+      // Auto-remap plan + applied status (the fix for those conflicts) — fire-and-forget.
+      fetch('/api/client-mods/keybinds', { method: 'POST', headers: h, body: JSON.stringify({ action: 'remapPlan' }) })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((p) => {
+          if (p && Array.isArray(p.remap)) setRemap(p as RemapPlan)
+        })
+        .catch(() => {})
       if (nxRes?.ok) {
         const n = await nxRes.json()
         setNexus({ premium: Boolean(n.valid && n.isPremium), name: n.name ?? null })
@@ -415,6 +432,35 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   useEffect(() => {
     if (reloadKey) void load()
   }, [reloadKey, load])
+
+  // Apply / undo the keybind auto-remap (writes/removes loadout config-overrides; admin-only).
+  const runRemap = useCallback(
+    async (action: 'remapApply' | 'remapClear') => {
+      if (!config) return
+      setRemapBusy(true)
+      try {
+        const res = await fetch('/api/client-mods/keybinds', {
+          method: 'POST',
+          headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(json.error ?? res.statusText)
+        if (action === 'remapApply') {
+          const n = Array.isArray(json.applied) ? json.applied.length : 0
+          toast.success(n ? `Remapped ${n} mod${n === 1 ? '' : 's'} — regenerate the loadout to ship it` : 'Nothing to remap')
+        } else {
+          toast.success(`Reverted the remap (${json.cleared ?? 0} override${json.cleared === 1 ? '' : 's'}) — regenerate the loadout to apply`)
+        }
+        await load() // refresh conflict count + applied status
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Remap failed')
+      } finally {
+        setRemapBusy(false)
+      }
+    },
+    [config, load],
+  )
 
   const postJson = useCallback(
     async (body: Record<string, unknown>) => {
@@ -760,6 +806,88 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
           Refresh
         </button>
       </div>
+
+      {/* Keybind auto-remap — shown when there are conflicts to fix or a remap is active */}
+      {remap && keybinds && (keybinds.conflicts.length > 0 || remap.applied) && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="flex items-center gap-1.5 font-medium text-foreground">
+                <WandSparklesIcon className="size-4 text-amber-600 dark:text-amber-400" />
+                Keybind auto-remap
+                {remap.applied && (
+                  <span className="rounded-full border border-emerald-500/50 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                    active
+                  </span>
+                )}
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                {remap.applied
+                  ? 'Conflicting keys were moved to free keys and bundled into the loadout. Regenerate the loadout so friends get them.'
+                  : 'Two client mods grab the same key — one silently loses on your friends’ machines. Auto-remap moves the loser to a free key as a loadout override; your payloads and the server stay untouched, and it’s reversible.'}
+              </p>
+              {remap.applied && keybinds.conflicts.length > 0 && (
+                <p className="mt-1 text-amber-600 dark:text-amber-400">
+                  {keybinds.conflicts.length} conflict{keybinds.conflicts.length === 1 ? '' : 's'} remain that the remap can’t
+                  fix automatically (both mods hardcode the key, or a mod was added since).
+                </p>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {remap.applied ? (
+                <button
+                  onClick={() => runRemap('remapClear')}
+                  disabled={remapBusy}
+                  className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 hover:bg-muted disabled:opacity-50"
+                >
+                  <RotateCcwIcon className={remapBusy ? 'size-3.5 animate-spin' : 'size-3.5'} />
+                  Undo remap
+                </button>
+              ) : (
+                <button
+                  onClick={() => runRemap('remapApply')}
+                  disabled={remapBusy}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/50 bg-amber-500/15 px-2 py-1 font-medium text-amber-700 hover:bg-amber-500/25 disabled:opacity-50 dark:text-amber-300"
+                >
+                  <WandSparklesIcon className={remapBusy ? 'size-3.5 animate-spin' : 'size-3.5'} />
+                  Auto-remap conflicts
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* What it changes — the full mapping, collapsed by default */}
+          {(remap.remap.length > 0 || remap.payloadEdits.length > 0) && (
+            <div className="mt-2">
+              <button
+                onClick={() => setRemapOpen((v) => !v)}
+                className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+              >
+                <ChevronDownIcon className={remapOpen ? 'size-3.5 rotate-180 transition' : 'size-3.5 transition'} />
+                What it changes ({remap.remap.reduce((n, e) => n + e.pairs.length, 0) + remap.payloadEdits.length})
+              </button>
+              {remapOpen && (
+                <ul className="mt-1.5 space-y-1 border-l-2 border-amber-500/30 pl-3">
+                  {remap.remap.map((e) => (
+                    <li key={`c-${e.modName}`}>
+                      <span className="font-medium text-foreground">{e.modName}</span>
+                      {': '}
+                      {e.pairs.map(([from, to]) => `${from} → ${to}`).join(', ')}
+                    </li>
+                  ))}
+                  {remap.payloadEdits.map((e) => (
+                    <li key={`p-${e.modName}-${e.resolves}`}>
+                      <span className="font-medium text-foreground">{e.modName}</span>
+                      {': '}
+                      {e.resolves}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Explainer */}
       <div className="rounded-md border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
