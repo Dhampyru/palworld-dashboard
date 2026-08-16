@@ -10,9 +10,9 @@
 // base bundle is OPERATOR-SUPPLIED (uploaded once, stored in the data volume). Presets are tiny
 // recipe .ini files added by upload or URL.
 import AdmZip from 'adm-zip'
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, resolve, sep } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { normalizeArchiveToZip } from '@/lib/archive'
 import { overlayShaderLibraryInto, resolvePresetShaders, type ShaderResolution } from '@/lib/reshade-shaders'
 
@@ -107,6 +107,37 @@ export async function saveReshadeBase(buffer: Buffer, name: string): Promise<Res
   await writeReshadeConfig(c)
   return c
 }
+
+// A durable DEFAULT seed on the GAME volume (a different volume from /app/data), so the base
+// survives a data-volume wipe and re-seeds automatically on boot. "Bake it in."
+const DEFAULT_SEED = join(process.env.PALWORLD_GAME_DIR ?? '/palworld-game', 'backups', 'reshade-default-base.zip')
+
+// Copy the CURRENT base to the durable seed location (the "set as default" action).
+export async function promoteBaseToDefault(): Promise<{ path: string }> {
+  if (!existsSync(BASE_ZIP)) throw new Error('No ReShade base uploaded to set as default.')
+  await mkdir(dirname(DEFAULT_SEED), { recursive: true }).catch(() => {})
+  await cp(BASE_ZIP, DEFAULT_SEED)
+  return { path: DEFAULT_SEED }
+}
+
+// Boot hook: if there's no base but a durable default seed exists, restore it. Idempotent and
+// silent — leaves `enabled` at whatever the (possibly fresh) config says (safe: off after a wipe).
+export async function seedDefaultBaseIfMissing(): Promise<boolean> {
+  if (existsSync(BASE_ZIP) || !existsSync(DEFAULT_SEED)) return false
+  await ensureDirs()
+  await cp(DEFAULT_SEED, BASE_ZIP)
+  try {
+    const entries = new AdmZip(await readFile(BASE_ZIP)).getEntries().filter((e) => !e.isDirectory)
+    const c = await readReshadeConfig()
+    c.base = { name: 'default (auto-reseeded)', sizeBytes: (await stat(BASE_ZIP)).size, fileCount: entries.length, addedAt: Date.now() }
+    await writeReshadeConfig(c)
+  } catch {
+    /* base copied; metadata best-effort */
+  }
+  return true
+}
+
+export const hasDefaultSeed = () => existsSync(DEFAULT_SEED)
 
 export async function clearReshadeBase(): Promise<ReshadeConfig> {
   await rm(BASE_ZIP, { force: true }).catch(() => {})
@@ -218,8 +249,8 @@ export async function overlayReshadeInto(win64Dir: string): Promise<{ files: num
   return { files, presets }
 }
 
-// For GET: current config + whether a base is actually on disk.
-export async function reshadeStatus(): Promise<ReshadeConfig & { basePresent: boolean }> {
+// For GET: current config + whether a base is actually on disk + whether a durable default exists.
+export async function reshadeStatus(): Promise<ReshadeConfig & { basePresent: boolean; defaultSeeded: boolean }> {
   const c = await readReshadeConfig()
-  return { ...c, basePresent: c.base != null && existsSync(BASE_ZIP) }
+  return { ...c, basePresent: c.base != null && existsSync(BASE_ZIP), defaultSeeded: hasDefaultSeed() }
 }

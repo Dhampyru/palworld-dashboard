@@ -36,6 +36,17 @@ an operator-chosen ReShade into the client loadout as an **optional toggle**.
   clearBase / removePreset / addPresetUrl; POST multipart = base / preset upload. Every mutation
   responds with the full `reshadeStatus()` (incl. `basePresent`).
 
+## Default seed / auto-reseed (2026-08-16)
+
+The base upload persists in the data volume, but to survive a data-volume wipe there's a durable
+**default seed** on the GAME volume (a different volume): `promoteBaseToDefault()` copies
+`base.zip` → `<game>/backups/reshade-default-base.zip` (the "set as default" action / `bakeDefault`
+API). On boot, `seedDefaultBaseIfMissing()` (called from `instrumentation.ts register()`) restores
+`base.zip` from that seed if the data volume lost it. `reshadeStatus().defaultSeeded` drives the UI
+(`base: … · default ✓` vs a "set as default" link). A bare `dxgi.dll` upload is accepted directly
+(MZ-magic wrap → single-entry base zip) so no manual zipping is needed. Verified: baked the seed,
+deleted `base.zip`, restarted → base auto-restored ("default (auto-reseeded)"), build unchanged.
+
 ## Coexistence
 
 Client UE4SS uses the `dwmapi.dll` proxy; ReShade uses `dxgi.dll` — different proxies, verified

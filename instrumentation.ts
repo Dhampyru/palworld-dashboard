@@ -12,5 +12,8 @@ export async function register() {
     startBroadcastScheduler()
     const { startDeathAnnouncer } = await import('@/lib/death-announce')
     startDeathAnnouncer()
+    // Restore the ReShade base from its durable default seed if the data volume was wiped.
+    const { seedDefaultBaseIfMissing } = await import('@/lib/reshade')
+    await seedDefaultBaseIfMissing().catch(() => {})
   }
 }

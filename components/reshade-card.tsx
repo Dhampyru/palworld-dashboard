@@ -18,6 +18,7 @@ type Status = {
   enabled: boolean
   base: { name: string; sizeBytes: number; fileCount: number; addedAt: number } | null
   basePresent: boolean
+  defaultSeeded?: boolean
   presets: Preset[]
   shaderRepos?: { name: string; license: string }[]
 }
@@ -187,6 +188,20 @@ export function ReshadeCard() {
         {hasBase ? (
           <span className="inline-flex items-center gap-2 text-[11px] text-emerald-600 dark:text-emerald-400">
             base: {st?.base?.name} ({st?.base?.fileCount} files, {Math.round((st?.base?.sizeBytes ?? 0) / 1024 / 1024)} MB)
+            {st?.defaultSeeded ? (
+              <span className="text-muted-foreground" title="Saved to the game volume — auto-restores after a data-volume wipe">
+                · default ✓
+              </span>
+            ) : (
+              <button
+                className="text-primary hover:underline"
+                disabled={busy}
+                onClick={() => postJson({ action: 'bakeDefault' })}
+                title="Copy this DLL to the durable game volume so it auto-restores after a reset"
+              >
+                set as default
+              </button>
+            )}
             <button
               className="text-muted-foreground hover:text-destructive"
               disabled={busy}

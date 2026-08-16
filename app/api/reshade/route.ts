@@ -6,6 +6,7 @@ import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import {
   addReshadePresetFromBuffer,
   clearReshadeBase,
+  promoteBaseToDefault,
   removeReshadePreset,
   reresolveAllPresets,
   reshadeStatus,
@@ -81,6 +82,9 @@ export async function POST(request: NextRequest) {
         return ok()
       case 'clearBase':
         await clearReshadeBase()
+        return ok()
+      case 'bakeDefault':
+        await promoteBaseToDefault()
         return ok()
       case 'removePreset':
         if (!body.file) return NextResponse.json({ error: 'file required' }, { status: 400 })
