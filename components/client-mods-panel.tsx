@@ -330,7 +330,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
           }
         }
         const bits = [`Extracted ${count} file(s)${many ? ` from ${zips.length} zips` : ''}`]
-        if (dup) bits.push(`ignored ${dup} duplicate(s)`)
+        if (dup) bits.push(`skipped ${dup} the mod already ships (upload singly to override)`)
         if (skipped) bits.push(`skipped ${skipped}`)
         if (failed) bits.push(`${failed} zip(s) failed`)
         const msg = `${bits.join(', ')} — regenerate the loadout to ship`
@@ -1317,9 +1317,9 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
                   disabled={filesBusy}
                   onClick={() => setFilesSel(new Set(filesOverlay.files.filter((f) => f.duplicate).map(fileKey)))}
                   className="h-7 gap-1.5 text-amber-600 hover:text-amber-600 dark:text-amber-400"
-                  title="Select files that duplicate ones the mod already ships"
+                  title="Select files that override ones the mod ships — handy for clearing an accidental whole-folder upload (leave intentional overrides like a config/gains file)"
                 >
-                  <AlertTriangleIcon className="size-3.5" /> Select duplicates ({filesOverlay.duplicates})
+                  <AlertTriangleIcon className="size-3.5" /> Select overrides ({filesOverlay.duplicates})
                 </Button>
               )}
               <Button
@@ -1362,9 +1362,9 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
                         {f.duplicate && (
                           <span
                             className="shrink-0 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400"
-                            title="Matches a file the mod already ships — usually an accidental whole-folder upload; safe to delete"
+                            title="Overrides a file the mod ships — at build this replaces the mod's own copy. Intentional if you're customizing it (e.g. a config/gains file); if it was an accidental whole-folder upload, delete it."
                           >
-                            dupe
+                            overrides
                           </span>
                         )}
                       </div>
