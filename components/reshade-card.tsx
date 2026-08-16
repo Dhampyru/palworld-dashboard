@@ -99,15 +99,54 @@ export function ReshadeCard() {
   const shaderRef = useRef<HTMLInputElement | null>(null)
   const anyMissing = (st?.presets ?? []).some((p) => (p.shaders?.missing?.length ?? 0) > 0)
 
+  // Drag & drop: route each dropped file to the right target by extension. A .dll is the base;
+  // .ini is a preset; .fx/.fxh are gap shaders; an archive is a preset (or the base if none yet).
+  const [dragOver, setDragOver] = useState(false)
+  const routeAndUpload = useCallback(
+    async (files: FileList | File[]) => {
+      const baseNow = st?.basePresent ?? false
+      for (const f of Array.from(files)) {
+        const n = f.name.toLowerCase()
+        let field: 'base' | 'preset' | 'shader' | null = null
+        if (n.endsWith('.dll')) field = 'base'
+        else if (n.endsWith('.ini')) field = 'preset'
+        else if (n.endsWith('.fx') || n.endsWith('.fxh')) field = 'shader'
+        else if (/\.(zip|7z|rar)$/.test(n)) field = baseNow ? 'preset' : 'base'
+        if (!field) {
+          toast.error(`${f.name}: unsupported — drop a .dll, .ini, .fx/.fxh, or a .zip`)
+          continue
+        }
+        await upload(field, f)
+      }
+    },
+    [upload, st],
+  )
+
   const enabled = st?.enabled ?? false
   const hasBase = st?.basePresent ?? false
 
   return (
-    <div className="flex flex-col gap-2 rounded-md border p-3">
+    <div
+      className={`flex flex-col gap-2 rounded-md border p-3 transition-colors ${dragOver ? 'border-primary ring-2 ring-primary/40 bg-primary/5' : ''}`}
+      onDragOver={(e) => {
+        e.preventDefault()
+        setDragOver(true)
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault()
+        setDragOver(false)
+      }}
+      onDrop={(e) => {
+        e.preventDefault()
+        setDragOver(false)
+        if (e.dataTransfer.files?.length) void routeAndUpload(e.dataTransfer.files)
+      }}
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <SparklesIcon className="size-4 text-primary" />
           <span className="text-sm font-semibold">ReShade (visual preset)</span>
+          {dragOver && <span className="text-[11px] text-primary">drop to add — .dll → base · .ini → preset · .fx → shader</span>}
         </div>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <input
@@ -125,7 +164,7 @@ export function ReshadeCard() {
         Client-side graphics post-processing (color/sharpness). When on, the loadout drops ReShade into every friend&apos;s{' '}
         <span className="font-mono">Pal\Binaries\Win64</span>. Coexists with UE4SS. Drop your{' '}
         <span className="font-mono">dxgi.dll</span> once (from a reshade.me install — shaders are fetched automatically),
-        then add preset(s).
+        then add preset(s). <span className="text-foreground/70">Tip: drag &amp; drop files anywhere on this card.</span>
       </p>
 
       {/* Base bundle */}
