@@ -153,10 +153,21 @@ export function InvitePanel() {
     }
   }, [config, includeUe4ss])
 
+  const shareUrl = useCallback((token: string) => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    return `${origin}/share/${token}`
+  }, [])
+
   const inviteText = useMemo(() => {
     if (!manifest) return ''
     const name = manifest.serverName ?? 'the server'
     const connect = host.trim() ? `${host.trim()}:${manifest.port}` : `<your public IP>:${manifest.port}`
+    // Newest still-valid share link (not expired, uses left), if any — so the invite carries a
+    // direct download instead of "ask me for the bundle".
+    const now = Date.now()
+    const validShare = shares
+      .filter((s) => (s.expiresAt == null || s.expiresAt > now) && (s.maxUses == null || s.uses < s.maxUses))
+      .sort((a, b) => b.createdAt - a.createdAt)[0]
     const lines: string[] = []
     lines.push(`Join ${name}!`)
     lines.push('')
@@ -165,16 +176,19 @@ export function InvitePanel() {
       lines.push(`Palworld version: ${manifest.gameVersion} — update via Steam if yours differs (you can't join otherwise).`)
     }
     lines.push('')
-    lines.push('Mods: ask me for the mod bundle (a single .zip). Close Palworld, extract it')
-    lines.push('into your Palworld install folder (…\\Steam\\steamapps\\common\\Palworld\\),')
-    lines.push('merging when asked, then relaunch. That’s everything you need to match the server.')
+    if (validShare) {
+      lines.push(`Mods: download the bundle here — ${shareUrl(validShare.token)}`)
+      if (validShare.requiresPass) lines.push('(It’ll ask for a passphrase — I’ll send that separately.)')
+      lines.push('Close Palworld, extract the .zip into your Palworld install folder')
+      lines.push('(…\\Steam\\steamapps\\common\\Palworld\\), merging when asked, then relaunch.')
+      lines.push('That’s everything you need to match the server.')
+    } else {
+      lines.push('Mods: ask me for the mod bundle (a single .zip). Close Palworld, extract it')
+      lines.push('into your Palworld install folder (…\\Steam\\steamapps\\common\\Palworld\\),')
+      lines.push('merging when asked, then relaunch. That’s everything you need to match the server.')
+    }
     return lines.join('\n')
-  }, [manifest, host])
-
-  const shareUrl = useCallback((token: string) => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : ''
-    return `${origin}/share/${token}`
-  }, [])
+  }, [manifest, host, shares, shareUrl])
 
   const createShare = useCallback(async () => {
     if (!config) return
