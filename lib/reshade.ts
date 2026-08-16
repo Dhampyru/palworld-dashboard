@@ -296,6 +296,9 @@ export async function overlayReshadeInto(win64Dir: string): Promise<{ files: num
   const firstPreset = c.presets.find((p) => existsSync(join(PRESETS_DIR, p.file)))
   if (firstPreset) kv.PresetPath = `.\\${firstPreset.file}`
   ini = setIniKeys(ini, 'GENERAL', kv)
+  // Mark the first-run tutorial complete (4 = done) so the "ReShade X.Y — visit reshade.me…"
+  // startup/tutorial message doesn't pop up on every launch for friends.
+  ini = setIniKeys(ini, 'OVERLAY', { TutorialProgress: '4' })
   await writeFile(iniPath, ini, 'utf8')
   if (!hadIni) files++
   return { files, presets }
