@@ -58,6 +58,16 @@ base overlay keys) — only when ReShade will actually ship (enabled + base pres
 signature includes ReShade state so it re-scans when a preset/base changes. Verified: a preset
 binding F7 surfaced as a conflict with Accessory Toggler (which keeps F7); removing it cleared it.
 
+## ReShade.ini generation (2026-08-16 fix)
+
+A bare-DLL base ships no `ReShade.ini`, so ReShade auto-generated one with EMPTY search paths →
+in-game "no .fx files found" and the preset not selected by default (user had to pick it).
+`overlayReshadeInto` now ensures `Win64/ReShade.ini` `[GENERAL]` has
+`EffectSearchPaths=.\reshade-shaders\Shaders\**`, `TextureSearchPaths=.\reshade-shaders\Textures\**`,
+and `PresetPath=.\<first preset>.ini` (patches an ini shipped in the base via `setIniKeys`, else
+generates a minimal one). Verified in a rebuilt bundle: the 3 keys point at the shipped
+Deband/FakeHDR/LumaSharpen + core includes, DECENT set as the default preset.
+
 ## Coexistence
 
 Client UE4SS uses the `dwmapi.dll` proxy; ReShade uses `dxgi.dll` — different proxies, verified

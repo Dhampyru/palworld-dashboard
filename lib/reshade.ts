@@ -215,6 +215,42 @@ export async function removeReshadePreset(file: string): Promise<ReshadeConfig> 
   return c
 }
 
+// Set key=value(s) within an INI [section], preserving the rest — replace existing keys, add
+// missing ones, create the section if absent. Used to point ReShade.ini at our shaders + preset.
+function setIniKeys(content: string, section: string, kv: Record<string, string>): string {
+  const lines = content.split(/\r?\n/)
+  let secStart = -1
+  let secEnd = lines.length
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().toLowerCase() === `[${section.toLowerCase()}]`) {
+      secStart = i
+      for (let j = i + 1; j < lines.length; j++) {
+        if (/^\s*\[/.test(lines[j])) {
+          secEnd = j
+          break
+        }
+      }
+      break
+    }
+  }
+  const remaining = { ...kv }
+  if (secStart === -1) {
+    const block = [`[${section}]`, ...Object.entries(remaining).map(([k, v]) => `${k}=${v}`)]
+    const base = content.trim() ? content.replace(/\s*$/, '') + '\n\n' : ''
+    return base + block.join('\n') + '\n'
+  }
+  for (let i = secStart + 1; i < secEnd; i++) {
+    const m = /^\s*([A-Za-z0-9_]+)\s*=/.exec(lines[i])
+    if (m && m[1] in remaining) {
+      lines[i] = `${m[1]}=${remaining[m[1]]}`
+      delete remaining[m[1]]
+    }
+  }
+  const toAdd = Object.entries(remaining).map(([k, v]) => `${k}=${v}`)
+  lines.splice(secEnd, 0, ...toAdd)
+  return lines.join('\n')
+}
+
 // Loadout hook: overlay ReShade into the bundle's Win64 dir. No-op unless enabled + a base is
 // present. Returns a summary { files, presets } (0 files → nothing shipped). Path-guarded so a
 // crafted base zip can't escape Win64.
@@ -246,6 +282,22 @@ export async function overlayReshadeInto(win64Dir: string): Promise<{ files: num
     presets.push(p.name)
     files++
   }
+  // 4. Ensure ReShade.ini points at OUR shaders + selects a preset by default. Without this,
+  // ReShade auto-generates an ini with empty search paths → "no .fx files found" and no preset
+  // selected. Patch an ini shipped in the base, or create a minimal one.
+  const iniPath = join(win64Dir, 'ReShade.ini')
+  const hadIni = existsSync(iniPath)
+  let ini = hadIni ? await readFile(iniPath, 'utf8') : ''
+  const kv: Record<string, string> = {
+    EffectSearchPaths: '.\\reshade-shaders\\Shaders\\**',
+    TextureSearchPaths: '.\\reshade-shaders\\Textures\\**',
+  }
+  // Default preset = the first shipped preset, so it's selected on first launch.
+  const firstPreset = c.presets.find((p) => existsSync(join(PRESETS_DIR, p.file)))
+  if (firstPreset) kv.PresetPath = `.\\${firstPreset.file}`
+  ini = setIniKeys(ini, 'GENERAL', kv)
+  await writeFile(iniPath, ini, 'utf8')
+  if (!hadIni) files++
   return { files, presets }
 }
 
