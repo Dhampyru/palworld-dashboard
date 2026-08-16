@@ -9,7 +9,6 @@ import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
 import { CheckIcon, CopyIcon, DownloadIcon, Link2Icon, PackageIcon, RefreshCwIcon, Trash2Icon, UsersIcon } from 'lucide-react'
-import { ReshadeCard } from '@/components/reshade-card'
 
 type ShareInfo = {
   token: string
@@ -408,9 +407,6 @@ export function InvitePanel() {
         )}
         {lastLoadout && <p className="text-[11px] text-emerald-600 dark:text-emerald-400">Last build: {lastLoadout}</p>}
       </div>
-
-      {/* Optional ReShade — visual preset baked into the loadout */}
-      <ReshadeCard />
 
       {/* Share links — a friend-facing web download (no admin login for them) */}
       <div className="flex flex-col gap-2 rounded-md border p-3">

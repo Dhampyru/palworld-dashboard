@@ -5,9 +5,10 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { GameModsPanel } from '@/components/game-mods-panel'
 import { ClientModsPanel } from '@/components/client-mods-panel'
 import { ClientConfigsPanel } from '@/components/client-configs-panel'
+import { ReshadeCard } from '@/components/reshade-card'
 import { UnifiedModUploader } from '@/components/unified-mod-uploader'
 import { Ue4ssLoaderCard } from '@/components/ue4ss-loader-card'
-import { ServerIcon, MonitorIcon } from 'lucide-react'
+import { ServerIcon, MonitorIcon, SparklesIcon } from 'lucide-react'
 
 // PATCH (not upstream): the Mods page. ONE uploader (UnifiedModUploader) sits ABOVE the two
 // sub-tabs — it scans an upload/URL, decides server/client/both, and installs there. The
@@ -15,7 +16,7 @@ import { ServerIcon, MonitorIcon } from 'lucide-react'
 // friend loadout staging. The old per-tab uploaders are hidden (hideInstall/hideUploader);
 // a bumped reloadKey refreshes both lists after the shared uploader commits. Sub-tab only;
 // the main dashboard tab is still `mods`. The sub-tab choice persists locally.
-type Sub = 'server' | 'client'
+type Sub = 'server' | 'client' | 'reshade'
 const STORE_KEY = 'modsSubTab'
 
 function SubTab({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
@@ -41,7 +42,7 @@ export function ModsWorkspace() {
   useEffect(() => {
     try {
       const s = localStorage.getItem(STORE_KEY)
-      if (s === 'client' || s === 'server') setSub(s)
+      if (s === 'client' || s === 'server' || s === 'reshade') setSub(s)
     } catch {
       /* ignore */
     }
@@ -67,16 +68,21 @@ export function ModsWorkspace() {
       <div role="tablist" className="flex shrink-0 items-center gap-1 border-b border-border/60 px-3 py-2">
         <SubTab active={sub === 'server'} onClick={() => choose('server')} icon={<ServerIcon className="size-4" />} label="Server mods" />
         <SubTab active={sub === 'client'} onClick={() => choose('client')} icon={<MonitorIcon className="size-4" />} label="Client mods" />
+        <SubTab active={sub === 'reshade'} onClick={() => choose('reshade')} icon={<SparklesIcon className="size-4" />} label="ReShade" />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto lg:overflow-hidden">
         <ScrollArea className="h-full lg:h-auto lg:flex-1">
           {sub === 'server' ? (
             <GameModsPanel reloadKey={reloadKey} />
-          ) : (
+          ) : sub === 'client' ? (
             <>
               <ClientModsPanel hideUploader reloadKey={reloadKey} />
               <ClientConfigsPanel />
             </>
+          ) : (
+            <div className="p-4">
+              <ReshadeCard />
+            </div>
           )}
         </ScrollArea>
       </div>
