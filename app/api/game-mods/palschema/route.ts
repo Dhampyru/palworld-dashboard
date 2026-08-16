@@ -4,6 +4,7 @@ import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { DEMO_MODE } from '@/lib/demo-mode'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { runWithInstance } from '@/lib/instances'
+import { removeClientModsByName } from '@/lib/client-mods'
 import {
   downloadPalSchemaRelease,
   installPalSchemaLoader,
@@ -106,10 +107,14 @@ async function _POST(request: NextRequest) {
       if (body.action === 'remove') {
         if (!body.name) return NextResponse.json({ error: 'name required' }, { status: 400 })
         const { backup } = await removePalSchemaSubmod(body.name)
+        // Cascade to the paired CLIENT mod (default: delete both sides). PalSchema submods carry
+        // no Nexus/Steam id, so match by normalized name.
+        const cascadedClient = await removeClientModsByName(body.name).catch(() => [])
         return NextResponse.json({
           status: await readPalSchemaStatus(),
           submods: await listPalSchemaSubmods(),
-          note: `Removed ${body.name} (backed up to ${backup}) — restart the server to apply.`,
+          cascadedClient,
+          note: `Removed ${body.name}${cascadedClient.length ? ` (+ client: ${cascadedClient.join(', ')})` : ''} (backed up to ${backup}) — restart the server to apply.`,
         })
       }
 

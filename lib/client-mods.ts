@@ -469,6 +469,19 @@ export async function removeClientModsBySource(source: 'nexus' | 'steam', source
   return victims.map((m) => m.name)
 }
 
+// Cascade a server-side removal to the paired client mod by NORMALIZED display name — for mods
+// with no Nexus/Steam id to match on (uploads, PalSchema submods). Exact match after stripping
+// non-alphanumerics so "Wing Pack Gliding - 0 Cost" == "WingPackGliding0Cost". Returns removed names.
+const normModName = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+export async function removeClientModsByName(name: string): Promise<string[]> {
+  const target = normModName(name)
+  if (!target) return []
+  const idx = await readIndex()
+  const victims = Object.values(idx).filter((m) => normModName(m.name) === target)
+  for (const m of victims) await removeClientMod(m.id)
+  return victims.map((m) => m.name)
+}
+
 // Recompute `configMenu` from a stored payload on disk (size-capped so a big payload never
 // bloats memory). Used by add (in-memory variants) and backfill.
 async function detectConfigMenuOnDisk(dir: string, payload: string): Promise<boolean> {
