@@ -194,6 +194,12 @@ const CURATED: Record<string, Partial<Omit<SettingField, 'key' | 'category' | 'd
   bShowPlayerList: { label: 'Show Player List Publicly', kind: 'boolean' },
   bHardcore: { label: 'Hardcore Mode', kind: 'boolean', description: 'Player death is permanent.' },
   bPalLost: { label: 'Pal Lost on Death', kind: 'boolean', description: 'Pals on a player are lost permanently on death.' },
+  bExistPlayerAfterLogout: {
+    label: 'Keep Player Body After Logout',
+    kind: 'boolean',
+    description:
+      'Leave your character standing in the world after you disconnect (NOT a save toggle). Keep OFF (default). On a dedicated server, ON is buggy: reconnecting tries to re-possess the leftover body and often fails, spawning a fresh character at the start with an empty inventory — looks like your save was lost. OFF removes the body and reloads you from your save normally, which is the reliable way to persist.',
+  },
   RCONEnabled: { label: 'RCON Enabled', kind: 'boolean', description: 'Enables RCON remote console access.' },
   RESTAPIEnabled: { label: 'REST API Enabled', kind: 'boolean', description: 'Enables the REST API used by this dashboard.' },
   PlayerStomachDecreaceRate: { label: 'Player Hunger Rate', kind: 'float', min: 0, max: 5, step: 0.1 },
