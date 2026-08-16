@@ -7,17 +7,19 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
-import { SparklesIcon, UploadIcon, Trash2Icon, PlusIcon } from 'lucide-react'
+import { SparklesIcon, UploadIcon, Trash2Icon, PlusIcon, CheckIcon, AlertTriangleIcon } from 'lucide-react'
 
 // PATCH (not upstream): ReShade in the client loadout. Toggle + operator-supplied base bundle
 // (BSD-3 injector + shaders) + presets (upload / Nexus URL). When enabled, the loadout drops it
 // into Pal/Binaries/Win64/. See docs/specs/reshade-loadout.md.
-type Preset = { file: string; name: string; source: string; addedAt: number }
+type ShaderResolution = { required: string[]; resolved: { file: string; source: string }[]; missing: string[]; sources: string[] }
+type Preset = { file: string; name: string; source: string; addedAt: number; shaders?: ShaderResolution }
 type Status = {
   enabled: boolean
   base: { name: string; sizeBytes: number; fileCount: number; addedAt: number } | null
   basePresent: boolean
   presets: Preset[]
+  shaderRepos?: { name: string; license: string }[]
 }
 
 export function ReshadeCard() {
@@ -66,10 +68,11 @@ export function ReshadeCard() {
   )
 
   const upload = useCallback(
-    async (field: 'base' | 'preset', file: File) => {
+    async (field: 'base' | 'preset' | 'shader', file: File) => {
       if (!config) return
       setBusy(true)
-      const tid = toast.loading(field === 'base' ? 'Uploading ReShade base…' : 'Adding preset…')
+      const label = field === 'base' ? 'Uploading ReShade base…' : field === 'preset' ? 'Adding preset (resolving shaders)…' : 'Adding shaders…'
+      const tid = toast.loading(label)
       try {
         const form = new FormData()
         form.append(field, file)
@@ -77,7 +80,13 @@ export function ReshadeCard() {
         const j = await r.json().catch(() => ({}))
         if (!r.ok) throw new Error(j.error ?? 'Upload failed')
         setSt(j)
-        toast.success(field === 'base' ? `ReShade base set (${j.base?.fileCount ?? '?'} files)` : 'Preset added', { id: tid })
+        const done =
+          field === 'base'
+            ? `ReShade base set (${j.base?.fileCount ?? '?'} files)`
+            : field === 'preset'
+              ? 'Preset added & shaders resolved'
+              : 'Shaders added'
+        toast.success(done, { id: tid })
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Upload failed', { id: tid })
       } finally {
@@ -86,6 +95,9 @@ export function ReshadeCard() {
     },
     [config],
   )
+
+  const shaderRef = useRef<HTMLInputElement | null>(null)
+  const anyMissing = (st?.presets ?? []).some((p) => (p.shaders?.missing?.length ?? 0) > 0)
 
   const enabled = st?.enabled ?? false
   const hasBase = st?.basePresent ?? false
@@ -188,25 +200,74 @@ export function ReshadeCard() {
         </div>
         {st?.presets?.length ? (
           <ul className="flex flex-col gap-1">
-            {st.presets.map((p) => (
-              <li key={p.file} className="flex items-center justify-between gap-2 rounded border px-2 py-1 text-[11px]">
-                <span className="truncate">
-                  <span className="font-medium text-foreground">{p.name}</span>{' '}
-                  <span className="text-muted-foreground">· {p.source}</span>
-                </span>
-                <button
-                  className="shrink-0 text-muted-foreground hover:text-destructive"
-                  disabled={busy}
-                  onClick={() => postJson({ action: 'removePreset', file: p.file })}
-                  title="Remove preset"
-                >
-                  <Trash2Icon className="size-3.5" />
-                </button>
-              </li>
-            ))}
+            {st.presets.map((p) => {
+              const sh = p.shaders
+              const miss = sh?.missing ?? []
+              const res = sh?.resolved?.length ?? 0
+              return (
+                <li key={p.file} className="flex flex-col gap-1 rounded border px-2 py-1.5 text-[11px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate">
+                      <span className="font-medium text-foreground">{p.name}</span>{' '}
+                      <span className="text-muted-foreground">· {p.source}</span>
+                    </span>
+                    <button
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
+                      disabled={busy}
+                      onClick={() => postJson({ action: 'removePreset', file: p.file })}
+                      title="Remove preset"
+                    >
+                      <Trash2Icon className="size-3.5" />
+                    </button>
+                  </div>
+                  {sh && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {miss.length === 0 ? (
+                        <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                          <CheckIcon className="size-3" /> {res}/{sh.required.length} shaders ready
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400" title={`Missing: ${miss.join(', ')}`}>
+                          <AlertTriangleIcon className="size-3" /> {res}/{sh.required.length} ready · needs {miss.length}: {miss.slice(0, 4).join(', ')}
+                          {miss.length > 4 ? '…' : ''}
+                        </span>
+                      )}
+                      {sh.sources.length > 0 && <span className="text-muted-foreground">— from {sh.sources.join(', ')}</span>}
+                    </div>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         ) : (
           <p className="text-[11px] text-muted-foreground">No presets yet — add a Nexus URL or upload a .ini.</p>
+        )}
+
+        {/* Gap-shader upload — appears when a preset references shaders we couldn't resolve. */}
+        {anyMissing && (
+          <div className="flex flex-wrap items-center gap-2 rounded border border-amber-500/40 bg-amber-500/5 p-2">
+            <span className="text-[11px] text-amber-700 dark:text-amber-300">
+              Some shaders aren&apos;t in the known repos (third-party pack). Upload the missing <span className="font-mono">.fx</span>/
+              <span className="font-mono">.fxh</span> (or a .zip of them):
+            </span>
+            <input
+              ref={shaderRef}
+              type="file"
+              accept=".fx,.fxh,.zip,.7z"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) void upload('shader', f)
+                e.target.value = ''
+              }}
+            />
+            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" disabled={busy} onClick={() => shaderRef.current?.click()}>
+              <UploadIcon className="size-3.5" /> Add shaders
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => postJson({ action: 'reresolve' })}>
+              Re-resolve
+            </Button>
+          </div>
         )}
       </div>
 

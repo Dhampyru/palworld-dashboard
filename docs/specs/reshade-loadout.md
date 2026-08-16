@@ -54,6 +54,43 @@ side-by-side in a built bundle. No conflict.
 - A **preset alone is not a working ReShade** — it references shaders it doesn't contain (Nexus
   197 is a 400-byte `.ini`). The base (DLL + shaders) is mandatory; the toggle enforces it.
 
+## Shader dependency resolver (2026-08-16)
+
+A preset is a recipe — its `Techniques=` line names the `.fx` effects it needs, but rarely ships
+them. `lib/reshade-shaders.ts` resolves every required shader so a preset-only upload actually
+works, and reports what it can't find so nothing ships broken.
+
+- **`parseRequiredFx`** — parses ONLY `Techniques=` (the ENABLED effects), deliberately not
+  `TechniqueSorting=` (author's full installed-effect list — parsing it ballooned a 4-effect
+  preset to 167 phantom deps; the fix is Techniques-only).
+- **Resolution order** per shader: (1) BUNDLED in the preset's own archive (e.g. Subtle Outline
+  ships all 13 of its `.fx`), (2) the already-resolved library, (3) the **repo registry**
+  (`SHADER_REPOS`), else (4) reported as a **gap**. Recursively follows `#include` deps; always
+  resolves the core includes (`ReShade.fxh`/`ReShadeUI.fxh`).
+- **Repo registry** (priority-ordered, license-annotated): SweetFX (MIT — the classic stock
+  effects: LumaSharpen/Curves/Tonemap/Vibrance/Levels/FakeHDR/DPX/FXAA…), crosire/reshade-shaders
+  `slim` (BSD-3 — Deband/LUT + core includes), Depth3D (SuperDepth3D), qUINT free, AstrayFX.
+  **Clean-room:** the dashboard ships only pointers; the OPERATOR's instance fetches from GitHub
+  at runtime (like Nexus/Steam), never redistributing shaders in the repo. Repo trees are cached
+  24h (`data/reshade/repo-cache.json`) to respect GitHub's 60/hr API limit; individual files come
+  from `raw.githubusercontent.com` (unlimited). A `.sources.json` manifest persists each shader's
+  origin so re-resolves keep attributing/licensing correctly.
+- **Storage**: resolved `.fx`/`.fxh` accumulate in `data/reshade/shaders/Shaders/` (+ textures),
+  overlaid into `Win64/reshade-shaders/` at build (`overlayShaderLibraryInto`).
+- **Gaps**: a preset referencing a third-party pack we don't have (e.g. Cellshading →
+  `PD80_03_Filmic_Adaptation.fx`, PalDelia → `pColors.fx`/`VividTone.fx`) is flagged per-preset in
+  the UI with an **"Add shaders"** upload (`addShaderFiles` → `.fx`/`.fxh`/zip) + **Re-resolve**.
+- **API**: GET returns per-preset `shaders {required, resolved[], missing[], sources[]}` +
+  `shaderRepos`; POST adds `reresolve` action + multipart `shader` upload.
+- **UI** (`reshade-card.tsx`): per-preset ✅ `N/M ready` / ⚠️ `needs X: …` with source repos, plus
+  the gap-upload panel when anything is missing.
+
+**Resolver verified (2026-08-16)** across the taxonomy: DECENT (stock-only) → 3/3 from
+SweetFX+crosire; Subtle Outline (self-bundled) → 13 placed / 3 enabled from bundled; PalDelia →
+5/7 (SuperDepth3D via Depth3D; 2 third-party gaps reported); Cellshading → 3/4 (1 prod80 gap).
+Full build with a **DLL-only base** + DECENT preset → bundle shipped `dxgi.dll` + preset +
+`reshade-shaders/Shaders/{Deband,FakeHDR,LumaSharpen}.fx` + core `.fxh`, all uninstall-tracked.
+
 ## Verified (2026-08-16, API)
 
 Upload base (4 files) → add Nexus 197 preset + upload a local `.ini` (2 presets) → enable →

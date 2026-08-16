@@ -7,10 +7,12 @@ import {
   addReshadePresetFromBuffer,
   clearReshadeBase,
   removeReshadePreset,
+  reresolveAllPresets,
   reshadeStatus,
   saveReshadeBase,
   setReshadeEnabled,
 } from '@/lib/reshade'
+import { addShaderFiles, SHADER_REPOS } from '@/lib/reshade-shaders'
 import { downloadNexusFile, getModFiles, getModInfo, parseNexusModId } from '@/lib/nexus'
 
 export const runtime = 'nodejs'
@@ -35,7 +37,7 @@ export async function GET(request: NextRequest) {
   const denied = requireAdmin(request)
   if (denied) return denied
   try {
-    return NextResponse.json(await reshadeStatus())
+    return NextResponse.json({ ...(await reshadeStatus()), shaderRepos: SHADER_REPOS })
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed' }, { status: 500 })
   }
@@ -62,7 +64,13 @@ export async function POST(request: NextRequest) {
         await addReshadePresetFromBuffer(Buffer.from(await preset.arrayBuffer()), preset.name, `upload: ${preset.name}`)
         return ok()
       }
-      return NextResponse.json({ error: 'No base or preset file provided' }, { status: 400 })
+      const shader = form.get('shader')
+      if (shader instanceof File) {
+        await addShaderFiles(Buffer.from(await shader.arrayBuffer()), shader.name)
+        await reresolveAllPresets() // refresh missing/resolved counts now that the gap is filled
+        return ok()
+      }
+      return NextResponse.json({ error: 'No base, preset, or shader file provided' }, { status: 400 })
     }
 
     // ── JSON actions ──────────────────────────────────────────────────────────
@@ -77,6 +85,9 @@ export async function POST(request: NextRequest) {
       case 'removePreset':
         if (!body.file) return NextResponse.json({ error: 'file required' }, { status: 400 })
         await removeReshadePreset(body.file)
+        return ok()
+      case 'reresolve':
+        await reresolveAllPresets()
         return ok()
       case 'addPresetUrl': {
         const modId = parseNexusModId(body.url ?? '')

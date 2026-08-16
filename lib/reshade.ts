@@ -14,6 +14,7 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { normalizeArchiveToZip } from '@/lib/archive'
+import { overlayShaderLibraryInto, resolvePresetShaders, type ShaderResolution } from '@/lib/reshade-shaders'
 
 const DATA_DIR = resolve(process.env.DASHBOARD_DATA_DIR ?? './data')
 const RESHADE_DIR = join(DATA_DIR, 'reshade')
@@ -21,7 +22,13 @@ const BASE_ZIP = join(RESHADE_DIR, 'base.zip')
 const PRESETS_DIR = join(RESHADE_DIR, 'presets')
 const CONFIG_FILE = join(DATA_DIR, 'reshade.json')
 
-export type ReshadePreset = { file: string; name: string; source: string; addedAt: number }
+export type ReshadePreset = {
+  file: string
+  name: string
+  source: string
+  addedAt: number
+  shaders?: ShaderResolution // dependency resolution report (resolved / missing / where-from)
+}
 export type ReshadeConfig = {
   enabled: boolean
   base: { name: string; sizeBytes: number; fileCount: number; addedAt: number } | null
@@ -134,11 +141,26 @@ export async function addReshadePresetFromBuffer(buffer: Buffer, filename: strin
   const found = extractPresets(buf, filename)
   if (!found.length) throw new Error('No ReShade preset (.ini with Techniques=) found in that upload.')
   const c = await readReshadeConfig()
+  // The archive may bundle the preset's own shaders (e.g. Subtle Outline ships all its .fx) —
+  // pass it to the resolver, which prefers bundled, then the library, then the known repos.
+  const bundledZip = buffer[0] === 0x50 ? buffer : buf[0] === 0x50 ? buf : undefined
   for (const p of found) {
     const file = `${safe(p.name)}.ini`
     await writeFile(join(PRESETS_DIR, file), p.content, 'utf8')
+    const shaders = await resolvePresetShaders(p.content, bundledZip).catch(() => undefined)
     c.presets = c.presets.filter((x) => x.file !== file)
-    c.presets.push({ file, name: p.name, source, addedAt: Date.now() })
+    c.presets.push({ file, name: p.name, source, addedAt: Date.now(), shaders })
+  }
+  await writeReshadeConfig(c)
+  return c
+}
+
+// Re-run shader resolution for all presets (e.g. after adding gap shaders or a repo comes online).
+export async function reresolveAllPresets(): Promise<ReshadeConfig> {
+  const c = await readReshadeConfig()
+  for (const p of c.presets) {
+    const content = await readFile(join(PRESETS_DIR, p.file), 'utf8').catch(() => '')
+    if (content) p.shaders = await resolvePresetShaders(content).catch(() => p.shaders)
   }
   await writeReshadeConfig(c)
   return c
@@ -172,7 +194,10 @@ export async function overlayReshadeInto(win64Dir: string): Promise<{ files: num
     await writeFile(dest, e.getData())
     files++
   }
-  // 2. Drop preset .ini files next to the DLL.
+  // 2. Overlay the resolved shader library (bundled + fetched .fx/.fxh + textures) into
+  // reshade-shaders/ — this is what makes preset-only uploads actually work.
+  files += await overlayShaderLibraryInto(win64Dir)
+  // 3. Drop preset .ini files next to the DLL.
   const presets: string[] = []
   for (const p of c.presets) {
     const src = join(PRESETS_DIR, p.file)
