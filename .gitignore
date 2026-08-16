@@ -60,3 +60,12 @@ mod_data/
 # Operator-supplied death-announcement content (clean-room: never shipped)
 deathchat/
 data/death-pal-messages.json
+
+# Operator-supplied ReShade base bundle + presets (clean-room: never shipped;
+# injector is BSD-3 but shaders are separately licensed — see docs/specs/reshade-loadout.md)
+data/reshade.json
+data/reshade/
+
+# Client UE4SS crash logs / dumps dropped in for diagnosis (never commit)
+UE4SS-Logs_Client/
+UECC-Windows-*/

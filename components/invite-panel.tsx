@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
 import { CheckIcon, CopyIcon, DownloadIcon, Link2Icon, PackageIcon, RefreshCwIcon, Trash2Icon, UsersIcon } from 'lucide-react'
+import { ReshadeCard } from '@/components/reshade-card'
 
 type ShareInfo = {
   token: string
@@ -137,7 +138,7 @@ export function InvitePanel() {
       if (!res.ok) throw new Error(json.error ?? res.statusText)
       const s = json.summary ?? {}
       const sizeMb = (Number(s.sizeBytes ?? 0) / 1024 / 1024).toFixed(0)
-      const summary = `${s.luaMods?.length ?? '?'} Lua + ${s.pakFiles?.length ?? '?'} pak${s.palSchemaMods ? ` + ${s.palSchemaMods} PalSchema` : ''} · ${sizeMb} MB · UE4SS ${s.includedUe4ss ? 'included' : 'excluded'}${s.configOverrides ? ` · ${s.configOverrides} config` : ''}${s.engineTweaks?.length ? ` · ${s.engineTweaks.length} Engine.ini tweak(s)` : ''}${s.skipped?.length ? ` · ${s.skipped.length} skipped (see manifest.json)` : ''}`
+      const summary = `${s.luaMods?.length ?? '?'} Lua + ${s.pakFiles?.length ?? '?'} pak${s.palSchemaMods ? ` + ${s.palSchemaMods} PalSchema` : ''} · ${sizeMb} MB · UE4SS ${s.includedUe4ss ? 'included' : 'excluded'}${s.configOverrides ? ` · ${s.configOverrides} config` : ''}${s.engineTweaks?.length ? ` · ${s.engineTweaks.length} Engine.ini tweak(s)` : ''}${s.reshade?.files ? ` · ReShade (${s.reshade.files} files${s.reshade.presets?.length ? `, ${s.reshade.presets.length} preset` : ''})` : ''}${s.skipped?.length ? ` · ${s.skipped.length} skipped (see manifest.json)` : ''}`
       setLastLoadout(summary)
       const a = document.createElement('a')
       a.href = `/api/client-mods/loadout?token=${encodeURIComponent(json.token)}`
@@ -407,6 +408,9 @@ export function InvitePanel() {
         )}
         {lastLoadout && <p className="text-[11px] text-emerald-600 dark:text-emerald-400">Last build: {lastLoadout}</p>}
       </div>
+
+      {/* Optional ReShade — visual preset baked into the loadout */}
+      <ReshadeCard />
 
       {/* Share links — a friend-facing web download (no admin login for them) */}
       <div className="flex flex-col gap-2 rounded-md border p-3">

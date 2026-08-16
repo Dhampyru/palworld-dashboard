@@ -12,6 +12,7 @@ import { readClientModConfigOverrides } from '@/lib/client-mod-config'
 import { overlayClientConfigsInto } from '@/lib/client-configs'
 import { overlayPalSchemaInto } from '@/lib/palschema-config'
 import { overlayClientModFilesInto } from '@/lib/client-mod-files'
+import { overlayReshadeInto } from '@/lib/reshade'
 
 const execFileP = promisify(execFile)
 
@@ -48,6 +49,7 @@ export type LoadoutSummary = {
   preConfigFiles: number // admin-captured runtime config files overlaid into the game tree
   palSchemaEdits: number // admin PalSchema data edits overlaid onto client submods (parity)
   engineTweaks: string[] // mods whose Engine.ini settings were folded into recommended-engine-ini.txt
+  reshade: { files: number; presets: string[] } // ReShade injector+shaders+presets overlaid into Win64 (if enabled)
   sizeBytes: number
   generatedAt: string
 }
@@ -986,6 +988,12 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       preConfigFiles += await overlayClientConfigsInto(logicDir)
     }
 
+    // ReShade (optional, operator-toggled): drop the injector + shaders + presets into Win64,
+    // next to the game exe. Client-side visual layer only; no server involvement. UE4SS (dwmapi)
+    // and ReShade (dxgi) use different proxies, so they coexist. Files land under game/ so the
+    // installed-files walk below tracks them for a clean uninstall.
+    const reshade = await overlayReshadeInto(win64).catch(() => ({ files: 0, presets: [] as string[] }))
+
     const generatedAt = new Date().toISOString()
     const summary: LoadoutSummary = {
       includedUe4ss,
@@ -1002,6 +1010,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       preConfigFiles,
       palSchemaEdits,
       engineTweaks: engineIniTweaks.map((t) => t.name),
+      reshade,
       sizeBytes: 0,
       generatedAt,
     }
