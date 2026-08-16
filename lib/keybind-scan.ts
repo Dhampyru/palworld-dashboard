@@ -38,18 +38,69 @@ function walkModconfig(node: unknown, out: Set<string>): void {
   for (const v of Object.values(n)) if (v && typeof v === 'object') walkModconfig(v, out)
 }
 
-// Pull keybind combos out of one file's text, by file type.
-function extractFromText(name: string, text: string, out: Set<string>): void {
-  const lower = name.toLowerCase()
+// Leading-indent width (tabs → 4 spaces) — for the config-gate enclosing-if walk.
+function indentOf(s: string): number {
+  const m = /^([ \t]*)/.exec(s)
+  return (m ? m[1]! : '').replace(/\t/g, '    ').length
+}
 
-  // Lua RegisterKeyBind(Key.X, { ModifierKey.Y, … }, …)
-  const rk = /RegisterKeyBind\s*\(\s*Key\.([A-Z0-9_]+)\s*(?:,\s*\{([^}]*)\})?/g
-  let m: RegExpExecArray | null
-  while ((m = rk.exec(text))) {
-    const key = normKey(m[1]!)
-    if (!KEY_TOKEN.test(key) || NOT_KEYS.has(key)) continue
-    const mods = (m[2] ?? '').match(/ModifierKey\.([A-Z_]+)/g)?.map((x) => x.replace('ModifierKey.', '')) ?? []
-    out.add(combo(mods, key))
+// A keybind line is "gated off" when an ENCLOSING `if <flag> … then` names a config flag the mod
+// set to false — a common debug/optional pattern (e.g. `if Config.DEBUG_SCAN_ENABLED then
+// RegisterKeyBind(…)`). Such a bind never registers in-game, so it must NOT count as a conflict.
+// Walk up through enclosing lines (strictly decreasing indentation); gate if any enclosing
+// if-condition references a disabled flag. Well-formatted Lua only — bad indentation just doesn't
+// gate (falls back to counting the bind, i.e. the pre-existing behavior).
+function gatedByDisabledFlag(lines: string[], idx: number, disabled: Set<string>): boolean {
+  if (!disabled.size) return false
+  let curInd = indentOf(lines[idx]!)
+  for (let j = idx - 1; j >= 0 && curInd > 0; j--) {
+    const t = lines[j]!.trim()
+    if (t === '' || t.startsWith('--')) continue
+    const li = indentOf(lines[j]!)
+    if (li >= curInd) continue // sibling / deeper — not an enclosing line
+    curInd = li
+    if (/^if\b/.test(t) && /\bthen\b/.test(t)) {
+      for (const f of disabled) if (new RegExp(`\\b${f}\\b`).test(t)) return true
+    }
+  }
+  return false
+}
+
+// Config flags the mod assigns `false` (Lua `X = false` / JSON `"X": false`). The gate may live in
+// config.lua while the bind is in another script, so these are collected mod-wide (see combosForMod).
+export function collectDisabledFlags(text: string): string[] {
+  const out: string[] = []
+  for (let line of text.split(/\r?\n/)) {
+    const c = line.indexOf('--')
+    if (c >= 0) line = line.slice(0, c)
+    let m = /([A-Za-z_][A-Za-z0-9_.]*)\s*=\s*false\b/.exec(line)
+    if (m) {
+      out.push(m[1]!.split('.').pop()!)
+      continue
+    }
+    m = /"([A-Za-z_][A-Za-z0-9_]*)"\s*:\s*false\b/.exec(line)
+    if (m) out.push(m[1]!)
+  }
+  return out
+}
+
+// Pull keybind combos out of one file's text. `disabled` = mod-wide flags set to false; a bind
+// gated behind one (see gatedByDisabledFlag) is skipped so it never shows as a phantom conflict.
+function extractFromText(name: string, text: string, out: Set<string>, disabled: Set<string>): void {
+  const lower = name.toLowerCase()
+  const lines = text.split(/\r?\n/)
+
+  // Lua RegisterKeyBind(Key.X, { ModifierKey.Y, … }, …) — line-based so each can be gate-checked.
+  for (let i = 0; i < lines.length; i++) {
+    const rk = /RegisterKeyBind\s*\(\s*Key\.([A-Z0-9_]+)\s*(?:,\s*\{([^}]*)\})?/g
+    let m: RegExpExecArray | null
+    while ((m = rk.exec(lines[i]!))) {
+      const key = normKey(m[1]!)
+      if (!KEY_TOKEN.test(key) || NOT_KEYS.has(key)) continue
+      if (gatedByDisabledFlag(lines, i, disabled)) continue
+      const mods = (m[2] ?? '').match(/ModifierKey\.([A-Z_]+)/g)?.map((x) => x.replace('ModifierKey.', '')) ?? []
+      out.add(combo(mods, key))
+    }
   }
 
   // DekModConfigMenu .modconfig.json → settings of type "keybind"
@@ -68,12 +119,14 @@ function extractFromText(name: string, text: string, out: Set<string>): void {
   // A value written as `Key.X` is treated as a keybind REGARDLESS of the field name (catches
   // fields like `SummonAdditionalPal = Key.G`); otherwise the field name must look like a bind.
   if (/config\.(lua|json)$/i.test(lower)) {
-    for (let line of text.split(/\r?\n/)) {
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i]!
       const c = line.indexOf('--') // strip trailing Lua comment
       if (c >= 0) line = line.slice(0, c)
       // Table form: … = { Key.X, ModifierKey.Y, … }
       const tbl = /[:=]\s*\{([^}]*\bKey\.[A-Za-z0-9_]+[^}]*)\}/.exec(line)
       if (tbl) {
+        if (gatedByDisabledFlag(lines, i, disabled)) continue
         const km = /\bKey\.([A-Za-z0-9_]+)/.exec(tbl[1]!)
         const mods = (tbl[1]!.match(/ModifierKey\.([A-Z_]+)/g) ?? []).map((x) => x.replace('ModifierKey.', ''))
         if (km) {
@@ -90,70 +143,90 @@ function extractFromText(name: string, text: string, out: Set<string>): void {
       const isKeyRef = /^Key\./i.test(val)
       if (!isKeyRef && !/key|hotkey|bind/.test(field) && !/^toggle/.test(field)) continue
       const key = normKey(val)
-      if (KEY_TOKEN.test(key) && !NOT_KEYS.has(key)) out.add(combo([], key))
+      if (!KEY_TOKEN.test(key) || NOT_KEYS.has(key)) continue
+      if (gatedByDisabledFlag(lines, i, disabled)) continue
+      out.add(combo([], key))
     }
   }
 }
 
-async function combosFromPayloadZip(zipPath: string, out: Set<string>, skip: (p: string) => boolean): Promise<void> {
+type ScanFile = { name: string; text: string }
+
+async function filesFromPayloadZip(zipPath: string, skip: (p: string) => boolean): Promise<ScanFile[]> {
   let zip: AdmZip
   try {
     zip = new AdmZip(zipPath)
   } catch {
-    return
+    return []
   }
+  const out: ScanFile[] = []
   for (const e of zip.getEntries()) {
     if (e.isDirectory) continue
     const n = e.entryName.replace(/\\/g, '/')
     if (!/(\.lua|\.modconfig\.json|config\.json)$/i.test(n)) continue
     if (skip(n)) continue // a config-override replaces this file — scan the override instead
     try {
-      extractFromText(n, e.getData().toString('utf8'), out)
+      out.push({ name: n, text: e.getData().toString('utf8') })
     } catch {
       /* skip unreadable entry */
     }
   }
+  return out
 }
 
-async function combosFromContentDir(dir: string, base: string, out: Set<string>, skip: (p: string) => boolean): Promise<void> {
+async function filesFromContentDir(dir: string, base: string, skip: (p: string) => boolean): Promise<ScanFile[]> {
+  const out: ScanFile[] = []
   let entries
   try {
     entries = await readdir(dir, { withFileTypes: true })
   } catch {
-    return
+    return out
   }
   for (const e of entries) {
     const p = join(dir, e.name)
-    if (e.isDirectory()) await combosFromContentDir(p, base, out, skip)
+    if (e.isDirectory()) out.push(...(await filesFromContentDir(p, base, skip)))
     else if (/(\.lua|\.modconfig\.json|config\.json)$/i.test(e.name)) {
       if (skip(p.slice(base.length + 1).replace(/\\/g, '/'))) continue
       try {
-        extractFromText(e.name, await readFile(p, 'utf8'), out)
+        out.push({ name: e.name, text: await readFile(p, 'utf8') })
       } catch {
         /* skip */
       }
     }
   }
+  return out
 }
 
 // Scan a mod's EFFECTIVE keybinds — the config-overrides that ship in the loadout replace the
 // payload's shipped config, so the conflict view reflects what will actually load (e.g. after an
 // auto/manual remap). A payload config file is skipped when an override targets it (matched by
 // its mod-root-relative path as a path suffix), and the override content is scanned in its place.
+// Two-pass: gather all files, collect the flags the mod sets false (the gate may be in config.lua
+// while the bind is in another script), then scan each with those config gates applied.
 async function combosForMod(m: ClientMod): Promise<Set<string>> {
   const store = clientModStorePath(m.id)
   const out = new Set<string>()
   const overrides = await readClientModConfigOverrides(m.id).catch(() => [])
   const skip = (p: string) => overrides.some((o) => p === o.relWithin || p.endsWith('/' + o.relWithin))
 
-  if (m.payload === 'payload.zip') await combosFromPayloadZip(join(store, 'payload.zip'), out, skip)
-  else if (m.payload === 'content') await combosFromContentDir(join(store, 'content'), join(store, 'content'), out, skip)
+  const files: ScanFile[] = []
+  if (m.payload === 'payload.zip') files.push(...(await filesFromPayloadZip(join(store, 'payload.zip'), skip)))
+  else if (m.payload === 'content') files.push(...(await filesFromContentDir(join(store, 'content'), join(store, 'content'), skip)))
   else return out
-
   for (const o of overrides) {
     if (!/(\.lua|\.modconfig\.json|config\.json)$/i.test(o.relWithin)) continue
     try {
-      extractFromText(o.relWithin, await readFile(o.absPath, 'utf8'), out)
+      files.push({ name: o.relWithin, text: await readFile(o.absPath, 'utf8') })
+    } catch {
+      /* skip */
+    }
+  }
+
+  const disabled = new Set<string>()
+  for (const f of files) for (const flag of collectDisabledFlags(f.text)) disabled.add(flag)
+  for (const f of files) {
+    try {
+      extractFromText(f.name, f.text, out, disabled)
     } catch {
       /* skip */
     }

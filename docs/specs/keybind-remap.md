@@ -127,6 +127,19 @@ side is remappable), and **Base Chest Organiser** F4/F5/F10 → END/INSERT/Numpa
 `Key.F4/F5/F10` were invisible pre-fix, so Ultra Graphics/Pal Insight had been remapped on top of
 them). Applied live → 0 detectable conflicts.
 
+## Config-gated keybinds not counted (2026-08-16, public-friendly)
+
+The detector was false-flagging keybinds that never actually register — a common DEBUG/optional
+pattern where a `RegisterKeyBind(...)` (or config bind) sits inside `if Config.<FLAG> … then` and
+the mod sets `<FLAG> = false` (e.g. Base Trimmer's F7/F8/F9 mesh-scan keys behind
+`DEBUG_SCAN_ENABLED = false`; the trim itself is automatic). `lib/keybind-scan` now, per mod,
+collects flags assigned `false` across ALL its files (`collectDisabledFlags` — the gate often lives
+in config.lua while the bind is in another script), then skips any bind whose ENCLOSING `if <flag>
+… then` names a disabled flag (`gatedByDisabledFlag` — an indentation-based enclosing-if walk).
+Safe-by-construction: bad/odd indentation just doesn't gate (falls back to counting the bind), and a
+flag being false means the bind genuinely doesn't fire, so skipping it matches runtime. This removes
+a whole false-positive class for the public release.
+
 ## Limitations / why not a general auto-planner
 
 - The remap spec is **hand-verified**, not auto-generated. A first auto-planner

@@ -75,21 +75,6 @@ export const PAYLOAD_EDITS: PayloadEdit[] = [
     ],
     resolves: 'NUM_4 (Palvolve side disabled)',
   },
-  {
-    // F7/F8/F9 — Base Trimmer's DEBUG mesh-scan keys (gated behind Config.DEBUG_SCAN_ENABLED,
-    // off by default, so they don't even bind in normal play — the trim itself is automatic).
-    // They still tripped the detector vs Accessory Toggler (F7) / Condenser IQ (F8/F9). Add Alt so
-    // they become Alt+F7/8/9 — same memorable keys, usable if debug is on, no plain-key clash.
-    modId: 'base-trimmer',
-    modName: 'Base Trimmer',
-    relWithin: 'Scripts/meshscan.lua',
-    replacements: [
-      ['RegisterKeyBind(Key.F7, function() MeshScan.run() end)', 'RegisterKeyBind(Key.F7, {ModifierKey.ALT}, function() MeshScan.run() end)'],
-      ['RegisterKeyBind(Key.F8, function() MeshScan.runAllFoliage() end)', 'RegisterKeyBind(Key.F8, {ModifierKey.ALT}, function() MeshScan.runAllFoliage() end)'],
-      ['RegisterKeyBind(Key.F9, function() MeshScan.dumpDismantleFunctions() end)', 'RegisterKeyBind(Key.F9, {ModifierKey.ALT}, function() MeshScan.dumpDismantleFunctions() end)'],
-    ],
-    resolves: 'F7/F8/F9 (Base Trimmer debug scan → Alt+F7/F8/F9)',
-  },
 ]
 
 export type RemapResult = {
