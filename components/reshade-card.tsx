@@ -123,9 +123,9 @@ export function ReshadeCard() {
 
       <p className="text-xs text-muted-foreground">
         Client-side graphics post-processing (color/sharpness). When on, the loadout drops ReShade into every friend&apos;s{' '}
-        <span className="font-mono">Pal\Binaries\Win64</span>. Coexists with UE4SS. Upload the ReShade{' '}
-        <span className="font-medium text-foreground">base</span> once (the injector <span className="font-mono">dxgi.dll</span> +{' '}
-        <span className="font-mono">reshade-shaders\</span> from your own install), then add preset(s).
+        <span className="font-mono">Pal\Binaries\Win64</span>. Coexists with UE4SS. Drop your{' '}
+        <span className="font-mono">dxgi.dll</span> once (from a reshade.me install — shaders are fetched automatically),
+        then add preset(s).
       </p>
 
       {/* Base bundle */}
@@ -133,7 +133,7 @@ export function ReshadeCard() {
         <input
           ref={baseRef}
           type="file"
-          accept=".zip,.7z,.rar"
+          accept=".dll,.zip,.7z,.rar"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0]
@@ -143,7 +143,7 @@ export function ReshadeCard() {
         />
         <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" disabled={busy} onClick={() => baseRef.current?.click()}>
           {busy ? <Spinner className="size-3.5" /> : <UploadIcon className="size-3.5" />}
-          {hasBase ? 'Replace base' : 'Upload ReShade base (.zip)'}
+          {hasBase ? 'Replace base' : 'Upload dxgi.dll (or .zip)'}
         </Button>
         {hasBase ? (
           <span className="inline-flex items-center gap-2 text-[11px] text-emerald-600 dark:text-emerald-400">

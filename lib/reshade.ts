@@ -73,10 +73,19 @@ const safe = (s: string) => s.replace(/[^A-Za-z0-9._ -]+/g, '_').replace(/^[_ ]+
 export async function saveReshadeBase(buffer: Buffer, name: string): Promise<ReshadeConfig> {
   await ensureDirs()
   let zipBuf: Buffer
-  try {
-    zipBuf = await normalizeArchiveToZip(buffer)
-  } catch {
-    throw new Error('Could not read that as an archive — upload the ReShade base as a .zip/.7z of the Win64 files.')
+  // Accept a BARE injector DLL (MZ magic + .dll name) — wrap it into a single-entry zip so the
+  // operator can drop `dxgi.dll` straight in without zipping it first. Shaders come from the
+  // resolver, so the DLL alone is a valid base. Otherwise treat it as an archive.
+  if (buffer[0] === 0x4d && buffer[1] === 0x5a && /\.dll$/i.test(name)) {
+    const z = new AdmZip()
+    z.addFile(name.split(/[\\/]/).pop()!, buffer)
+    zipBuf = z.toBuffer()
+  } else {
+    try {
+      zipBuf = await normalizeArchiveToZip(buffer)
+    } catch {
+      throw new Error('Could not read that — drop a bare dxgi.dll, or a .zip/.7z of the ReShade Win64 files.')
+    }
   }
   let entries
   try {
