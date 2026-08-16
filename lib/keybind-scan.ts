@@ -8,6 +8,7 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { clientModStorePath, listClientMods, type ClientMod } from '@/lib/client-mods'
 import { readClientModConfigOverrides } from '@/lib/client-mod-config'
+import { reshadeKeybindSignature, reshadeKeybindSources } from '@/lib/reshade-keybinds'
 
 // Recognized UE4SS Key.* tokens (function keys, letters, number-row words, numpad, named keys).
 // Mouse buttons are deliberately excluded — mods hook LMB/RMB contextually (their own UI),
@@ -171,11 +172,15 @@ export async function scanClientKeybinds(): Promise<KeybindScan> {
       .join(',')
     sigParts.push(`${m.id}:${size}:${ov}`)
   }
-  const sig = sigParts.join('|')
+  // ReShade preset/overlay keys ship on the same client, so fold them into the same conflict
+  // scan (a preset effect-key vs a mod keybind is the same class of collision).
+  const reshadeSources = await reshadeKeybindSources().catch(() => [])
+  const sig = `${sigParts.join('|')}||${await reshadeKeybindSignature().catch(() => 'reshade:?')}`
   if (cache && cache.sig === sig) return cache.scan
 
   const modCombos: { id: string; name: string; combos: Set<string> }[] = []
   for (const m of kept) modCombos.push({ id: m.id, name: m.name, combos: await combosForMod(m) })
+  for (const s of reshadeSources) modCombos.push(s)
 
   // combo → modIds that bind it
   const byCombo = new Map<string, string[]>()

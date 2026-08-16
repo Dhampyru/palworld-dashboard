@@ -47,6 +47,17 @@ API). On boot, `seedDefaultBaseIfMissing()` (called from `instrumentation.ts reg
 (MZ-magic wrap → single-entry base zip) so no manual zipping is needed. Verified: baked the seed,
 deleted `base.zip`, restarted → base auto-restored ("default (auto-reseeded)"), build unchanged.
 
+## Keybind conflict detection (2026-08-16)
+
+ReShade preset effect-toggle keys (`Key<Effect>=<vk>,<ctrl>,<shift>,<alt>`) and the base
+`ReShade.ini` global hotkeys fire on the same client as the UE4SS mods, so they're folded into the
+existing client keybind conflict detector (`lib/keybind-scan`). `lib/reshade-keybinds.ts` maps
+ReShade's Windows VK codes → the detector's key-name vocab (F1-24, A-Z, number words, NUM_*,
+PAGE_UP/DOWN, HOME/END/INSERT/DELETE…) and contributes one source per enabled preset (+ one for the
+base overlay keys) — only when ReShade will actually ship (enabled + base present). The scan's cache
+signature includes ReShade state so it re-scans when a preset/base changes. Verified: a preset
+binding F7 surfaced as a conflict with Accessory Toggler (which keeps F7); removing it cleared it.
+
 ## Coexistence
 
 Client UE4SS uses the `dwmapi.dll` proxy; ReShade uses `dxgi.dll` — different proxies, verified
