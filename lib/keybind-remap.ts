@@ -34,6 +34,18 @@ export const CONFLICT_REMAP: RemapEntry[] = [
   // it moves; GuildSight keeps the frequent F6 overlay. O = Options mnemonic, unused + game-free.
   { modId: 'pal-insight---native-style-pal-inspection-overlay', modName: 'Pal Insight', pairs: [['F7', 'F5'], ['F6', 'O']] },
   { modId: 'palvolve---evolve-your-pals', modName: 'Palvolve', pairs: [['F2', 'Y']] },
+  // Numpad 5/6 — FOV Control (config `Key.NUM_FIVE/SIX`) clashed with Party Hotkey Switcher's
+  // party-preset numpad 5/6. Move FOV to Numpad +/- (ADD/SUBTRACT): intuitive zoom, free.
+  { modId: 'fov-control', modName: 'FOV Control', pairs: [['NUM_FIVE', 'ADD'], ['NUM_SIX', 'SUBTRACT']] },
+  // G — Multi Party Pals Summon (`Key.G`, incl. Shift+G "summon all") clashed with Simple Building
+  // Blueprints' G (in a non-config .lua, so only remappable via the Multi Party side). Blueprint
+  // keeps G; Multi Party's summon moves to Numpad 0 (free — Party Hotkey uses 1-9 only).
+  { modId: 'multi-party-pals-summons-1-0-update', modName: 'Multi Party Pals Summon', pairs: [['G', 'NUM_ZERO']] },
+  // F4/F5/F10 — Base Chest Organiser (config `Key.F4/F5/F10`) was invisible to the detector until
+  // the dotted-Key.X parse fix, so the earlier remap put Ultra Graphics on F4 and Pal Insight on
+  // F5 right on top of it (F10 vs Condenser was pre-existing). Chest sorting is an occasional base
+  // action → move it to END / INSERT / Numpad-decimal; the frequent combat keys keep F4/F5/F10.
+  { modId: 'base-chest-organiser', modName: 'Base Chest Organiser', pairs: [['F4', 'END'], ['F5', 'INSERT'], ['F10', 'DECIMAL']] },
 ]
 
 // ── 2. Payload edits (key hardcoded in main.lua). Exact-string replacements on a specific file,
@@ -82,6 +94,17 @@ function replaceQuotedKey(content: string, from: string, to: string): { content:
   })
   return { content: next, changed }
 }
+// Also rewrite the unquoted UE4SS reference form `Key.NUM_FIVE` → `Key.ADD` (word-boundary safe,
+// so `Key.G` never matches `Key.GAMEPAD_*`). Mods like FOV Control / Multi Party write keys this way.
+function replaceKeyRef(content: string, from: string, to: string): { content: string; changed: boolean } {
+  const re = new RegExp(`\\bKey\\.${escapeRe(from)}(?![A-Za-z0-9_])`, 'g')
+  let changed = false
+  const next = content.replace(re, () => {
+    changed = true
+    return `Key.${to}`
+  })
+  return { content: next, changed }
+}
 
 // Apply everything, idempotently, then (re)write a complete undo ledger from the overrides that
 // actually exist for every touched mod — so undo works even across partial/repeat runs.
@@ -101,11 +124,18 @@ export async function applyManualRemap(): Promise<RemapResult> {
       let content = cfg.content
       const done: string[] = []
       for (const [from, to] of entry.pairs) {
-        const r = replaceQuotedKey(content, from, to)
-        if (r.changed) {
-          content = r.content
-          done.push(`${from}→${to}`)
+        let hit = false
+        const q = replaceQuotedKey(content, from, to)
+        if (q.changed) {
+          content = q.content
+          hit = true
         }
+        const d = replaceKeyRef(content, from, to) // unquoted Key.X form
+        if (d.changed) {
+          content = d.content
+          hit = true
+        }
+        if (hit) done.push(`${from}→${to}`)
       }
       if (done.length) {
         await saveClientModConfig(entry.modId, cfg.relWithin, content)

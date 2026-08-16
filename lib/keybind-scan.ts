@@ -62,17 +62,34 @@ function extractFromText(name: string, text: string, out: Set<string>): void {
     return
   }
 
-  // config.lua / config.json → fields whose NAME looks like a keybind (…Key/…Hotkey/…Bind, or
-  // Toggle…), with a value that is a recognized key token.
+  // config.lua / config.json → keybind assignments. Catches:
+  //   Field = "F8"  |  Field = F8  |  Field = Key.NUM_FIVE  (dotted UE4SS ref)
+  //   Field = { Key.G, ModifierKey.SHIFT }  (config table, e.g. Multi Party SummonAll)
+  // A value written as `Key.X` is treated as a keybind REGARDLESS of the field name (catches
+  // fields like `SummonAdditionalPal = Key.G`); otherwise the field name must look like a bind.
   if (/config\.(lua|json)$/i.test(lower)) {
     for (let line of text.split(/\r?\n/)) {
       const c = line.indexOf('--') // strip trailing Lua comment
       if (c >= 0) line = line.slice(0, c)
-      const mm = /([A-Za-z0-9_]+)\s*[:=]\s*"?([A-Za-z0-9_]+)"?/.exec(line)
+      // Table form: … = { Key.X, ModifierKey.Y, … }
+      const tbl = /[:=]\s*\{([^}]*\bKey\.[A-Za-z0-9_]+[^}]*)\}/.exec(line)
+      if (tbl) {
+        const km = /\bKey\.([A-Za-z0-9_]+)/.exec(tbl[1]!)
+        const mods = (tbl[1]!.match(/ModifierKey\.([A-Z_]+)/g) ?? []).map((x) => x.replace('ModifierKey.', ''))
+        if (km) {
+          const key = normKey(km[1]!)
+          if (KEY_TOKEN.test(key) && !NOT_KEYS.has(key)) out.add(combo(mods, key))
+        }
+        continue
+      }
+      // Scalar form: Field = value  (value may carry a `Key.` prefix).
+      const mm = /([A-Za-z0-9_]+)\s*[:=]\s*"?((?:Key\.)?[A-Za-z0-9_]+)"?/.exec(line)
       if (!mm) continue
       const field = mm[1]!.toLowerCase()
-      if (!/key|hotkey|bind/.test(field) && !/^toggle/.test(field)) continue
-      const key = normKey(mm[2]!)
+      const val = mm[2]!
+      const isKeyRef = /^Key\./i.test(val)
+      if (!isKeyRef && !/key|hotkey|bind/.test(field) && !/^toggle/.test(field)) continue
+      const key = normKey(val)
       if (KEY_TOKEN.test(key) && !NOT_KEYS.has(key)) out.add(combo([], key))
     }
   }

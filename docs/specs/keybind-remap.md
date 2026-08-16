@@ -111,6 +111,22 @@ valid config as broken (and blocked this remap on Ultra Graphics' 211 KB config)
 Now pinned to `luaVersion: '5.3'`. Affects the server Mod Config Editor too — a
 strict improvement (accepts more valid Lua; still parse-only, never executed).
 
+## Detector parsing fix + more remaps (2026-08-16)
+
+The config scanner (`lib/keybind-scan` `extractFromText`) had two blind spots that hid real
+conflicts: (1) a value written as `Key.NUM_FIVE` (dotted UE4SS ref) was read as just "Key" and
+dropped; (2) a keybind on a non-standard field name (`SummonAdditionalPal = Key.G`) was skipped
+because the field didn't match `key|hotkey|bind|toggle`. Fixed: a `Key.X` value is now treated as
+a keybind regardless of field name, dotted refs parse correctly, and the config-table form
+`Field = { Key.G, ModifierKey.SHIFT }` is parsed. This immediately surfaced conflicts the earlier
+remap had created/missed. `lib/keybind-remap` gained `replaceKeyRef` (rewrites the unquoted
+`Key.X` form, word-boundary safe) and three new `CONFLICT_REMAP` entries: **FOV Control** Numpad
+5/6 → Numpad +/- (was clashing with Party Hotkey presets), **Multi Party Pals Summon** G → Numpad 0
+(clashed with Simple Building Blueprints' G, which lives in a non-config .lua so only the summon
+side is remappable), and **Base Chest Organiser** F4/F5/F10 → END/INSERT/Numpad-decimal (its dotted
+`Key.F4/F5/F10` were invisible pre-fix, so Ultra Graphics/Pal Insight had been remapped on top of
+them). Applied live → 0 detectable conflicts.
+
 ## Limitations / why not a general auto-planner
 
 - The remap spec is **hand-verified**, not auto-generated. A first auto-planner
