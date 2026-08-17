@@ -33,6 +33,9 @@ regex-guarded before interpolation. The store `data/give-kits.json` gained a
 - **`app/api/give-kits/route.ts`** — GET lists kits; POST `save`/`delete`/`give`.
   Admin-only (same gate as the RCON console — `giveitems` is an admin-cheat command).
   Instance-scoped via `runWithInstance`.
+- **`components/kits-section.tsx`** — a collapsible **"Give Item & Pal Kits"** category (default
+  collapsed; world-settings chevron pattern) wrapping both cards in the PalDefender tab, so
+  they tuck away. Shown when PalDefender is detected and the settings search is empty.
 - **`components/give-kits-card.tsx`** — a card in the **PalDefender tab** (shown when
   PalDefender is detected; hidden while the settings search box is active). Target
   player dropdown (online roster), a kit list with **Give** per kit, and an inline

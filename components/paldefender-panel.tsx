@@ -44,8 +44,7 @@ import {
   SearchIcon,
   InfoIcon,
 } from 'lucide-react'
-import { GiveKitsCard } from '@/components/give-kits-card'
-import { PalKitsCard } from '@/components/pal-kits-card'
+import { KitsSection } from '@/components/kits-section'
 import {
   PD_FIELDS,
   PD_GROUP_LABELS,
@@ -301,8 +300,7 @@ export function PalDefenderPanel() {
             <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground"><Spinner className="size-4" /> Loading…</div>
           )}
 
-          {!query && <GiveKitsCard />}
-          {!query && <PalKitsCard />}
+          {!query && <KitsSection />}
 
           {filteredGroups.map(({ group, fields }) => (
             <div key={group} className="flex flex-col gap-3 rounded-md border p-3">
