@@ -4,7 +4,16 @@ import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { DEMO_MODE } from '@/lib/demo-mode'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { runWithInstance, currentInstanceId } from '@/lib/instances'
-import { deleteKit, giveKit, listKits, saveKit } from '@/lib/give-kits'
+import {
+  deleteKit,
+  deletePalKit,
+  giveKit,
+  givePalKit,
+  listKits,
+  listPalKits,
+  saveKit,
+  savePalKit,
+} from '@/lib/give-kits'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -33,7 +42,7 @@ export async function GET(request: NextRequest) {
   return runWithInstance(request.headers.get(PALWORLD_PROXY_HEADERS.instance), async () => {
     const denied = requireAdmin(request)
     if (denied) return denied
-    return NextResponse.json({ kits: await listKits() })
+    return NextResponse.json({ kits: await listKits(), palKits: await listPalKits() })
   })
 }
 
@@ -42,7 +51,7 @@ export async function POST(request: NextRequest) {
     const denied = requireAdmin(request)
     if (denied) return denied
     if (DEMO_MODE) return NextResponse.json({ error: 'Disabled in demo mode' }, { status: 400 })
-    let body: { action?: string; kit?: unknown; id?: string; kitId?: string; userId?: string }
+    let body: { action?: string; kit?: unknown; palKit?: unknown; id?: string; kitId?: string; userId?: string }
     try {
       body = (await request.json()) as typeof body
     } catch {
@@ -60,6 +69,18 @@ export async function POST(request: NextRequest) {
           if (!body.kitId || !body.userId)
             return NextResponse.json({ error: 'kitId and userId required' }, { status: 400 })
           const result = await giveKit(body.kitId, body.userId, currentInstanceId())
+          return NextResponse.json(result)
+        }
+        case 'savePal':
+          return NextResponse.json({ palKit: await savePalKit(body.palKit), palKits: await listPalKits() })
+        case 'deletePal':
+          if (!body.id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+          await deletePalKit(body.id)
+          return NextResponse.json({ palKits: await listPalKits() })
+        case 'givePal': {
+          if (!body.kitId || !body.userId)
+            return NextResponse.json({ error: 'kitId and userId required' }, { status: 400 })
+          const result = await givePalKit(body.kitId, body.userId, currentInstanceId())
           return NextResponse.json(result)
         }
         default:

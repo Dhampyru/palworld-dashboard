@@ -45,6 +45,7 @@ import {
   InfoIcon,
 } from 'lucide-react'
 import { GiveKitsCard } from '@/components/give-kits-card'
+import { PalKitsCard } from '@/components/pal-kits-card'
 import {
   PD_FIELDS,
   PD_GROUP_LABELS,
@@ -301,6 +302,7 @@ export function PalDefenderPanel() {
           )}
 
           {!query && <GiveKitsCard />}
+          {!query && <PalKitsCard />}
 
           {filteredGroups.map(({ group, fields }) => (
             <div key={group} className="flex flex-col gap-3 rounded-md border p-3">

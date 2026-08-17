@@ -279,8 +279,8 @@ function KitEditor({
   )
 }
 
-// ---- item typeahead (search by name or id) -----------------------------------------------
-function ItemPicker({ items, value, onChange }: { items: DatasetEntry[]; value: string; onChange: (id: string) => void }) {
+// ---- entity typeahead (search by name or id) — reused for items AND pals -----------------
+export function ItemPicker({ items, value, onChange }: { items: DatasetEntry[]; value: string; onChange: (id: string) => void }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)

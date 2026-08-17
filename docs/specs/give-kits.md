@@ -1,9 +1,22 @@
-# Give-Items Kits
+# Give-Items Kits (+ Pal Teams)
 
 Reusable "kits" that hand a bundle of items to a player in one PalDefender
 `giveitems <UserId> ItemId:Amount ItemId:Amount …` call. Built 2026-08-17 at the
 owner's request (an alternative to a "free building" mod — hand out the mats
 instead of zeroing build costs).
+
+**Pal teams (2026-08-17):** the same feature, for Pals — a named team of
+`{palId, level, count}` handed out via one `givepal <UserId> <PalId> <level>` per
+Pal (repeated `count` times, capped at 30 calls/kit so a team can't flood). Party
+holds 5; extras overflow to the Palbox. Seeds **Starter Team**, **Worker Team**
+(base-suitability workers), **Combat Team** (top-tier). Backed by `lib/give-kits.ts`
+(`listPalKits`/`savePalKit`/`deletePalKit`/`givePalKit`, `loadPals` for the picker +
+validation), the same `app/api/give-kits` route (`savePal`/`deletePal`/`givePal`
+actions; GET also returns `palKits`), and `components/pal-kits-card.tsx` (mounted
+under the item card in the PalDefender tab; reuses the item card's exported
+`ItemPicker` over the pals dataset; rows carry level 1–60 + count 1–10). Pal ids are
+regex-guarded before interpolation. The store `data/give-kits.json` gained a
+`palKits` array; a pre-existing item-only store auto-seeds the pal half on next read.
 
 ## Pieces
 - **`lib/give-kits.ts`** — kit model `{ id, name, items: {itemId, amount}[] }`,
