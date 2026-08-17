@@ -35,6 +35,52 @@ const DEFAULT_KITS: GiveKit[] = [
       { itemId: 'Coal', amount: 200 },
     ],
   },
+  {
+    id: 'starter-kit',
+    name: 'Starter Kit',
+    items: [
+      { itemId: 'PalSphere', amount: 50 },
+      { itemId: 'Pan', amount: 20 }, // Bread
+      { itemId: 'Berries', amount: 50 }, // Red Berries
+      { itemId: 'Herbs', amount: 20 }, // Low Grade Medical Supplies
+      { itemId: 'ClothArmor', amount: 1 }, // Cloth Outfit
+      { itemId: 'Wood', amount: 500 },
+      { itemId: 'Stone', amount: 500 },
+    ],
+  },
+  {
+    id: 'capture-kit',
+    name: 'Capture Kit (Spheres)',
+    items: [
+      { itemId: 'PalSphere', amount: 100 },
+      { itemId: 'PalSphere_Mega', amount: 50 },
+      { itemId: 'PalSphere_Giga', amount: 30 },
+      { itemId: 'PalSphere_Master', amount: 10 },
+    ],
+  },
+  {
+    id: 'combat-kit',
+    name: 'Combat Kit',
+    items: [
+      { itemId: 'AssaultRifle_Default1', amount: 1 },
+      { itemId: 'AssaultRifleBullet', amount: 2000 },
+      { itemId: 'HandgunBullet', amount: 500 },
+      { itemId: 'LuxuryMedicines', amount: 20 }, // High Grade Medical Supplies
+      { itemId: 'Potion_High', amount: 20 }, // High Quality Recovery Meds
+      { itemId: 'PalRevive', amount: 5 }, // Revival Potion
+    ],
+  },
+  {
+    id: 'food-kit',
+    name: 'Food Kit',
+    items: [
+      { itemId: 'Pan', amount: 50 }, // Bread
+      { itemId: 'Berries', amount: 100 },
+      { itemId: 'BakedMeat_ChickenPal', amount: 30 }, // Grilled Chikipi
+      { itemId: 'Milk', amount: 30 },
+      { itemId: 'Potion', amount: 10 }, // Recovery Meds
+    ],
+  },
 ]
 
 // ---- item dataset (for validation + the picker) ------------------------------------------

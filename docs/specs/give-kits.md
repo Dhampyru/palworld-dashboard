@@ -7,9 +7,11 @@ instead of zeroing build costs).
 
 ## Pieces
 - **`lib/give-kits.ts`** — kit model `{ id, name, items: {itemId, amount}[] }`,
-  persisted to `data/give-kits.json` (data volume; operational, backed up). Seeds a
-  default **Building Materials** kit on first read (Wood/Stone/Fiber/Pal_crystal_S/
-  CopperIngot/Cement/Coal — ids verified against the live dataset). `loadItems()`
+  persisted to `data/give-kits.json` (data volume; operational, backed up). Seeds five
+  default kits on first read — **Building Materials**, **Starter Kit**, **Capture Kit
+  (Spheres)**, **Combat Kit**, **Food Kit** — all ids verified against the live dataset.
+  (New kits added to an EXISTING store don't re-seed; they were pushed to the live store
+  via the save API so code defaults and the live file stay in sync.) `loadItems()`
   reads `items.json` from the active instance's extracted datasets, falling back to
   the baked `PALWORLD_DATASETS_DIR` (the operator's populated copy). `giveKit()`
   builds the `giveitems` string and runs it via the shared `lib/rcon-exec.ts`
