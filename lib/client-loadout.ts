@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { extractZipTolerant } from '@/lib/archive'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { currentGameDir } from '@/lib/instances'
+import { currentGameDir, currentRestConfig } from '@/lib/instances'
 import { serializeModsTxt } from '@/lib/game-mods'
 import { UE4SS_FRAMEWORK_DEFAULTS } from '@/lib/ue4ss-framework-defaults'
 import { clientModStorePath, listClientMods, type ClientMod } from '@/lib/client-mods'
@@ -808,12 +808,13 @@ function keybindsTxt(): string {
   return s.join('\r\n') + '\r\n'
 }
 
-function readMeFirst(connect: string | null): string {
+function readMeFirst(connect: string | null, serverName: string | null): string {
   const s = [
     'PALWORLD — MODS (READ ME FIRST)',
     '===============================',
     '',
-    connect ? `Join the server at:  ${connect}` : '',
+    serverName ? `Server:  ${serverName}` : '',
+    connect ? `Join at: ${connect}` : '',
     '',
     'You only need ONE thing here:',
     '',
@@ -1001,10 +1002,31 @@ while ($running) {
   if ($running) { Write-Host ""; Read-Host "  Press Enter to return to the menu" | Out-Null }
 }
 `
+  // Strip chars that would break a PowerShell double-quoted string ("$` and newlines) — the
+  // server name is game-settings text, so it's untrusted.
+  const psSafe = (v: string | null) => (v ?? '').replace(/["$`\r\n]/g, '').trim()
   return s
-    .replace(/__CONNECT__/g, (connect ?? '').replace(/"/g, ''))
-    .replace(/__SERVER__/g, (serverName ?? '').replace(/"/g, ''))
+    .replace(/__CONNECT__/g, psSafe(connect))
+    .replace(/__SERVER__/g, psSafe(serverName))
     .replace(/\r?\n/g, '\r\n')
+}
+
+// Best-effort server name via the game REST (same source as the manifest). Null if the
+// server is down — the manager just omits the "Server:" line then.
+async function fetchServerName(): Promise<string | null> {
+  try {
+    const { restUrl, adminPassword: pw } = currentRestConfig()
+    const res = await fetch(new URL('/v1/api/info', new URL(restUrl)), {
+      headers: { Accept: 'application/json', Authorization: `Basic ${Buffer.from(`admin:${pw}`).toString('base64')}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return null
+    const j = (await res.json()) as { servername?: string }
+    return j.servername?.trim() || null
+  } catch {
+    return null
+  }
 }
 
 // Build the bundle. `includeUe4ss` (default true) ships the loader for a self-contained
@@ -1308,6 +1330,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     // root is just the launcher + READ-ME + game\. installed-files.txt STAYS at root (the FSA
     // per-file serving reads it there). See docs/specs/client-mod-sync.md §9.
     const connect = await resolveConnectString()
+    const serverName = await fetchServerName()
     const mgr = join(bundle, '_manager')
     await mkdir(mgr, { recursive: true })
     await writeFile(join(mgr, 'manifest.json'), JSON.stringify(summary, null, 2), 'utf8')
@@ -1316,9 +1339,9 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       await writeFile(join(mgr, 'recommended-engine-ini.txt'), recommendedEngineIni(engineIniTweaks), 'utf8')
     await writeFile(join(mgr, 'performance-targets.txt'), perfTargetsTxt(await heavyPerfTargets(gameRoot)), 'utf8')
     await writeFile(join(mgr, 'keybinds.txt'), keybindsTxt(), 'utf8')
-    await writeFile(join(mgr, 'manager.ps1'), managerPs1(connect, null), 'utf8')
+    await writeFile(join(mgr, 'manager.ps1'), managerPs1(connect, serverName), 'utf8')
     await writeFile(join(bundle, 'Palworld Mod Manager.bat'), managerBat(), 'utf8')
-    await writeFile(join(bundle, 'READ-ME-FIRST.txt'), readMeFirst(connect), 'utf8')
+    await writeFile(join(bundle, 'READ-ME-FIRST.txt'), readMeFirst(connect, serverName), 'utf8')
 
     // Zip the bundle contents (game/, INSTALL.txt, install.ps1, manifest.json) at the
     // zip root. Streaming CLI zip — the ~1GB tree never sits in a Node buffer.
