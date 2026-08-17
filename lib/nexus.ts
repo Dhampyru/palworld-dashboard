@@ -217,7 +217,12 @@ export function resolveVariantLatest(
   return { latest: best ?? (use.length ? (use[use.length - 1].version ?? null) : null), variant: v }
 }
 
-// Downloadable files for a mod — MAIN + OPTIONAL only (skip ARCHIVED/OLD_VERSION).
+// Downloadable files for a mod (skip ARCHIVED/OLD_VERSION). Includes MISCELLANEOUS:
+// some mods (e.g. 5120 Stuck Pal Scanner) publish their ONLY download under that category,
+// so excluding it left getModFiles empty — detection still flagged an update via the mod's
+// headline version, but the Update flow found no file to download and failed ("can't update").
+// MAIN stays preferred everywhere (pickUpdateFile / downloadMainArchive / resolveVariantLatest
+// all fall back to the full list only when no MAIN exists), so this only affects MAIN-less mods.
 export async function getModFiles(modId: number): Promise<NexusFile[]> {
   const found = await readNexusKey()
   if (!found) return []
@@ -234,7 +239,7 @@ export async function getModFiles(modId: number): Promise<NexusFile[]> {
     return (j.files ?? [])
       .filter((f) => {
         const c = (f.category_name ?? '').toUpperCase()
-        return c === 'MAIN' || c === 'OPTIONAL' || c === 'UPDATE'
+        return c === 'MAIN' || c === 'OPTIONAL' || c === 'UPDATE' || c === 'MISCELLANEOUS'
       })
       .map((f) => ({
         fileId: f.file_id,
