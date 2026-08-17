@@ -127,6 +127,14 @@ side is remappable), and **Base Chest Organiser** F4/F5/F10 → END/INSERT/Numpa
 `Key.F4/F5/F10` were invisible pre-fix, so Ultra Graphics/Pal Insight had been remapped on top of
 them). Applied live → 0 detectable conflicts.
 
+## OwnedIndicator F7/F9 → Ctrl+F7/Ctrl+F9 (2026-08-17)
+
+OwnedIndicator (Show What You Already Built) hardcodes F7 (re-check) and F9 (hide/show owned)
+via `RegisterKeyBind` in `main.lua`, colliding with Accessory Toggler (F7) and Condenser IQ (F9).
+Resolved by moving the NEWCOMER: two `PAYLOAD_EDITS` add `{ModifierKey.CONTROL}` → Ctrl+F7 /
+Ctrl+F9, so the two established mods keep their bare keys and the modifier-aware detector reports
+0 conflicts. Broadcast tip added for the new controls.
+
 ## Letter keybinds fire while typing → add a modifier (2026-08-17)
 
 A friend hit Pal Insight's SETTINGS menu popping open whenever he typed a word with "O" in a text

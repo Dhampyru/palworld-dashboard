@@ -96,6 +96,20 @@ export const PAYLOAD_EDITS: PayloadEdit[] = [
     replacements: [['settingsCtrl = false', 'settingsCtrl = true']],
     resolves: 'O → Ctrl+O (settings; typing O is now safe)',
   },
+  {
+    // OwnedIndicator (newcomer) hardcodes F7 + F9 via RegisterKeyBind in main.lua, colliding
+    // with Accessory Toggler (F7) and Condenser IQ (F9). Move the NEWCOMER by adding a Ctrl
+    // modifier → Ctrl+F7 / Ctrl+F9; modifier-aware detector clears both conflicts, and the two
+    // established mods keep their bare keys.
+    modId: 'ownedindicator---show-what-you-already-built',
+    modName: 'OwnedIndicator',
+    relWithin: 'Scripts/main.lua',
+    replacements: [
+      ['RegisterKeyBind(Key.F7, function()', 'RegisterKeyBind(Key.F7, {ModifierKey.CONTROL}, function()'],
+      ['RegisterKeyBind(Key.F9, function()', 'RegisterKeyBind(Key.F9, {ModifierKey.CONTROL}, function()'],
+    ],
+    resolves: 'F7 → Ctrl+F7 (re-check), F9 → Ctrl+F9 (hide/show owned)',
+  },
 ]
 
 export type RemapResult = {
