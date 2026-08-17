@@ -45,6 +45,9 @@ data/steam/
 # Friend-loadout connect address (operator's public IP:port — never in the tree)
 data/loadout-connect.json
 
+# Give-items kits (operator's own item lists — runtime data, not shipped)
+data/give-kits.json
+
 # game-server runtime data (created on first run)
 game-server/game/
 game-server/mods/
