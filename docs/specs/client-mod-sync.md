@@ -322,6 +322,18 @@ from the spreadsheet — NOT in any API. So "add a mod by URL" cannot (and must 
 - Prefer a token or share-link over fully open, and never expose anything but the
   curated `clientMods` set.
 
+### 8a.0. Durable connect address — 2026-08-17
+The connect address (`host:port` a friend types to join) was browser-local only (invite
+panel `HOST_KEY` localStorage), so a share minted from another browser or the API carried
+NO "Connect address" and friends didn't know where to join. Now persisted server-side:
+`lib/loadout-connect.ts` (`getLoadoutConnect`/`setLoadoutConnect`/`resolveConnectString`;
+`data/loadout-connect.json`, not a secret, backed up with the operational JSONs; port
+defaults to the ACTIVE instance's game port). `createShare` uses an explicitly-passed host
+(and PERSISTS it) else falls back to the stored connect, so every link carries it. The
+bundle **INSTALL.txt** gains a "HOW TO JOIN" section (`installTxt(..., connect)` ←
+`resolveConnectString()`). `GET/POST /api/client-mods/connect` (admin) reads/sets it; the
+invite panel prefills its host field from the server (server wins over localStorage).
+
 ### 8a. Friend share links — BUILT + tested 2026-08-08
 The admin mints a **share link**; a non-admin friend opens a PUBLIC page (the unguessable
 192-bit token IS the capability — no admin login) and downloads the bundle.

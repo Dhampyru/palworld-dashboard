@@ -42,6 +42,9 @@ data/nexus.json
 data/steam-account.json
 data/steam/
 
+# Friend-loadout connect address (operator's public IP:port — never in the tree)
+data/loadout-connect.json
+
 # game-server runtime data (created on first run)
 game-server/game/
 game-server/mods/

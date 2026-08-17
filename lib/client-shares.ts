@@ -1,8 +1,13 @@
 import { copyFile, cp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
-import { currentGameDir } from '@/lib/instances'
+import { currentGameDir, currentInstanceId, resolveInstance } from '@/lib/instances'
 import { buildClientLoadout } from '@/lib/client-loadout'
+import { resolveConnectString, setLoadoutConnect } from '@/lib/loadout-connect'
+
+function instanceGamePortForShare(): number {
+  return resolveInstance(currentInstanceId())?.ports.game ?? Number(process.env.PALWORLD_GAME_PORT ?? 8211)
+}
 
 // PATCH (not upstream): friend-facing share links (docs/specs/client-mod-sync.md §5b/§8).
 // The admin mints a share link; a non-admin friend opens a public page (token = capability,
@@ -109,7 +114,18 @@ export async function createShare(opts: {
     await copyFile(zipPath, dest) // cross-device safe (temp /tmp → game volume)
     const treeDir = join(dir, token) // extracted tree (for FSA per-file serving)
     await cp(bundleDir, treeDir, { recursive: true })
-    const host = opts.connectHost?.trim()
+    // Connect address: an explicit host (from the invite panel field) wins and is
+    // ALSO persisted server-side so it's remembered for future shares + the bundle;
+    // otherwise fall back to the stored connect so every link carries it.
+    const explicitHost = opts.connectHost?.trim()
+    let connect: string | null
+    if (explicitHost) {
+      const port = opts.port ?? instanceGamePortForShare()
+      connect = `${explicitHost}:${port}`
+      await setLoadoutConnect({ host: explicitHost, port: opts.port ?? null })
+    } else {
+      connect = await resolveConnectString()
+    }
     const pass = opts.passphrase?.trim() || null
     const stored: StoredShare = {
       token,
@@ -121,7 +137,7 @@ export async function createShare(opts: {
       label: opts.label?.trim() || null,
       serverName: opts.serverName ?? null,
       gameVersion: opts.gameVersion ?? null,
-      connect: host ? `${host}:${opts.port ?? 8211}` : null,
+      connect,
       summary: {
         lua: summary.luaMods.length,
         pak: summary.pakFiles.length,

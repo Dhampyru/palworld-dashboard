@@ -13,6 +13,7 @@ import { overlayClientConfigsInto } from '@/lib/client-configs'
 import { overlayPalSchemaInto } from '@/lib/palschema-config'
 import { overlayClientModFilesInto } from '@/lib/client-mod-files'
 import { overlayReshadeInto } from '@/lib/reshade'
+import { resolveConnectString } from '@/lib/loadout-connect'
 
 const execFileP = promisify(execFile)
 
@@ -529,11 +530,20 @@ function recommendedEngineIni(tweaks: { name: string; text: string }[]): string 
   return body
 }
 
-function installTxt(s: LoadoutSummary, includedUe4ss: boolean): string {
+function installTxt(s: LoadoutSummary, includedUe4ss: boolean, connect: string | null): string {
   return [
     'Palworld — Client Mods Loadout',
     '================================',
     `Generated: ${s.generatedAt}`,
+    ...(connect
+      ? [
+          '',
+          'HOW TO JOIN',
+          `  After installing, open Palworld → Join Multiplayer (Dedicated Server) → Connect,`,
+          `  and enter this address:`,
+          `      ${connect}`,
+        ]
+      : []),
     `Mods: ${s.mods.length} (${s.luaMods.length} UE4SS/Lua, ${s.pakFiles.length} pak, ${s.logicMods.length} LogicMods)`,
     s.parityPaks ? `Includes ${s.parityPaks} server-parity pak(s) so your content matches the server.` : '',
     s.palSchemaMods ? `Includes PalSchema + ${s.palSchemaMods} client PalSchema mod(s) (custom items/recipes/icons).` : '',
@@ -1023,7 +1033,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     await writeFile(join(bundle, 'installed-files.txt'), installedFiles.join('\n') + '\n', 'utf8')
 
     await writeFile(join(bundle, 'manifest.json'), JSON.stringify(summary, null, 2), 'utf8')
-    await writeFile(join(bundle, 'INSTALL.txt'), installTxt(summary, includedUe4ss), 'utf8')
+    await writeFile(join(bundle, 'INSTALL.txt'), installTxt(summary, includedUe4ss, await resolveConnectString()), 'utf8')
     if (engineIniTweaks.length)
       await writeFile(join(bundle, 'recommended-engine-ini.txt'), recommendedEngineIni(engineIniTweaks), 'utf8')
     await writeFile(join(bundle, 'install.ps1'), installPs1(), 'utf8')

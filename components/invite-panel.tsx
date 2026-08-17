@@ -107,6 +107,23 @@ export function InvitePanel() {
     } catch {
       /* ignore */
     }
+    // Durable connect host (server-side wins over localStorage — it's what every share uses).
+    try {
+      const c = await fetch('/api/client-mods/connect', { headers: buildPalworldProxyHeaders(config), cache: 'no-store' })
+      if (c.ok) {
+        const j = (await c.json()) as { host?: string | null }
+        if (j.host) {
+          setHost(j.host)
+          try {
+            localStorage.setItem(HOST_KEY, j.host)
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
   }, [config])
 
   useEffect(() => {
