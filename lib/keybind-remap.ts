@@ -75,6 +75,27 @@ export const PAYLOAD_EDITS: PayloadEdit[] = [
     ],
     resolves: 'NUM_4 (Palvolve side disabled)',
   },
+  {
+    // "Y" (Palvolve evolve-confirm, remapped off F2) fires GLOBALLY (RegisterKeyBind), so typing
+    // "Y" in a text box could confirm an armed evolve. Add Ctrl → Ctrl+Y; plain typing is safe.
+    modId: 'palvolve---evolve-your-pals',
+    modName: 'Palvolve',
+    relWithin: 'Scripts/evolution.lua',
+    replacements: [
+      ['RegisterKeyBind(Key[Config.confirmKey], function()', 'RegisterKeyBind(Key[Config.confirmKey], {ModifierKey.CONTROL}, function()'],
+    ],
+    resolves: 'Y → Ctrl+Y (evolve-confirm; typing Y is now safe)',
+  },
+  {
+    // "O" (Pal Insight settings, remapped off F6) also fires globally — typing "O" popped the
+    // settings menu. Flip its config modifier to Ctrl → Ctrl+O; plain typing is safe. Config-based,
+    // so this is an exact-string edit on config.lua (settingsCtrl only — not inspect/potential).
+    modId: 'pal-insight---native-style-pal-inspection-overlay',
+    modName: 'Pal Insight',
+    relWithin: 'config.lua',
+    replacements: [['settingsCtrl = false', 'settingsCtrl = true']],
+    resolves: 'O → Ctrl+O (settings; typing O is now safe)',
+  },
 ]
 
 export type RemapResult = {

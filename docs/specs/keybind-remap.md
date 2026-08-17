@@ -127,6 +127,19 @@ side is remappable), and **Base Chest Organiser** F4/F5/F10 → END/INSERT/Numpa
 `Key.F4/F5/F10` were invisible pre-fix, so Ultra Graphics/Pal Insight had been remapped on top of
 them). Applied live → 0 detectable conflicts.
 
+## Letter keybinds fire while typing → add a modifier (2026-08-17)
+
+A friend hit Pal Insight's SETTINGS menu popping open whenever he typed a word with "O" in a text
+box. Root cause: **UE4SS keybinds fire even while a game text field has focus**, so a bind on a
+plain LETTER triggers mid-typing. Two of our own remaps had moved binds onto bare letters —
+Pal Insight settings F6→**O** and Palvolve evolve-confirm F2→**Y**. Fix: add a **Ctrl** modifier
+(Ctrl+O / Ctrl+Y) so plain typing is safe but the action is still reachable. Both are now robust
+`PAYLOAD_EDITS` (Palvolve: add `{ModifierKey.CONTROL}` to the `RegisterKeyBind(Key[Config.confirmKey]…)`
+in evolution.lua; Pal Insight: flip `settingsCtrl = false → true` in config.lua) so a remapClear +
+remapApply re-derives the modifier instead of reverting to the bare letter. **Lesson (public
+release):** never remap to a bare letter — modified combos, function keys, or numpad only, because
+plain letters get typed. Broadcast tips updated (Palvolve → Ctrl+Y, added a Pal Insight controls tip).
+
 ## Config-gated keybinds not counted (2026-08-16, public-friendly)
 
 The detector was false-flagging keybinds that never actually register — a common DEBUG/optional
