@@ -393,3 +393,20 @@ The admin mints a **share link**; a non-admin friend opens a PUBLIC page (the un
 - Reconciling a client that wants to ALSO run Steam Workshop mods alongside the Classic
   bundle — pick one runtime (§2b); the bundle is meant to be their single mod source.
 - Auto-updating a friend's client from Nexus (auth-gated; same verdict as elsewhere).
+
+## 9. Mod Manager — one clickable launcher (2026-08-17)
+Instead of loose install/uninstall `.bat`/`.ps1` at the zip root, the bundle ships ONE launcher
+`Palworld Mod Manager.bat` → a console-menu app (`_manager\manager.ps1`, launched with
+`-ExecutionPolicy Bypass`). Root is now just: `Palworld Mod Manager.bat`, `READ-ME-FIRST.txt`,
+`game\`, `installed-files.txt` (kept at root — the FSA per-file serving reads it there), `_manager\`.
+All scripts + `manifest.json`/`INSTALL.txt`/`recommended-engine-ini.txt` moved into `_manager\`.
+Menu: **[1] Install/Update** — a true SYNC: reads the bundle's `installed-files.txt`, diffs against
+a per-install stash (`<Palworld>\.palworld-loadout-manifest.txt`), DELETES no-longer-included files,
+robocopies the rest, re-stashes — so added/changed/removed all go through one button and the friend
+never needs to know what changed. **[2] Performance Mode / [3] Restore** — toggles the
+performance-heavy mods from `_manager\performance-targets.txt` (mods.txt lines → 0, heavy paks →
+`.pak.off`, ReShade `dxgi.dll` → `.off`) and reverses it. **[4] Uninstall**, **[5] Controls**.
+Heavy targets are AUTO-DERIVED at build time by scanning the assembled bundle by folder/pak name
+(`heavyPerfTargets` in `lib/client-loadout.ts`) — no hardcoded per-mod list, so it's correct for any
+operator's mod set ("Fix" in a name never masks a heavy mod, e.g. Extreme Foliage). The old
+install/uninstall script generators remain but are no longer written to the bundle.

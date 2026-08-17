@@ -561,9 +561,8 @@ function installTxt(s: LoadoutSummary, includedUe4ss: boolean, connect: string |
     'INSTALL (easy)',
     '  1. Close Palworld completely.',
     '  2. Make sure your Palworld is the SAME version as the server (update via Steam).',
-    '  3. DOUBLE-CLICK  install.bat  and follow the prompt. (Use the .bat, not the .ps1 —',
-    '     it gets past Windows\' "scripts are disabled / blocked" and keeps the window open',
-    '     so you can read any message.)',
+    '  3. From the zip ROOT, DOUBLE-CLICK  "Palworld Mod Manager.bat"  and choose  [1] Install / Update.',
+    '     (This file — INSTALL.txt — is only the manual fallback.)',
     '',
     'INSTALL (manual — always works)',
     '  1. Close Palworld.',
@@ -575,9 +574,9 @@ function installTxt(s: LoadoutSummary, includedUe4ss: boolean, connect: string |
     '  4. Launch Palworld. UE4SS loads the mods ~1-2 minutes into the world.',
     '',
     'UNINSTALL',
-    '  Keep this extracted folder. To remove the mods later, close Palworld and double-click',
-    '  uninstall.bat — it removes the mods this bundle installed (their folders, including any',
-    '  config/cache they wrote after launch) and nothing else — your other mods are left alone.',
+    '  Keep this extracted folder. Open "Palworld Mod Manager.bat" and choose [4] Uninstall —',
+    '  it removes the mods this bundle installed (their folders, including any config/cache they',
+    '  wrote after launch) and nothing else — your other mods are left alone.',
     '  (This also removes UE4SS; if you run other UE4SS mods, reinstall your loader afterward.)',
     '',
     'MODS IN THIS LOADOUT',
@@ -733,6 +732,279 @@ echo.
 pause
 `
   return s.replace(/\r?\n/g, '\r\n')
+}
+
+// ── Mod Manager (single clickable launcher) ──────────────────────────────────────────────
+// Replaces the loose install/uninstall .bat/.ps1 with ONE console-menu app. All the real
+// scripts live in _manager\ so the zip root is just the launcher + READ-ME + game\.
+// docs/specs/client-mod-sync.md §9.
+
+// Which shipped mods are performance-heavy → what Performance Mode disables. DERIVED by
+// scanning the assembled bundle by folder/pak name (no hardcoded per-mod list, so it's
+// correct for any operator's mod set). MAIN/booster mods are untouched.
+async function heavyPerfTargets(gameRoot: string): Promise<{ mods: string[]; paks: string[]; reshade: boolean }> {
+  // Heavy UE4SS Lua mods by FOLDER name. "Fix" in a name never overrides these (so "Extreme
+  // Foliage Draw Distance and Tree Pop-in Fix" is correctly heavy, not a booster).
+  const HEAVY_FOLDER = /ultra.?graphic|ultra.?weather|volumetric|foliage|draw.?distance|culling.?disabl|light.?cull/i
+  const HEAVY_PAK = /hd.?map|hd.?tex|bloodfx|_blood|blood_|plaster|texture.?swap|4k|high.?res|volumetric.?cloud/i
+  const mods: string[] = []
+  try {
+    for (const e of await readdir(join(gameRoot, 'Pal/Binaries/Win64/ue4ss/Mods'), { withFileTypes: true })) {
+      if (e.isDirectory() && HEAVY_FOLDER.test(e.name)) mods.push(e.name)
+    }
+  } catch {
+    /* no ue4ss mods */
+  }
+  const paks: string[] = []
+  for (const sub of ['Pal/Content/Paks/~mods', 'Pal/Content/Paks/LogicMods']) {
+    try {
+      for (const e of await readdir(join(gameRoot, sub), { withFileTypes: true })) {
+        if (e.isFile() && /\.pak$/i.test(e.name) && HEAVY_PAK.test(e.name)) paks.push(`${sub}/${e.name}`)
+      }
+    } catch {
+      /* dir absent */
+    }
+  }
+  const reshade = await exists(join(gameRoot, 'Pal/Binaries/Win64/dxgi.dll'))
+  return { mods, paks, reshade }
+}
+
+function perfTargetsTxt(t: { mods: string[]; paks: string[]; reshade: boolean }): string {
+  const lines = [
+    '# Auto-generated — the performance-heavy items Performance Mode toggles. Do not edit.',
+    ...t.mods.map((m) => `MODTXT ${m}`),
+    ...t.paks.map((p) => `PAK ${p}`),
+    ...(t.reshade ? ['RESHADE'] : []),
+  ]
+  return lines.join('\r\n') + '\r\n'
+}
+
+function keybindsTxt(): string {
+  const s = [
+    'PALWORLD — CONTROLS (this server\u2019s mods)',
+    '=========================================',
+    '',
+    '  E .................. throw a sphere / summon your active Pal',
+    '  F .................. partner skill (Full Sphere Summon)',
+    '  F2 ................. quick-stack loot + eggs into nearby chests',
+    '  F5 ................. reveal a Pal\u2019s hidden potential / IVs (look at it)',
+    '  F6 ................. guild overlay: members + territory (GuildSight)',
+    '  F7 ................. toggle accessories on/off',
+    '  F8 / F9 / F10 ...... Smart Condenser: pick best passives / open / clear',
+    '  Left-Alt (hold) .... inspect a Pal (Pal Insight)',
+    '  B .................. free-camera build mode',
+    '  G .................. Blueprint mode (save & stamp builds)',
+    '  Numpad 1-9 ......... swap saved Palbox party presets',
+    '  Numpad + / - ....... widen / narrow FOV + camera distance',
+    '',
+    'Ctrl combos (safe to type the plain letter):',
+    '  Ctrl+Y ............. confirm Evolve in a Pal\u2019s radial menu (Palvolve)',
+    '  Ctrl+O ............. Pal Insight settings',
+    '  Ctrl+C ............. copy a base layout (Base Automation)',
+    '  Ctrl+F9 ............ hide/show what you already own (OwnedIndicator)',
+    '  Ctrl+F7 ............ OwnedIndicator re-check',
+    '',
+  ]
+  return s.join('\r\n') + '\r\n'
+}
+
+function readMeFirst(connect: string | null): string {
+  const s = [
+    'PALWORLD — MODS (READ ME FIRST)',
+    '===============================',
+    '',
+    connect ? `Join the server at:  ${connect}` : '',
+    '',
+    'You only need ONE thing here:',
+    '',
+    '    ▶  Double-click  "Palworld Mod Manager.bat"',
+    '',
+    'It opens a small menu with everything:',
+    '  [1] Install / Update mods   — run this any time the host says mods changed',
+    '  [2] Performance Mode        — laptop or crashing? turns off the heavy visual mods',
+    '  [3] Restore Full Graphics   — puts them back',
+    '  [4] Uninstall everything',
+    '  [5] Show controls / keybinds',
+    '',
+    'Notes:',
+    '  • Close Palworld before Install / Performance / Uninstall.',
+    '  • Install / Update is smart — it adds, updates AND removes to match the host,',
+    '    so you always just click [1]; you never need to know what changed.',
+    '  • Everything else (the actual scripts) is tucked in the _manager folder —',
+    '    you can ignore it.',
+    '',
+  ]
+  return s.filter((l) => l !== '').join('\r\n') + '\r\n'
+}
+
+function managerBat(): string {
+  const s = String.raw`@echo off
+title Palworld Mod Manager
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0_manager\manager.ps1"
+`
+  return s.replace(/\r?\n/g, '\r\n')
+}
+
+function managerPs1(connect: string | null, serverName: string | null): string {
+  const s = String.raw`# Palworld Mod Manager. Launch via "Palworld Mod Manager.bat" (double-click).
+$ErrorActionPreference = "Stop"
+$Root       = Split-Path -Parent $PSScriptRoot
+$BundleGame = Join-Path $Root "game"
+$ListFile   = Join-Path $Root "installed-files.txt"
+$Targets    = Join-Path $PSScriptRoot "performance-targets.txt"
+$Keybinds   = Join-Path $PSScriptRoot "keybinds.txt"
+$Connect    = "__CONNECT__"
+$ServerName = "__SERVER__"
+$Stash      = ".palworld-loadout-manifest.txt"
+
+function Find-Palworld {
+  $cands = @()
+  try {
+    $steam = (Get-ItemProperty "HKCU:\Software\Valve\Steam" -EA SilentlyContinue).SteamPath
+    if ($steam) {
+      $cands += (Join-Path $steam "steamapps\common\Palworld")
+      $vdf = Join-Path $steam "steamapps\libraryfolders.vdf"
+      if (Test-Path $vdf) {
+        foreach ($line in Get-Content $vdf) {
+          if ($line -match '"path"\s+"(.+?)"') { $cands += (Join-Path ($Matches[1] -replace '\\\\','\') "steamapps\common\Palworld") }
+        }
+      }
+    }
+  } catch {}
+  $cands += "C:\Program Files (x86)\Steam\steamapps\common\Palworld"
+  foreach ($c in $cands) { if (Test-Path (Join-Path $c "Pal\Binaries\Win64")) { return $c } }
+  return $null
+}
+function Get-Pal {
+  $pal = Find-Palworld
+  if (-not $pal) { $pal = Read-Host "Could not auto-find Palworld. Paste your Palworld folder (the one with Pal\Binaries)" }
+  if (-not (Test-Path (Join-Path $pal "Pal\Binaries\Win64"))) { throw "That folder is not a Palworld install (no Pal\Binaries\Win64)." }
+  return $pal
+}
+function Prune-Empty($pal) {
+  foreach ($d in @("Pal\Binaries\Win64\ue4ss","Pal\Content\Paks\~mods","Pal\Content\Paks\LogicMods")) {
+    $dir = Join-Path $pal $d
+    if (Test-Path $dir) {
+      Get-ChildItem -LiteralPath $dir -Recurse -Directory -EA SilentlyContinue | Sort-Object FullName -Descending | ForEach-Object {
+        if (-not (Get-ChildItem -LiteralPath $_.FullName -Force -EA SilentlyContinue)) { Remove-Item -LiteralPath $_.FullName -Force -EA SilentlyContinue }
+      }
+    }
+  }
+}
+function Do-Install {
+  if (-not (Test-Path $BundleGame)) { throw "The game\ folder is missing - extract the WHOLE zip first." }
+  $pal = Get-Pal
+  Write-Host "Syncing mods into: $pal" -ForegroundColor Cyan
+  $new = @(Get-Content $ListFile -EA SilentlyContinue | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+  $stashPath = Join-Path $pal $Stash
+  $old = @()
+  if (Test-Path $stashPath) { $old = @(Get-Content $stashPath -EA SilentlyContinue | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+  $newSet = @{}; foreach ($n in $new) { $newSet[$n] = $true }
+  $removed = 0
+  foreach ($rel in $old) {
+    if (-not $newSet.ContainsKey($rel)) {
+      $p = Join-Path $pal ($rel -replace '/','\')
+      if (Test-Path $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force -EA SilentlyContinue; $removed++ }
+    }
+  }
+  robocopy "$BundleGame" "$pal" /E /IS /IT /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+  if ($LASTEXITCODE -ge 8) { throw "Copy failed (robocopy code $LASTEXITCODE)." }
+  Prune-Empty $pal
+  Set-Content -LiteralPath $stashPath -Value $new -Encoding ASCII
+  $msg = "Done. " + $new.Count + " files in sync"
+  if ($removed -gt 0) { $msg += " (" + $removed + " no-longer-included removed)" }
+  Write-Host $msg -ForegroundColor Green
+  Write-Host "Launch Palworld - mods load ~1-2 min into the world." -ForegroundColor Green
+}
+function Do-Uninstall {
+  $pal = Get-Pal
+  if ((Read-Host "Remove ALL mods this bundle installed from $pal ? (y/n)") -ne "y") { Write-Host "Cancelled."; return }
+  $list = @(Get-Content $ListFile -EA SilentlyContinue | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+  $removed = 0
+  foreach ($rel in $list) { $p = Join-Path $pal ($rel -replace '/','\'); if (Test-Path $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force -EA SilentlyContinue; $removed++ } }
+  $roots = @{}
+  foreach ($rel in $list) {
+    $r = $rel -replace '/','\'
+    if ($r -match '^(Pal\\Binaries\\Win64\\ue4ss\\Mods|Pal\\Content\\Paks\\LogicMods)\\([^\\]+)\\') { $roots[(Join-Path $Matches[1] $Matches[2])] = $true }
+  }
+  foreach ($r in $roots.Keys) { $p = Join-Path $pal $r; if (Test-Path $p -PathType Container) { Remove-Item -LiteralPath $p -Recurse -Force -EA SilentlyContinue } }
+  Prune-Empty $pal
+  $stashPath = Join-Path $pal $Stash; if (Test-Path $stashPath) { Remove-Item -LiteralPath $stashPath -Force -EA SilentlyContinue }
+  Write-Host "Removed $removed file(s). The mods are uninstalled." -ForegroundColor Green
+  Write-Host "(This also removed UE4SS. If you run OTHER UE4SS mods, reinstall your loader.)" -ForegroundColor Yellow
+}
+function Set-Perf($enable) {
+  if (-not (Test-Path $Targets)) { Write-Host "No performance targets shipped." -ForegroundColor Yellow; return }
+  $items = @(Get-Content $Targets | Where-Object { $_ -and -not $_.StartsWith('#') })
+  if (-not $items) { Write-Host "This bundle has no performance-heavy mods to toggle." -ForegroundColor Yellow; return }
+  $pal = Get-Pal
+  $modsTxt = Join-Path $pal "Pal\Binaries\Win64\ue4ss\Mods\mods.txt"
+  $n = 0
+  foreach ($it in $items) {
+    $sp = $it -split ' ', 2
+    $kind = $sp[0]; $arg = if ($sp.Count -gt 1) { $sp[1].Trim() } else { "" }
+    if ($kind -eq 'MODTXT' -and (Test-Path $modsTxt)) {
+      $val = if ($enable) { '0' } else { '1' }
+      $out = foreach ($ln in (Get-Content $modsTxt)) {
+        if ($ln -match ('^\s*' + [regex]::Escape($arg) + '\s*:\s*[01]\s*$')) { $n++; ('{0} : {1}' -f $arg, $val) } else { $ln }
+      }
+      Set-Content -LiteralPath $modsTxt -Value $out
+    } elseif ($kind -eq 'PAK') {
+      $p = Join-Path $pal ($arg -replace '/','\'); $off = "$p.off"
+      if ($enable) { if (Test-Path $p) { Move-Item -LiteralPath $p -Destination $off -Force; $n++ } }
+      else        { if (Test-Path $off) { Move-Item -LiteralPath $off -Destination $p -Force; $n++ } }
+    } elseif ($kind -eq 'RESHADE') {
+      $dll = Join-Path $pal "Pal\Binaries\Win64\dxgi.dll"; $off = "$dll.off"
+      if ($enable) { if (Test-Path $dll) { Move-Item -LiteralPath $dll -Destination $off -Force; $n++ } }
+      else        { if (Test-Path $off) { Move-Item -LiteralPath $off -Destination $dll -Force; $n++ } }
+    }
+  }
+  if ($enable) { Write-Host "Performance Mode ON - disabled $n heavy item(s). Restart Palworld to apply." -ForegroundColor Green }
+  else         { Write-Host "Full Graphics restored - re-enabled $n item(s). Restart Palworld to apply." -ForegroundColor Green }
+}
+function Show-Menu {
+  Clear-Host
+  Write-Host ""
+  Write-Host "  ==================================================" -ForegroundColor DarkCyan
+  Write-Host "            PALWORLD  -  MOD MANAGER" -ForegroundColor Cyan
+  if ($ServerName) { Write-Host ("            Server: " + $ServerName) -ForegroundColor Gray }
+  if ($Connect)    { Write-Host ("            Join:   " + $Connect) -ForegroundColor Gray }
+  Write-Host "  ==================================================" -ForegroundColor DarkCyan
+  Write-Host ""
+  Write-Host "     [1]  Install / Update mods"
+  Write-Host "     [2]  Performance Mode   (laptop / crashing)" -ForegroundColor DarkYellow
+  Write-Host "     [3]  Restore Full Graphics"
+  Write-Host "     [4]  Uninstall everything"
+  Write-Host "     [5]  Show controls / keybinds"
+  Write-Host "     [0]  Exit"
+  Write-Host ""
+}
+$running = $true
+while ($running) {
+  Show-Menu
+  $c = Read-Host "  Choose"
+  Write-Host ""
+  try {
+    switch ($c) {
+      '1' { Do-Install }
+      '2' { Set-Perf $true }
+      '3' { Set-Perf $false }
+      '4' { Do-Uninstall }
+      '5' { if (Test-Path $Keybinds) { Get-Content $Keybinds | ForEach-Object { Write-Host $_ } } else { Write-Host "No keybinds file shipped." -ForegroundColor Yellow } }
+      '0' { $running = $false }
+      default { Write-Host "Pick a number 0-5." -ForegroundColor Yellow }
+    }
+  } catch {
+    Write-Host ("ERROR: " + $_.Exception.Message) -ForegroundColor Red
+    Write-Host "See _manager\INSTALL.txt to do it manually." -ForegroundColor Yellow
+  }
+  if ($running) { Write-Host ""; Read-Host "  Press Enter to return to the menu" | Out-Null }
+}
+`
+  return s
+    .replace(/__CONNECT__/g, (connect ?? '').replace(/"/g, ''))
+    .replace(/__SERVER__/g, (serverName ?? '').replace(/"/g, ''))
+    .replace(/\r?\n/g, '\r\n')
 }
 
 // Build the bundle. `includeUe4ss` (default true) ships the loader for a self-contained
@@ -1032,14 +1304,21 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       .sort()
     await writeFile(join(bundle, 'installed-files.txt'), installedFiles.join('\n') + '\n', 'utf8')
 
-    await writeFile(join(bundle, 'manifest.json'), JSON.stringify(summary, null, 2), 'utf8')
-    await writeFile(join(bundle, 'INSTALL.txt'), installTxt(summary, includedUe4ss, await resolveConnectString()), 'utf8')
+    // ONE clickable launcher at the root; every real script tucked into _manager\ so the zip
+    // root is just the launcher + READ-ME + game\. installed-files.txt STAYS at root (the FSA
+    // per-file serving reads it there). See docs/specs/client-mod-sync.md §9.
+    const connect = await resolveConnectString()
+    const mgr = join(bundle, '_manager')
+    await mkdir(mgr, { recursive: true })
+    await writeFile(join(mgr, 'manifest.json'), JSON.stringify(summary, null, 2), 'utf8')
+    await writeFile(join(mgr, 'INSTALL.txt'), installTxt(summary, includedUe4ss, connect), 'utf8')
     if (engineIniTweaks.length)
-      await writeFile(join(bundle, 'recommended-engine-ini.txt'), recommendedEngineIni(engineIniTweaks), 'utf8')
-    await writeFile(join(bundle, 'install.ps1'), installPs1(), 'utf8')
-    await writeFile(join(bundle, 'install.bat'), installBat(), 'utf8')
-    await writeFile(join(bundle, 'uninstall.ps1'), uninstallPs1(), 'utf8')
-    await writeFile(join(bundle, 'uninstall.bat'), uninstallBat(), 'utf8')
+      await writeFile(join(mgr, 'recommended-engine-ini.txt'), recommendedEngineIni(engineIniTweaks), 'utf8')
+    await writeFile(join(mgr, 'performance-targets.txt'), perfTargetsTxt(await heavyPerfTargets(gameRoot)), 'utf8')
+    await writeFile(join(mgr, 'keybinds.txt'), keybindsTxt(), 'utf8')
+    await writeFile(join(mgr, 'manager.ps1'), managerPs1(connect, null), 'utf8')
+    await writeFile(join(bundle, 'Palworld Mod Manager.bat'), managerBat(), 'utf8')
+    await writeFile(join(bundle, 'READ-ME-FIRST.txt'), readMeFirst(connect), 'utf8')
 
     // Zip the bundle contents (game/, INSTALL.txt, install.ps1, manifest.json) at the
     // zip root. Streaming CLI zip — the ~1GB tree never sits in a Node buffer.
