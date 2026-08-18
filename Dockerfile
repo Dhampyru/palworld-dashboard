@@ -71,13 +71,13 @@ RUN groupadd --system --gid 2001 nodejs \
 # path) tolerates the release tarball's internal folder name changing between
 # versions.
 ARG RCON_CLI_VERSION=0.10.2
-# `unar` (The Unarchiver, GPL) lets the mod installer open .rar/.7z uploads and
-# Nexus downloads, not just .zip (lib/archive.ts normalizes them to zip). `zip`
-# lets the client-loadout generator produce a Windows-friendly .zip via the CLI
-# (streaming, low memory — the bundle can be ~1GB). Both are explicitly installed,
-# so the curl purge/autoremove below leaves them in place.
+# `bsdtar` (libarchive-tools, BSD) is the primary extractor for .rar/.7z/.tar Nexus
+# downloads + uploads — its RAR5 support is complete where `unar`'s decoder fails mid-file
+# (lib/archive.ts). `unar` (The Unarchiver, GPL) stays as the fallback. `zip` lets the
+# client-loadout generator stream a Windows-friendly .zip via the CLI (low memory — the
+# bundle can be ~1GB). All are explicitly installed, so the curl purge below leaves them.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends curl ca-certificates unar zip \
+  && apt-get install -y --no-install-recommends curl ca-certificates unar libarchive-tools zip \
   && curl -fsSL -o /tmp/rcon.tar.gz \
     "https://github.com/gorcon/rcon-cli/releases/download/v${RCON_CLI_VERSION}/rcon-${RCON_CLI_VERSION}-amd64_linux.tar.gz" \
   && mkdir -p /tmp/rcon-extract \

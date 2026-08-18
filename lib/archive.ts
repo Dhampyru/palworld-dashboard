@@ -7,10 +7,12 @@ import AdmZip from 'adm-zip'
 
 const execFileP = promisify(execFile)
 
-// The Unarchiver (`unar`, GPL — redistributable in the image) handles .rar
-// (incl. RAR5), .7z, .zip, .tar and more with one binary. We only shell out for
-// the formats adm-zip can't read; zip stays in-process. Overridable for tests.
+// Two shell extractors for the formats adm-zip can't read (zip stays in-process):
+// bsdtar (libarchive, BSD) is primary — robust RAR5/7z/tar/gzip; unar (The Unarchiver,
+// GPL) is the fallback. unar's RAR5 decoder is incomplete and fails mid-file on some
+// archives, which is why bsdtar leads. Both overridable for tests.
 const UNAR_BIN = process.env.UNAR_BIN ?? 'unar'
+const BSDTAR_BIN = process.env.BSDTAR_BIN ?? 'bsdtar'
 
 export type ArchiveFormat = 'zip' | '7z' | 'rar' | 'tar' | 'gzip' | 'unknown'
 
@@ -79,15 +81,12 @@ export async function normalizeArchiveToZip(buffer: Buffer): Promise<Buffer> {
 
   const work = await mkdtemp(join(tmpdir(), 'modarch-'))
   try {
-    // gzip is almost always a .tar.gz here — name it .tgz so unar extracts the inner tar tree
-    // rather than just decompressing one gzip layer to a lone .tar file.
+    // gzip is almost always a .tar.gz here — name it .tgz so the inner tar tree extracts
+    // rather than just one gzip layer to a lone .tar file. (Extractors detect by content;
+    // the extension is only a hint.)
     const src = join(work, `archive.${fmt === 'gzip' ? 'tgz' : fmt}`)
-    const out = join(work, 'out')
     await writeFile(src, buffer)
-    // -q quiet, -f force-overwrite, -D never wrap in a containing dir (so `out/`
-    // mirrors the archive's own root layout — the install pipeline expects that;
-    // note -D is "no-directory", whereas lowercase -d FORCES one).
-    await execFileP(UNAR_BIN, ['-q', '-f', '-D', '-o', out, src], { maxBuffer: 64 * 1024 * 1024 })
+    const out = await extractToDir(src, work)
     const zip = new AdmZip()
     await addDirToZip(zip, out, out)
     if (zip.getEntries().length === 0) throw new Error('archive extracted to nothing')
@@ -95,6 +94,40 @@ export async function normalizeArchiveToZip(buffer: Buffer): Promise<Buffer> {
   } finally {
     await rm(work, { recursive: true, force: true }).catch(() => {})
   }
+}
+
+// Extract into a temp dir whose layout mirrors the archive's own root (the install pipeline
+// expects that). bsdtar (libarchive) is PRIMARY — its RAR5/7z support is far more complete
+// than unar's (unar's RAR5 decoder fails mid-file on some archives, e.g. Nexus mod 3771 with
+// "Attempted to read more data than was available"). unar is the FALLBACK for anything
+// libarchive can't open. Each attempt must exit clean AND produce files, else we try the next.
+async function extractToDir(src: string, work: string): Promise<string> {
+  const attempts: { bin: string; args: (out: string) => string[] }[] = [
+    { bin: BSDTAR_BIN, args: (out) => ['-x', '-f', src, '-C', out] },
+    // -q quiet, -f force-overwrite, -D never wrap in a containing dir (lowercase -d FORCES one).
+    { bin: UNAR_BIN, args: (out) => ['-q', '-f', '-D', '-o', out, src] },
+  ]
+  const failures: string[] = []
+  for (let i = 0; i < attempts.length; i++) {
+    const out = join(work, `out${i}`)
+    await mkdir(out, { recursive: true })
+    try {
+      await execFileP(attempts[i].bin, attempts[i].args(out), { maxBuffer: 64 * 1024 * 1024 })
+      if (await dirHasFiles(out)) return out
+      failures.push(`${attempts[i].bin}: extracted nothing`)
+    } catch (e) {
+      failures.push(`${attempts[i].bin}: ${e instanceof Error ? e.message.split('\n')[0] : 'failed'}`)
+    }
+  }
+  throw new Error(`Could not extract archive (${failures.join('; ')})`)
+}
+
+async function dirHasFiles(dir: string): Promise<boolean> {
+  for (const e of await readdir(dir, { withFileTypes: true })) {
+    if (e.isFile()) return true
+    if (e.isDirectory() && (await dirHasFiles(join(dir, e.name)))) return true
+  }
+  return false
 }
 
 async function addDirToZip(zip: AdmZip, root: string, dir: string): Promise<void> {
