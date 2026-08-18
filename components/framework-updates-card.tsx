@@ -1,0 +1,249 @@
+'use client'
+
+// PATCH (not upstream): UE4SS + PalSchema update checks with update-and-rollback
+// (docs/specs/framework-updates.md). PalSchema is a clean semver check (hard "update
+// available"); UE4SS tracks a rolling tag so it's shown informationally (latest release +
+// link) without a false badge. Every action takes a backup; rollbacks are listed. Admin-only.
+
+import { useCallback, useEffect, useState } from 'react'
+import { useServer } from '@/lib/server-context'
+import { buildPalworldProxyHeaders } from '@/lib/palworld'
+import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Spinner } from '@/components/ui/spinner'
+import { RefreshCwIcon, ArrowUpCircleIcon, RotateCcwIcon, ExternalLinkIcon, PackageIcon } from 'lucide-react'
+
+type Backup = { file: string; sizeBytes: number; modifiedAt: string | null }
+type Data = {
+  updates: {
+    ue4ss: {
+      installed: { version: string | null; sha: string | null; source: string | null }
+      latest: { tag: string | null; publishedAt: string | null; url: string | null }
+      updateAvailable: boolean | null
+      note: string
+    }
+    palschema: {
+      installed: string | null
+      installedFlag: boolean
+      latest: string | null
+      publishedAt: string | null
+      url: string | null
+      updateAvailable: boolean
+    }
+    checkedAt: string
+  }
+  palschemaBackups: Backup[]
+  ue4ssBackups: Backup[]
+}
+
+const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString() : '—')
+
+export function FrameworkUpdatesCard() {
+  const { config } = useServer()
+  const [data, setData] = useState<Data | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [psRollback, setPsRollback] = useState('')
+  const [ueRollback, setUeRollback] = useState('')
+
+  const load = useCallback(
+    async (refresh = false) => {
+      if (!config) return
+      setLoading(true)
+      try {
+        const res = await fetch(`/api/framework-updates${refresh ? '?refresh=1' : ''}`, {
+          headers: buildPalworldProxyHeaders(config),
+          cache: 'no-store',
+        })
+        const j = await res.json()
+        if (!res.ok) throw new Error(j.error ?? res.statusText)
+        setData(j)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to check framework updates')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [config],
+  )
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const post = useCallback(
+    async (url: string, body: unknown, label: string) => {
+      if (!config) return
+      setBusy(label)
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        const j = await res.json()
+        if (!res.ok) throw new Error(j.error ?? res.statusText)
+        toast.success(j.note ?? 'Done — restart the server to apply.')
+        await load(true)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Action failed')
+      } finally {
+        setBusy(null)
+      }
+    },
+    [config, load],
+  )
+
+  const ue4ssSource = (src: string | null) => (src === 'experimental-palworld' ? 'palschema' : src === 'beta' ? 'beta' : 'official')
+
+  const u = data?.updates
+  return (
+    <div className="flex flex-col gap-3 rounded-md border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <PackageIcon className="size-3.5" /> Framework Updates
+        </h3>
+        <div className="flex items-center gap-2">
+          {u && <span className="text-[11px] text-muted-foreground">checked {fmtDate(u.checkedAt)}</span>}
+          <Button size="sm" variant="ghost" onClick={() => load(true)} disabled={loading} className="gap-1.5" aria-label="Re-check">
+            {loading ? <Spinner className="size-3.5" /> : <RefreshCwIcon className="size-3.5" />}
+          </Button>
+        </div>
+      </div>
+
+      {!u ? (
+        <div className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
+          {loading ? <><Spinner className="size-4" /> Checking GitHub…</> : 'No data.'}
+        </div>
+      ) : (
+        <>
+          {/* PalSchema — clean semver */}
+          <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium">PalSchema</span>
+              {u.palschema.updateAvailable ? (
+                <Badge variant="outline" className="border-amber-500/40 text-amber-600 dark:text-amber-400">update available</Badge>
+              ) : u.palschema.installedFlag ? (
+                <Badge variant="outline" className="border-emerald-500/30 text-emerald-600 dark:text-emerald-400">up to date</Badge>
+              ) : (
+                <Badge variant="outline">not installed</Badge>
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              installed <span className="font-mono text-foreground">{u.palschema.installed ?? '—'}</span>
+              {' · '}latest{' '}
+              {u.palschema.url ? (
+                <a href={u.palschema.url} target="_blank" rel="noreferrer" className="font-mono text-foreground underline decoration-dotted">
+                  {u.palschema.latest ?? '—'}
+                </a>
+              ) : (
+                <span className="font-mono text-foreground">{u.palschema.latest ?? '—'}</span>
+              )}
+              {u.palschema.publishedAt ? ` (${fmtDate(u.palschema.publishedAt)})` : ''}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {u.palschema.updateAvailable && u.palschema.latest && (
+                <Button
+                  size="sm"
+                  onClick={() => post('/api/framework-updates', { action: 'palschemaUpdate', tag: u.palschema.latest }, 'ps-update')}
+                  disabled={!!busy}
+                  className="h-7 gap-1.5 px-2.5"
+                >
+                  {busy === 'ps-update' ? <Spinner className="size-3.5" /> : <ArrowUpCircleIcon className="size-3.5" />}
+                  Update to {u.palschema.latest} (backup taken)
+                </Button>
+              )}
+              {(data?.palschemaBackups.length ?? 0) > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={psRollback}
+                    onChange={(e) => setPsRollback(e.target.value)}
+                    className="h-7 rounded-md border border-input bg-transparent px-1.5 text-xs"
+                    aria-label="PalSchema backup to restore"
+                  >
+                    <option value="">Rollback to…</option>
+                    {data!.palschemaBackups.map((b) => (
+                      <option key={b.file} value={b.file}>{b.file.replace(/^palschema-loader-/, '').replace(/\.tar\.gz$/, '')}</option>
+                    ))}
+                  </select>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!psRollback || !!busy}
+                    onClick={() => post('/api/framework-updates', { action: 'palschemaRollback', file: psRollback }, 'ps-roll')}
+                    className="h-7 gap-1.5 px-2"
+                  >
+                    {busy === 'ps-roll' ? <Spinner className="size-3.5" /> : <RotateCcwIcon className="size-3.5" />}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* UE4SS — rolling tag, informational */}
+          <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium">UE4SS</span>
+              <Badge variant="outline" className="text-muted-foreground">rolling tag</Badge>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              installed <span className="font-mono text-foreground">{u.ue4ss.installed.version ?? '—'}</span>
+              {u.ue4ss.installed.sha ? <span className="font-mono"> ({u.ue4ss.installed.sha})</span> : ''}
+              {' · '}latest{' '}
+              {u.ue4ss.latest.url ? (
+                <a href={u.ue4ss.latest.url} target="_blank" rel="noreferrer" className="font-mono text-foreground underline decoration-dotted">
+                  {u.ue4ss.latest.tag ?? '—'} <ExternalLinkIcon className="inline size-3" />
+                </a>
+              ) : (
+                <span className="font-mono text-foreground">{u.ue4ss.latest.tag ?? '—'}</span>
+              )}
+              {u.ue4ss.latest.publishedAt ? ` (${fmtDate(u.ue4ss.latest.publishedAt)})` : ''}
+            </div>
+            <p className="text-[11px] text-muted-foreground">{u.ue4ss.note}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => post('/api/game-mods/ue4ss/install', { action: 'download', source: ue4ssSource(u.ue4ss.installed.source) }, 'ue-update')}
+                disabled={!!busy}
+                className="h-7 gap-1.5 px-2.5"
+              >
+                {busy === 'ue-update' ? <Spinner className="size-3.5" /> : <ArrowUpCircleIcon className="size-3.5" />}
+                Reinstall latest (backup taken)
+              </Button>
+              {(data?.ue4ssBackups.length ?? 0) > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={ueRollback}
+                    onChange={(e) => setUeRollback(e.target.value)}
+                    className="h-7 rounded-md border border-input bg-transparent px-1.5 text-xs"
+                    aria-label="UE4SS backup to restore"
+                  >
+                    <option value="">Rollback to…</option>
+                    {data!.ue4ssBackups.map((b) => (
+                      <option key={b.file} value={b.file}>{b.file.replace(/^ue4ss-/, '').replace(/\.tar\.gz$/, '')}</option>
+                    ))}
+                  </select>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!ueRollback || !!busy}
+                    onClick={() => post('/api/game-mods/ue4ss/install', { action: 'rollback', backupFile: ueRollback }, 'ue-roll')}
+                    className="h-7 gap-1.5 px-2"
+                  >
+                    {busy === 'ue-roll' ? <Spinner className="size-3.5" /> : <RotateCcwIcon className="size-3.5" />}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <p className="text-[11px] text-muted-foreground">
+            Framework changes take effect on the next server restart. Both frameworks are fragile — an update is a
+            deliberate action, and every update takes a backup you can roll back to here.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}

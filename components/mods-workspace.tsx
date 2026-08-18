@@ -8,6 +8,7 @@ import { ClientConfigsPanel } from '@/components/client-configs-panel'
 import { ReshadeCard } from '@/components/reshade-card'
 import { UnifiedModUploader } from '@/components/unified-mod-uploader'
 import { Ue4ssLoaderCard } from '@/components/ue4ss-loader-card'
+import { FrameworkUpdatesCard } from '@/components/framework-updates-card'
 import { ServerIcon, MonitorIcon, SparklesIcon } from 'lucide-react'
 
 // PATCH (not upstream): the Mods page. ONE uploader (UnifiedModUploader) sits ABOVE the two
@@ -62,6 +63,7 @@ export function ModsWorkspace() {
       {/* Shared, always-visible loader + uploader above the tabs. */}
       <div className="shrink-0 space-y-3 border-b border-border/60 p-3">
         <Ue4ssLoaderCard onChanged={() => setReloadKey((k) => k + 1)} />
+        <FrameworkUpdatesCard />
         <UnifiedModUploader onInstalled={() => setReloadKey((k) => k + 1)} />
       </div>
 

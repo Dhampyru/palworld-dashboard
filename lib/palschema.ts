@@ -400,10 +400,11 @@ export async function removePalSchemaSubmod(name: string): Promise<{ backup: str
 // PalSchema pins to one specific linked UE4SS build. 0.6.1 pairs with the
 // Okaetsu experimental-palworld build the loader installs. Bump both together.
 export const PALSCHEMA_PINNED_TAG = '0.6.1'
-const PALSCHEMA_RELEASE_API = `https://api.github.com/repos/Okaetsu/PalSchema/releases/tags/${PALSCHEMA_PINNED_TAG}`
-
-export async function downloadPalSchemaRelease(): Promise<Buffer> {
-  const rel = await fetch(PALSCHEMA_RELEASE_API, {
+// Default install pins to PALSCHEMA_PINNED_TAG; the update flow passes a newer tag (e.g. the
+// latest release) so operators can move off the pin deliberately, with a rollback backup.
+export async function downloadPalSchemaRelease(tag: string = PALSCHEMA_PINNED_TAG): Promise<Buffer> {
+  const api = `https://api.github.com/repos/Okaetsu/PalSchema/releases/tags/${encodeURIComponent(tag)}`
+  const rel = await fetch(api, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'palworld-dashboard' },
     cache: 'no-store',
     signal: AbortSignal.timeout(15_000),
@@ -516,6 +517,63 @@ export async function installPalSchemaLoader(
   const finalVersion = version ?? null
   await writeMeta({ version: finalVersion ?? undefined })
   return { version: finalVersion }
+}
+
+// ── Loader backup / rollback / update (for update-with-rollback) ────────────────
+// Backs up the WHOLE loader folder (<modsDir>/PalSchema) as palschema-loader-<ver>-<stamp>,
+// distinct from per-submod backups (palschema-<name>-…). Rollback restores it + the version.
+export type PalSchemaLoaderBackup = { file: string; sizeBytes: number; modifiedAt: string | null }
+
+export async function backupPalSchemaLoader(): Promise<string | null> {
+  const modsDir = await resolveUe4ssModsDir()
+  if (!modsDir) return null
+  try {
+    await stat(join(modsDir, PALSCHEMA_FOLDER))
+  } catch {
+    return null // nothing installed to back up
+  }
+  await mkdir(backupDir(), { recursive: true })
+  const ver = ((await readMeta()).version ?? 'unknown').replace(/[^A-Za-z0-9_.-]+/g, '_') || 'unknown'
+  const file = `palschema-loader-${ver}-${stamp()}.tar.gz`
+  await execFileP('tar', ['-czf', join(backupDir(), file), '-C', modsDir, PALSCHEMA_FOLDER])
+  return file
+}
+
+export async function listPalSchemaLoaderBackups(): Promise<PalSchemaLoaderBackup[]> {
+  try {
+    const out: PalSchemaLoaderBackup[] = []
+    for (const name of await readdir(backupDir())) {
+      if (!/^palschema-loader-.*\.tar\.gz$/.test(name)) continue
+      const s = await stat(join(backupDir(), name))
+      out.push({ file: name, sizeBytes: s.size, modifiedAt: s.mtime.toISOString() })
+    }
+    return out.sort((a, b) => (b.modifiedAt ?? '').localeCompare(a.modifiedAt ?? ''))
+  } catch {
+    return []
+  }
+}
+
+export async function rollbackPalSchemaLoader(file: string): Promise<{ version: string | null }> {
+  if (!/^palschema-loader-[\w.-]+\.tar\.gz$/.test(file)) throw new Error('Invalid backup name')
+  const modsDir = await resolveUe4ssModsDir()
+  if (!modsDir) throw new Error('UE4SS Mods directory not found')
+  const path = join(backupDir(), file)
+  await stat(path) // throws if absent
+  await rm(join(modsDir, PALSCHEMA_FOLDER), { recursive: true, force: true })
+  await execFileP('tar', ['-xzf', path, '-C', modsDir]) // archive holds the PalSchema/ folder
+  // The version meta lives outside the folder, so restore it from the backup file name.
+  const m = /^palschema-loader-(.+)-\d{4}/.exec(file)
+  const version = m ? m[1].replace(/_/g, '.').replace(/\.+$/, '') : null
+  if (version && version !== 'unknown') await writeMeta({ version })
+  return { version }
+}
+
+// Update the loader to `tag` (e.g. the latest release), taking a rollback backup first.
+export async function updatePalSchemaLoader(tag: string): Promise<{ backup: string | null; version: string | null }> {
+  const backup = await backupPalSchemaLoader()
+  const buffer = await downloadPalSchemaRelease(tag)
+  const r = await installPalSchemaLoader(buffer, tag)
+  return { backup, version: r.version }
 }
 
 // Read every file under `dir` into memory, keyed by a path relative to `asRel`.
