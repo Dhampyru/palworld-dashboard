@@ -395,6 +395,21 @@ export async function removePalSchemaSubmod(name: string): Promise<{ backup: str
   return { backup }
 }
 
+// Client→server delete cascade: remove the server PalSchema submod whose FOLDER matches
+// `name` (normalized exact match), mirroring removeClientModsByName in the other direction.
+// PalSchema submods aren't handled by removeServerMod (ue4ss/pak only) and often aren't
+// tracked by Nexus/Steam source, so a client-mod delete would otherwise orphan them. Backs
+// up before removing. Returns the removed folder name, or null when there's no match.
+export async function removePalSchemaSubmodByName(name: string): Promise<string | null> {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '')
+  const target = norm(name)
+  if (!target) return null
+  const match = (await listPalSchemaSubmods()).find((s) => norm(s.name) === target)
+  if (!match) return null
+  await removePalSchemaSubmod(match.name) // backs up + removes
+  return match.name
+}
+
 // ── Loader install ────────────────────────────────────────────────────────────
 
 // PalSchema pins to one specific linked UE4SS build. 0.6.1 pairs with the

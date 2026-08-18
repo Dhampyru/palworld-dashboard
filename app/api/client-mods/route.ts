@@ -18,6 +18,7 @@ import {
 } from '@/lib/client-mods'
 import { clearClientModConfig, listClientModConfigs, saveClientModConfig } from '@/lib/client-mod-config'
 import { removeServerModsBySource } from '@/lib/game-mods'
+import { removePalSchemaSubmodByName } from '@/lib/palschema'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -153,7 +154,13 @@ async function _POST(request: NextRequest) {
         if (target && (target.source === 'nexus' || target.source === 'steam') && target.sourceId) {
           cascadedServer = await removeServerModsBySource(target.source, target.sourceId)
         }
-        return NextResponse.json({ removed: body.id, cascadedServer })
+        // PalSchema submods aren't reachable via removeServerMod (ue4ss/pak only) and are
+        // often untracked by source (e.g. CustomTechnologyTree), so the source cascade leaves
+        // them behind. Also remove a server PalSchema submod matching this mod's name.
+        const cascadedPalSchema = target?.name
+          ? await removePalSchemaSubmodByName(target.name).catch(() => null)
+          : null
+        return NextResponse.json({ removed: body.id, cascadedServer, cascadedPalSchema })
       }
       case 'backfillWarnings': {
         const r = await backfillClientWarnings()
