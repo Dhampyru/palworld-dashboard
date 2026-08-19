@@ -892,6 +892,38 @@ function Prune-Empty($pal) {
     }
   }
 }
+function Clean-Leftovers($pal, $list) {
+  # Remove RUNTIME files mods write AFTER install (not in installed-files.txt, so the
+  # file-list pass misses them). Every target here is mod-exclusive — never a base-game
+  # file — so this can't touch the game (exe/pak/Plugins/DLSS/D3D12 stay put).
+  $win64 = Join-Path $pal "Pal\Binaries\Win64"
+  # ReShade footprint (these names are ReShade-only): shader library + logs + saved preset.
+  $rd = Join-Path $win64 "reshade-shaders"
+  if (Test-Path $rd) { Remove-Item -LiteralPath $rd -Recurse -Force -EA SilentlyContinue }
+  Get-ChildItem -LiteralPath $win64 -File -EA SilentlyContinue |
+    Where-Object { $_.Name -match "^ReShade.*\.(log|ini)$" -or $_.Name -match "^ReShadePreset.*\.ini$" -or $_.Name -match "_sync\.log$" } |
+    ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -EA SilentlyContinue }
+  # UE4SS loader folder wholesale (runtime UE4SS.log + crash dumps) — only if THIS bundle
+  # shipped UE4SS (else leave the friend's own loader alone).
+  $shippedUe4ss = @($list | Where-Object { ($_ -replace "/","\") -match "^Pal\\Binaries\\Win64\\ue4ss\\" }).Count -gt 0
+  if ($shippedUe4ss) {
+    $ue = Join-Path $win64 "ue4ss"
+    if (Test-Path $ue) { Remove-Item -LiteralPath $ue -Recurse -Force -EA SilentlyContinue }
+  }
+  # Per-mod runtime configs under Saved\<ModName> — names taken from THIS bundle's own mods,
+  # so game saves (SaveGames\, Config\) are never touched.
+  $saved = Join-Path $pal "Pal\Saved"
+  if (Test-Path $saved) {
+    $modNames = @{}
+    foreach ($rel in $list) {
+      if (($rel -replace "/","\") -match "^Pal\\Binaries\\Win64\\ue4ss\\Mods\\([^\\]+)\\") { $modNames[$Matches[1]] = $true }
+    }
+    foreach ($n in $modNames.Keys) {
+      $d = Join-Path $saved $n
+      if (Test-Path $d -PathType Container) { Remove-Item -LiteralPath $d -Recurse -Force -EA SilentlyContinue }
+    }
+  }
+}
 function Do-Install {
   if (-not (Test-Path $BundleGame)) { throw "The game\ folder is missing - extract the WHOLE zip first." }
   $pal = Get-Pal
@@ -929,9 +961,10 @@ function Do-Uninstall {
     if ($r -match '^(Pal\\Binaries\\Win64\\ue4ss\\Mods|Pal\\Content\\Paks\\LogicMods)\\([^\\]+)\\') { $roots[(Join-Path $Matches[1] $Matches[2])] = $true }
   }
   foreach ($r in $roots.Keys) { $p = Join-Path $pal $r; if (Test-Path $p -PathType Container) { Remove-Item -LiteralPath $p -Recurse -Force -EA SilentlyContinue } }
+  Clean-Leftovers $pal $list
   Prune-Empty $pal
   $stashPath = Join-Path $pal $Stash; if (Test-Path $stashPath) { Remove-Item -LiteralPath $stashPath -Force -EA SilentlyContinue }
-  Write-Host "Removed $removed file(s). The mods are uninstalled." -ForegroundColor Green
+  Write-Host "Removed $removed file(s) + mod runtime files (ReShade, logs, per-mod configs). The mods are uninstalled." -ForegroundColor Green
   Write-Host "(This also removed UE4SS. If you run OTHER UE4SS mods, reinstall your loader.)" -ForegroundColor Yellow
 }
 function Set-Perf($enable) {
