@@ -20,6 +20,12 @@ type Data = {
     ue4ss: {
       installed: { version: string | null; sha: string | null; source: string | null }
       latest: { tag: string | null; publishedAt: string | null; url: string | null }
+      workshop: {
+        itemId: string
+        baselineAt: number | null
+        latestAt: number | null
+        updateAvailable: boolean
+      } | null
       updateAvailable: boolean | null
       note: string
     }
@@ -40,7 +46,7 @@ type Data = {
 const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString() : '—')
 
 export function FrameworkUpdatesCard() {
-  const { config } = useServer()
+  const { config, refreshModUpdates } = useServer()
   const [data, setData] = useState<Data | null>(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
@@ -85,13 +91,14 @@ export function FrameworkUpdatesCard() {
         if (!res.ok) throw new Error(j.error ?? res.statusText)
         toast.success(j.note ?? 'Done — restart the server to apply.')
         await load(true)
+        refreshModUpdates()
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Action failed')
       } finally {
         setBusy(null)
       }
     },
-    [config, load],
+    [config, load, refreshModUpdates],
   )
 
   const ue4ssSource = (src: string | null) => (src === 'experimental-palworld' ? 'palschema' : src === 'beta' ? 'beta' : 'official')
@@ -158,7 +165,7 @@ export function FrameworkUpdatesCard() {
                   <select
                     value={psRollback}
                     onChange={(e) => setPsRollback(e.target.value)}
-                    className="h-7 rounded-md border border-input bg-transparent px-1.5 text-xs"
+                    className="h-7 rounded-md border border-input bg-background px-1.5 text-xs text-foreground [&>option]:bg-background [&>option]:text-foreground"
                     aria-label="PalSchema backup to restore"
                   >
                     <option value="">Rollback to…</option>
@@ -180,11 +187,17 @@ export function FrameworkUpdatesCard() {
             </div>
           </div>
 
-          {/* UE4SS — rolling tag, informational */}
+          {/* UE4SS — reliable Workshop-time check (experimental-palworld); rolling tag otherwise */}
           <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-2.5">
             <div className="flex items-center justify-between gap-2">
               <span className="font-medium">UE4SS</span>
-              <Badge variant="outline" className="text-muted-foreground">rolling tag</Badge>
+              {u.ue4ss.workshop?.updateAvailable ? (
+                <Badge className="border-amber-500/50 bg-amber-500/15 text-amber-600 dark:text-amber-400">update available</Badge>
+              ) : u.ue4ss.workshop ? (
+                <Badge variant="outline" className="text-emerald-600 dark:text-emerald-400">up to date</Badge>
+              ) : (
+                <Badge variant="outline" className="text-muted-foreground">rolling tag</Badge>
+              )}
             </div>
             <div className="text-xs text-muted-foreground">
               installed <span className="font-mono text-foreground">{u.ue4ss.installed.version ?? '—'}</span>
@@ -199,7 +212,9 @@ export function FrameworkUpdatesCard() {
               )}
               {u.ue4ss.latest.publishedAt ? ` (${fmtDate(u.ue4ss.latest.publishedAt)})` : ''}
             </div>
-            <p className="text-[11px] text-muted-foreground">{u.ue4ss.note}</p>
+            <p className={u.ue4ss.workshop?.updateAvailable ? 'text-[11px] font-medium text-amber-600 dark:text-amber-400' : 'text-[11px] text-muted-foreground'}>
+              {u.ue4ss.note}
+            </p>
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
@@ -216,7 +231,7 @@ export function FrameworkUpdatesCard() {
                   <select
                     value={ueRollback}
                     onChange={(e) => setUeRollback(e.target.value)}
-                    className="h-7 rounded-md border border-input bg-transparent px-1.5 text-xs"
+                    className="h-7 rounded-md border border-input bg-background px-1.5 text-xs text-foreground [&>option]:bg-background [&>option]:text-foreground"
                     aria-label="UE4SS backup to restore"
                   >
                     <option value="">Rollback to…</option>
@@ -234,6 +249,19 @@ export function FrameworkUpdatesCard() {
                     {busy === 'ue-roll' ? <Spinner className="size-3.5" /> : <RotateCcwIcon className="size-3.5" />}
                   </Button>
                 </div>
+              )}
+              {u.ue4ss.workshop && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => post('/api/framework-updates', { action: 'markUe4ssInstalled' }, 'ue-ack')}
+                  disabled={!!busy}
+                  className="h-7 gap-1.5 px-2.5 text-muted-foreground"
+                  title="Re-baseline the update check to the current build — use after you've updated UE4SS (or to dismiss)"
+                >
+                  {busy === 'ue-ack' ? <Spinner className="size-3.5" /> : null}
+                  Mark up to date
+                </Button>
               )}
             </div>
           </div>

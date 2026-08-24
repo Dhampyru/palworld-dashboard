@@ -62,6 +62,8 @@ type ClientMod = {
   addedAt: number
   keepChangedAt?: number
   warn?: string | null
+  updateAvailable?: boolean // newer upstream build available (nexus version / steam timestamp)
+  latestVersion?: string | null // nexus: newest version seen, for the chip label
 }
 type Suggestion = {
   source: 'nexus' | 'workshop'
@@ -100,9 +102,18 @@ function detectSource(u: string): 'nexus' | 'steam' | null {
 // `hideUploader` removes the client add/upload/bulk controls — the unified uploader above
 // the tabs stages client mods now. `reloadKey` refreshes this list after it commits.
 export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploader?: boolean; reloadKey?: number } = {}) {
-  const { config, requestTab } = useServer()
+  const { config, requestTab, refreshModUpdates } = useServer()
   const [mods, setMods] = useState<ClientMod[]>([])
+  const [listQuery, setListQuery] = useState('')
+  // 'category' groups into collapsible genre sections (the default); every other value is a FLAT,
+  // globally-sorted list so the sort actually orders the whole list (grouping + global sort fight).
+  const [listSort, setListSort] = useState<'category' | 'name-asc' | 'name-desc' | 'added-desc' | 'added-asc' | 'source' | 'type'>('category')
+  const [categories, setCategories] = useState<Record<string, string | null>>({})
+  // EXPANDED category sections (names). Empty = all COLLAPSED (default); controlled so
+  // Expand/Collapse-all work. Only meaningful when listSort === 'category'.
+  const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
   const [showDisabled, setShowDisabled] = useState(false) // collapse the disabled (not-in-loadout) block
+  const [conflictsOnly, setConflictsOnly] = useState(false) // filter the list to only mods with a keybind conflict
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [catalogAvailable, setCatalogAvailable] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -395,6 +406,25 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
       setMods(json.mods ?? [])
       setSuggestions(json.suggestions ?? [])
       setCatalogAvailable(Boolean(json.catalogAvailable))
+      // Client-mod update check (nexus versions / steam timestamps) — fire-and-forget; refreshes
+      // the chips in the background. Cached 30d server-side, so only the first pass is slow.
+      fetch('/api/client-mods', {
+        method: 'POST',
+        headers: { ...h, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'checkUpdates' }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((u) => {
+          if (u && Array.isArray(u.mods)) setMods(u.mods)
+        })
+        .catch(() => {})
+      // Genre categories (nexus:<modId> / steam:<itemId>) for grouping — fire-and-forget.
+      fetch('/api/mod-categories', { headers: h, cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((c) => {
+          if (c && c.categories) setCategories(c.categories as Record<string, string | null>)
+        })
+        .catch(() => {})
       // Keybind-conflict scan (cached server-side by the mod set) — fire-and-forget.
       fetch('/api/client-mods/keybinds', { headers: h, cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : null))
@@ -432,6 +462,12 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   useEffect(() => {
     if (reloadKey) void load()
   }, [reloadKey, load])
+
+  // Auto-clear the conflicts-only filter once there are no conflicts (the badge that toggles it
+  // disappears then, so leaving it on would strand an empty list).
+  useEffect(() => {
+    if (keybinds && keybinds.conflicts.length === 0 && conflictsOnly) setConflictsOnly(false)
+  }, [keybinds, conflictsOnly])
 
   // Apply / undo the keybind auto-remap (writes/removes loadout config-overrides; admin-only).
   const runRemap = useCallback(
@@ -597,6 +633,54 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
     [applyKeep],
   )
 
+  // Update one staged mod in place to the newest upstream build (keep + config-override kept).
+  const updateOne = useCallback(
+    async (m: ClientMod) => {
+      setBusy(m.id)
+      try {
+        const json = await postJson({ action: 'update', id: m.id })
+        toast.success(json?.note ?? `Updated ${m.name}`)
+        await load()
+        refreshModUpdates()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Update failed')
+      } finally {
+        setBusy(null)
+      }
+    },
+    [postJson, load, refreshModUpdates],
+  )
+
+  // Update every staged mod we can actually pull (nexus needs Premium, steam a connected
+  // account), sequentially — mirrors the server panel's "Update all" gating.
+  const updateAll = useCallback(async () => {
+    const targets = mods.filter(
+      (m) => !!m.updateAvailable && ((m.source === 'nexus' && !!nexus?.premium) || (m.source === 'steam' && !!steam?.connected)),
+    )
+    if (!targets.length) return
+    setBusy('update-all')
+    let ok = 0
+    let fail = 0
+    for (const m of targets) {
+      try {
+        await postJson({ action: 'update', id: m.id })
+        ok++
+      } catch {
+        fail++
+      }
+    }
+    toast.success(`Updated ${ok} client mod(s)${fail ? `, ${fail} failed` : ''}.`)
+    await load()
+    refreshModUpdates()
+    setBusy(null)
+  }, [mods, nexus, steam, postJson, load, refreshModUpdates])
+
+  // The chip shows for ANY available update; the one-click action only when we can pull it
+  // (Nexus Premium / Steam connected) — same split the server panel uses.
+  const canUpdate = (m: ClientMod) =>
+    !!m.updateAvailable && ((m.source === 'nexus' && !!nexus?.premium) || (m.source === 'steam' && !!steam?.connected))
+  const updateCount = mods.filter(canUpdate).length
+
   // Called from the confirm dialog (AlertDialog — replaces window.confirm, which blocked
   // the page thread and hung automated browsers).
   const remove = useCallback(
@@ -695,6 +779,58 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
     .filter((m) => !m.keep)
     .sort((a, b) => (b.keepChangedAt ?? 0) - (a.keepChangedAt ?? 0) || a.name.localeCompare(b.name))
 
+  // Organize the staged list: name filter + sort (name / install date / source). Header counts
+  // stay TRUE (unfiltered); only rendered rows are filtered/sorted/grouped. Sort applies to the
+  // kept list; the disabled block keeps its recently-disabled order and is only filtered.
+  const listQ = listQuery.trim().toLowerCase()
+  const sourceKeyOf = (m: ClientMod): string | null =>
+    (m.source === 'nexus' || m.source === 'steam') && m.sourceId ? `${m.source}:${m.sourceId}` : null
+  const sourceLabelOf = (m: ClientMod): string => (m.source === 'nexus' ? 'Nexus' : m.source === 'steam' ? 'Steam' : 'Manual')
+  const categoryOf = (m: ClientMod): string => {
+    const k = sourceKeyOf(m)
+    return (k && categories[k]) || 'Uncategorized'
+  }
+  const hasKbConflict = (m: ClientMod) => !!keybinds?.perMod[m.id]?.length
+  const visibleActive = activeMods
+    .filter((m) => (!listQ || m.name.toLowerCase().includes(listQ)) && (!conflictsOnly || hasKbConflict(m)))
+    .sort(
+    (a, b) => {
+      switch (listSort) {
+        case 'category': // grouped after; order rows within each group by name
+        case 'name-asc':
+          return a.name.localeCompare(b.name)
+        case 'name-desc':
+          return b.name.localeCompare(a.name)
+        case 'added-desc':
+          return (b.addedAt ?? 0) - (a.addedAt ?? 0)
+        case 'added-asc':
+          return (a.addedAt ?? 0) - (b.addedAt ?? 0)
+        case 'source':
+          return sourceLabelOf(a).localeCompare(sourceLabelOf(b)) || a.name.localeCompare(b.name)
+        case 'type': {
+          const rank: Record<ClientMod['kind'], number> = { ue4ss: 0, pak: 1, palschema: 2, unknown: 3 }
+          return rank[a.kind] - rank[b.kind] || a.name.localeCompare(b.name)
+        }
+      }
+    },
+  )
+  // #3: group the visible staged mods by genre category (Uncategorized last).
+  const activeByCategory: [string, ClientMod[]][] = (() => {
+    const map = new Map<string, ClientMod[]>()
+    for (const m of visibleActive) {
+      const arr = map.get(categoryOf(m)) ?? []
+      arr.push(m)
+      map.set(categoryOf(m), arr)
+    }
+    return [...map.entries()].sort(([a], [b]) => (a === 'Uncategorized' ? 1 : b === 'Uncategorized' ? -1 : a.localeCompare(b)))
+  })()
+  // Conflicts live only among KEPT mods, so the disabled block is irrelevant while filtering.
+  const visibleDisabled = conflictsOnly
+    ? []
+    : listQ
+      ? disabledMods.filter((m) => m.name.toLowerCase().includes(listQ))
+      : disabledMods
+
   // One staged-mod row — reused by the Active list and the Disabled block.
   const renderRow = (m: ClientMod) => (
     <li
@@ -735,6 +871,14 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
                 {keybinds.perMod[m.id]!.map((c) => c.combo).join(', ')}
               </span>
             ) : null}
+            {m.updateAvailable ? (
+              <span
+                title={m.source === 'nexus' && m.latestVersion ? `You have v${m.version}; Nexus has v${m.latestVersion}` : 'A newer Workshop build is available'}
+                className="shrink-0 rounded bg-amber-500/20 px-1 text-[11px] font-medium text-amber-700 dark:text-amber-300"
+              >
+                ↑ update
+              </span>
+            ) : null}
           </div>
           <div className="truncate text-xs text-muted-foreground">
             {SOURCE_LABEL[m.source] ?? m.source} · {m.kind}
@@ -745,6 +889,16 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
         </div>
       </div>
       <div className="flex items-center gap-1.5">
+        {canUpdate(m) ? (
+          <button
+            onClick={() => updateOne(m)}
+            disabled={busy === m.id || busy === 'update-all'}
+            title={m.source === 'nexus' && m.latestVersion ? `Download & install v${m.latestVersion} (re-sync the loadout to apply)` : 'Re-download the latest build (re-sync to apply)'}
+            className="rounded bg-primary/15 px-1.5 py-1 text-xs font-medium text-primary hover:bg-primary/25 disabled:opacity-40"
+          >
+            {busy === m.id ? 'updating…' : '↑ update now'}
+          </button>
+        ) : null}
         {(m.kind === 'ue4ss' || m.kind === 'unknown') && (
           <button
             onClick={() => openFiles(m)}
@@ -788,23 +942,49 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
             <span className="text-xs text-muted-foreground">· {keptCount} kept for the loadout</span>
           )}
           {keybinds && keybinds.conflicts.length > 0 && (
-            <span
-              title={keybinds.conflicts.map((c) => `${c.combo}: ${c.mods.join(', ')}`).join('\n')}
-              className="inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400"
+            <button
+              type="button"
+              onClick={() => setConflictsOnly((v) => !v)}
+              aria-pressed={conflictsOnly}
+              title={
+                (conflictsOnly
+                  ? 'Showing only mods with a keybind conflict — click to show all.\n\n'
+                  : 'Click to show only the mods with a keybind conflict.\n\n') +
+                keybinds.conflicts.map((c) => `${c.combo}: ${c.mods.join(', ')}`).join('\n')
+              }
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                conflictsOnly
+                  ? 'border-amber-500 bg-amber-500/30 text-amber-700 dark:text-amber-200'
+                  : 'border-amber-500/50 bg-amber-500/15 text-amber-600 hover:bg-amber-500/25 dark:text-amber-400'
+              }`}
             >
               <AlertTriangleIcon className="size-3.5" />
               {keybinds.conflicts.length} keybind conflict{keybinds.conflicts.length === 1 ? '' : 's'}
-            </span>
+              {conflictsOnly ? ' · filtering' : ''}
+            </button>
           )}
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm hover:bg-muted disabled:opacity-50"
-        >
-          <RefreshCwIcon className={loading ? 'size-3.5 animate-spin' : 'size-3.5'} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-1.5">
+          {updateCount > 0 && (
+            <button
+              onClick={updateAll}
+              disabled={busy === 'update-all' || loading}
+              title="Update every client mod that has a newer build (Nexus + Steam)"
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/50 px-2 py-1 text-sm font-medium text-amber-600 hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
+            >
+              {busy === 'update-all' ? <Spinner className="size-3.5" /> : <span aria-hidden>↑</span>}
+              Update all ({updateCount})
+            </button>
+          )}
+          <button
+            onClick={load}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm hover:bg-muted disabled:opacity-50"
+          >
+            <RefreshCwIcon className={loading ? 'size-3.5 animate-spin' : 'size-3.5'} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Keybind auto-remap — shown when there are conflicts to fix or a remap is active */}
@@ -1010,9 +1190,93 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
       {/* Staged list — active (in the loadout) then a collapsible disabled block */}
       {mods.length > 0 && (
         <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium">Staged for friends ({activeMods.length})</span>
-          {activeMods.length > 0 && <ul className="flex flex-col divide-y rounded-md border">{activeMods.map(renderRow)}</ul>}
-          {disabledMods.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium">
+              Staged for friends ({activeMods.length})
+              {listQ ? <span className="ml-1 text-xs font-normal text-muted-foreground tabular-nums">· {visibleActive.length} shown</span> : null}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <Input
+                value={listQuery}
+                onChange={(e) => setListQuery(e.target.value)}
+                placeholder="Filter by name…"
+                aria-label="Filter client mods by name"
+                className="h-8 w-40 text-xs sm:w-56"
+              />
+              <select
+                value={listSort}
+                onChange={(e) => setListSort(e.target.value as typeof listSort)}
+                aria-label="Sort client mods"
+                className="h-8 rounded-md border bg-background px-2 text-xs"
+              >
+                <option value="category">Category (grouped)</option>
+                <option value="name-asc">Name (A–Z)</option>
+                <option value="name-desc">Name (Z–A)</option>
+                <option value="added-desc">Recently added</option>
+                <option value="added-asc">Oldest first</option>
+                <option value="source">Source (Nexus/Steam)</option>
+                <option value="type">Type (UE4SS/pak/…)</option>
+              </select>
+            </div>
+          </div>
+          {visibleActive.length > 0 ? (
+            <details open className="rounded-md border">
+              <summary className="cursor-pointer select-none border-b px-3 py-2 text-sm font-medium">
+                Mods (Client) <span className="tabular-nums text-muted-foreground">({visibleActive.length})</span>
+              </summary>
+              {listSort === 'category' ? (
+                <>
+                  {activeByCategory.length > 1 && (
+                    <div className="flex items-center gap-2 border-b bg-muted/10 px-3 py-1.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedCats(new Set(activeByCategory.map(([c]) => c)))}
+                        className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                      >
+                        Expand all
+                      </button>
+                      <span className="text-muted-foreground/50">·</span>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedCats(new Set())}
+                        className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                      >
+                        Collapse all
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex flex-col divide-y">
+                    {activeByCategory.map(([cat, list]) => (
+                      <details
+                        key={cat}
+                        open={expandedCats.has(cat)}
+                        onToggle={(e) => {
+                          const open = e.currentTarget.open
+                          setExpandedCats((prev) => {
+                            if (open === prev.has(cat)) return prev
+                            const n = new Set(prev)
+                            if (open) n.add(cat)
+                            else n.delete(cat)
+                            return n
+                          })
+                        }}
+                      >
+                        <summary className="cursor-pointer select-none bg-muted/30 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                          {cat} <span className="tabular-nums">({list.length})</span>
+                        </summary>
+                        <ul className="flex flex-col divide-y">{list.map(renderRow)}</ul>
+                      </details>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <ul className="flex flex-col divide-y">{visibleActive.map(renderRow)}</ul>
+              )}
+            </details>
+          ) : activeMods.length > 0 ? (
+            <p className="text-xs text-muted-foreground">No kept mods match “{listQuery}”.</p>
+          ) : null}
+          {visibleDisabled.length > 0 && (
             <div className="flex flex-col gap-1">
               <button
                 onClick={() => setShowDisabled((s) => !s)}
@@ -1021,7 +1285,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
                 <ChevronDownIcon className={showDisabled ? 'size-4 rotate-180 transition-transform' : 'size-4 transition-transform'} />
                 Disabled — excluded from the loadout ({disabledMods.length})
               </button>
-              {showDisabled && <ul className="flex flex-col divide-y rounded-md border opacity-70">{disabledMods.map(renderRow)}</ul>}
+              {showDisabled && <ul className="flex flex-col divide-y rounded-md border opacity-70">{visibleDisabled.map(renderRow)}</ul>}
             </div>
           )}
         </div>

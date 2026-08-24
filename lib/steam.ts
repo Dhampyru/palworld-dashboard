@@ -265,6 +265,34 @@ export async function fetchWorkshopUpdateTimes(
   }
 }
 
+// Workshop tags per item, via the public GetPublishedFileDetails (no API key). Used as a
+// genre-category source for Steam-sourced mods. Best-effort: a failed call yields {}.
+export async function fetchWorkshopTags(ids: string[]): Promise<Record<string, string[]>> {
+  const uniq = [...new Set(ids.filter(Boolean))]
+  if (!uniq.length) return {}
+  const body = new URLSearchParams()
+  body.set('itemcount', String(uniq.length))
+  uniq.forEach((id, i) => body.set(`publishedfileids[${i}]`, id))
+  try {
+    const res = await fetch('https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+    if (!res.ok) return {}
+    const j = (await res.json()) as {
+      response?: { publishedfiledetails?: { publishedfileid: string; result?: number; tags?: { tag?: string }[] }[] }
+    }
+    const out: Record<string, string[]> = {}
+    for (const d of j.response?.publishedfiledetails ?? []) {
+      if (d.result === 1) out[d.publishedfileid] = (d.tags ?? []).map((t) => String(t?.tag ?? '')).filter(Boolean)
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
 // Title + description for one workshop item, via the public GetPublishedFileDetails (no key).
 // Used to mine the mod page for placement keywords (server/client/both) — the file CONTENTS
 // still need a SteamCMD download, but the description is public. Null on any error.

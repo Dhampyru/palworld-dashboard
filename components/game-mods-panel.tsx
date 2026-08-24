@@ -21,17 +21,40 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
-import { PackageIcon, RefreshCwIcon, Trash2Icon, ShieldAlertIcon, ShieldCheckIcon, DownloadIcon, SlidersHorizontalIcon } from 'lucide-react'
+import { PackageIcon, RefreshCwIcon, Trash2Icon, ShieldAlertIcon, ShieldCheckIcon, DownloadIcon, SlidersHorizontalIcon, ClipboardListIcon, LayersIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
+import { PalSchemaSubmodEditor } from '@/components/palschema-editor'
+import { copyToClipboard } from '@/lib/clipboard'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 
 
 interface GameModEntry {
   id: string
-  kind: 'ue4ss' | 'pak' | 'paldefender'
+  // 'palschema' entries are synthesised in this panel from the PalSchema submod list (they
+  // are NOT returned by /api/game-mods); they flow through the same grouping/category/nesting
+  // pipeline and render via a dedicated branch in renderModRow.
+  kind: 'ue4ss' | 'pak' | 'paldefender' | 'palschema'
   name: string
   enabled: boolean
   hasConfig?: boolean
+  addedAt?: number // epoch ms — filesystem install date (drives the sort control)
+  disabledAt?: number // epoch ms — when this mod was toggled off (only on disabled mods)
+  // PalSchema-only metadata (for the synthetic rows).
+  psFileCount?: number
+  psSizeBytes?: number
 }
+
+// Compact relative time for the disabled block, mirroring the client panel.
+function timeAgo(ms: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
+  if (s < 60) return 'just now'
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.round(h / 24)}d ago`
+}
+
+type ModSort = 'category' | 'added-desc' | 'added-asc' | 'name-asc' | 'name-desc' | 'source' | 'type'
 
 type ModConfigFileMeta = {
   id: string
@@ -86,8 +109,10 @@ const fmtEpoch = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 10
 // Loader are hoisted above the tabs (the unified uploader + Ue4ssLoaderCard). `reloadKey`
 // lets those refresh this list after a change.
 export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
-  const { config, connectionStatus } = useServer()
+  const { config, connectionStatus, refreshModUpdates } = useServer()
   const [mods, setMods] = useState<GameModEntry[] | null>(null)
+  const [modFilter, setModFilter] = useState('')
+  const [modSort, setModSort] = useState<ModSort>('category')
   const [modGroups, setModGroups] = useState<Record<string, string[]>>({})
   const [steamLinks, setSteamLinks] = useState<Record<string, { itemId: string; name: string | null }>>({})
   const [error, setError] = useState<string | null>(null)
@@ -126,6 +151,67 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
   // Nexus Premium + Steam account state (gates the update-now actions in the list).
   const [nexusPremium, setNexusPremium] = useState(false)
   const [steamConnected, setSteamConnected] = useState(false)
+  // Genre categories per source identity (nexus:<modId> / steam:<itemId>), for grouping.
+  const [categories, setCategories] = useState<Record<string, string | null>>({})
+  // EXPANDED category sections (names). Empty = all COLLAPSED (the default). Controlled so the
+  // Expand-all / Collapse-all buttons can drive every section at once. Only used when
+  // modSort === 'category' (grouped view); other sorts render a flat, globally-sorted list.
+  const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
+  const [showDisabled, setShowDisabled] = useState(false) // collapse the disabled-mods block
+  // PalSchema submods, lifted into the main list (nested under their parent mod). The separate
+  // PalSchema section keeps only the loader/install/status; this panel owns the submod rows.
+  type PsSubmod = { name: string; fileCount: number; sizeBytes: number; modifiedAt: string | null }
+  const [palschemaSubmods, setPalschemaSubmods] = useState<PsSubmod[]>([])
+  const [psRemoveTarget, setPsRemoveTarget] = useState<string | null>(null)
+  const [psEditing, setPsEditing] = useState<string | null>(null)
+  const [psBusy, setPsBusy] = useState<string | null>(null)
+
+  const loadPalschema = useCallback(async () => {
+    if (!config) return
+    try {
+      const res = await fetch('/api/game-mods/palschema', { headers: buildPalworldProxyHeaders(config), cache: 'no-store' })
+      const json = await res.json()
+      if (res.ok) setPalschemaSubmods((json.submods as PsSubmod[]) ?? [])
+    } catch {
+      /* leave empty — the PalSchema loader may not be installed */
+    }
+  }, [config])
+
+  const removePalschema = useCallback(
+    async (name: string) => {
+      if (!config) return
+      setPsBusy(`rm:${name}`)
+      try {
+        const res = await fetch('/api/game-mods/palschema', {
+          method: 'POST',
+          headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'remove', name }),
+        })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.error ?? 'Failed')
+        setPalschemaSubmods((json.submods as PsSubmod[]) ?? [])
+        setPalschemaReload((n) => n + 1) // keep the PalSchema section's count in sync
+        toast.success(`Removing ${name} — effective on next restart`)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to remove')
+      } finally {
+        setPsBusy(null)
+        setPsRemoveTarget(null)
+      }
+    },
+    [config],
+  )
+
+  const loadCategories = useCallback(async () => {
+    if (!config) return
+    try {
+      const res = await fetch('/api/mod-categories', { headers: buildPalworldProxyHeaders(config), cache: 'no-store' })
+      const json = await res.json()
+      if (res.ok) setCategories((json.categories as Record<string, string | null>) ?? {})
+    } catch {
+      /* categories are best-effort; mods fall back to Uncategorized */
+    }
+  }, [config])
 
   const loadNexus = useCallback(async () => {
     if (!config) return
@@ -307,13 +393,14 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
         toast.success('Updated to the latest — restart the server to apply.', { id: toastId })
         await load()
         await loadSteam()
+        refreshModUpdates()
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Update failed', { id: toastId })
       } finally {
         setSteamBusy(null)
       }
     },
-    [config, load, loadSteam],
+    [config, load, loadSteam, refreshModUpdates],
   )
 
 
@@ -335,13 +422,14 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
         toast.success((json.note as string) ?? 'Updated from Nexus', { id: toastId })
         await load()
         await loadNexus()
+        refreshModUpdates()
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Update failed', { id: toastId })
       } finally {
         setNexusBusy(null)
       }
     },
-    [config, load, loadNexus],
+    [config, load, loadNexus, refreshModUpdates],
   )
 
   // Update every mod that has an update available — Nexus (Premium) and Steam Workshop
@@ -393,8 +481,9 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
     await load()
     await loadNexus()
     await loadSteam()
+    refreshModUpdates()
     setUpdatingAll(false)
-  }, [config, nexusMods, nexusPremium, steamUpdates, steamConnected, load, loadNexus, loadSteam])
+  }, [config, nexusMods, nexusPremium, steamUpdates, steamConnected, load, loadNexus, loadSteam, refreshModUpdates])
 
 
   useEffect(() => {
@@ -402,7 +491,14 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
     void loadUe4ss()
     void loadNexus()
     void loadSteam()
-  }, [load, loadUe4ss, loadNexus, loadSteam])
+    void loadCategories()
+  }, [load, loadUe4ss, loadNexus, loadSteam, loadCategories])
+
+  // PalSchema submods refresh on mount and whenever the PalSchema section reloads (a shared
+  // uploader commit or a loader install/remove bumps palschemaReload).
+  useEffect(() => {
+    void loadPalschema()
+  }, [loadPalschema, palschemaReload])
 
   // Poll UE4SS status so the running/loaded state (banner vs boot time) updates on
   // its own after a restart — a swap stages instantly, but "now running the new
@@ -678,6 +774,54 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
     opts: { nested?: boolean; childrenNode?: React.ReactNode } = {},
   ) => {
     const { nested = false, childrenNode = null } = opts
+
+    // PalSchema submod rows: a synthetic entry, managed via /api/game-mods/palschema (edit its
+    // data files / remove), NOT mods.txt — so it short-circuits the regular row entirely.
+    if (mod.kind === 'palschema') {
+      const editing = psEditing === mod.name
+      return (
+        <li key={mod.id} className="flex flex-col">
+          <div className={`flex items-center justify-between gap-3 px-3 py-2${nested ? ' pl-8' : ''}`}>
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="gap-1 border-sky-500/50 text-sky-600 dark:text-sky-400">
+                  <LayersIcon className="size-3" /> PalSchema
+                </Badge>
+                <span className="truncate text-sm font-medium">{mod.name}</span>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {mod.psFileCount ?? 0} data file{mod.psFileCount === 1 ? '' : 's'} · always on (remove to disable)
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                onClick={() => setPsEditing((e) => (e === mod.name ? null : mod.name))}
+                title="Edit data files"
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                {editing ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
+                Edit data
+              </button>
+              <button
+                onClick={() => setPsRemoveTarget(mod.name)}
+                disabled={!!psBusy}
+                title="Remove (backed up first)"
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-30"
+              >
+                {psBusy === `rm:${mod.name}` ? <Spinner className="size-4" /> : <Trash2Icon className="size-4" />}
+              </button>
+            </div>
+          </div>
+          {editing && (
+            <div className="px-3 pb-2">
+              <PalSchemaSubmodEditor submod={mod.name} />
+            </div>
+          )}
+          {childrenNode}
+        </li>
+      )
+    }
+
     // Candidate parents to nest a floating pak under (other top-level mods).
     const nestCandidates =
       !nested && mod.kind === 'pak'
@@ -714,6 +858,22 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
             )}
             <span className="truncate text-sm">{mod.name}</span>
             {inert && <span className="text-[10px] uppercase tracking-wide text-amber-500">inactive</span>}
+            {!mod.enabled && mod.disabledAt ? (
+              <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums" title="When this mod was disabled">
+                · disabled {timeAgo(mod.disabledAt)}
+              </span>
+            ) : (
+              !nested &&
+              !isDefault &&
+              mod.addedAt && (
+                <span
+                  className="shrink-0 text-[10px] text-muted-foreground tabular-nums"
+                  title="Install date (from the filesystem)"
+                >
+                  · {fmtEpoch(Math.round(mod.addedAt / 1000))}
+                </span>
+              )
+            )}
           </div>
           {description && <p className="pl-0.5 text-xs text-muted-foreground">{description}</p>}
           {!nested && steamLink && (
@@ -899,17 +1059,157 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
   }
 
   // Split UE4SS's bundled framework/dev mods off into a collapsed group so the
-  // operator's OWN mods (+ PalDefender, pak mods) lead the list. PalDefender is a
-  // built-in too but stays up top — it's not UE4SS framework plumbing.
-  const isUe4ssBuiltin = (m: GameModEntry) => m.kind === 'ue4ss' && isFrameworkDefault(m.kind, m.name)
-  const builtinMods = mods?.filter(isUe4ssBuiltin) ?? []
-  // Hybrid grouping: nested children (e.g. a hybrid's pak) render under their
+  // Built-ins (UE4SS framework plumbing AND PalDefender) are collapsed into their own
+  // section at the bottom, out of the operator's own mod list. isFrameworkDefault already
+  // returns true for both.
+  const isBuiltin = (m: GameModEntry) => isFrameworkDefault(m.kind, m.name)
+  const builtinMods = mods?.filter(isBuiltin) ?? []
+  // Synthesise PalSchema submods into the universe so they flow through the same category /
+  // nesting / sort pipeline. id = `palschema:<name>` matches the Nexus/Steam tracking key, so
+  // sourceKeyOf/categoryOf resolve for them too.
+  const palschemaEntries: GameModEntry[] = palschemaSubmods.map((s) => ({
+    id: `palschema:${s.name}`,
+    kind: 'palschema' as const,
+    name: s.name,
+    enabled: true,
+    addedAt: s.modifiedAt ? Date.parse(s.modifiedAt) || undefined : undefined,
+    psFileCount: s.fileCount,
+    psSizeBytes: s.sizeBytes,
+  }))
+  const allMods = [...(mods ?? []), ...palschemaEntries]
+
+  // Hybrid grouping: nested children (a hybrid's pak / PalSchema data) render under their
   // parent, not as separate top-level rows.
-  const modByKey: Record<string, GameModEntry> = Object.fromEntries((mods ?? []).map((m) => [m.id, m]))
-  const childKeys = new Set(Object.values(modGroups).flat())
-  const userMods = (mods ?? []).filter((m) => !isUe4ssBuiltin(m) && !childKeys.has(m.id))
+  const modByKey: Record<string, GameModEntry> = Object.fromEntries(allMods.map((m) => [m.id, m]))
+
+  // Source identity + genre category per mod. The category cache is keyed by source identity
+  // (nexus:<modId> / steam:<itemId>); mods with no source link are Uncategorized.
+  const sourceKeyOf = (m: GameModEntry): string | null => {
+    const s = steamLinks[m.id]
+    if (s?.itemId) return `steam:${s.itemId}`
+    const n = nexusMods[m.id]
+    if (n?.modId) return `nexus:${n.modId}`
+    return null
+  }
+  const sourceLabelOf = (m: GameModEntry): string => {
+    const k = sourceKeyOf(m)
+    return k?.startsWith('nexus:') ? 'Nexus' : k?.startsWith('steam:') ? 'Steam' : 'Manual'
+  }
+  const categoryOf = (m: GameModEntry): string => {
+    const k = sourceKeyOf(m)
+    return (k && categories[k]) || 'Uncategorized'
+  }
+
+  // #2: auto-nest a pak OR PalSchema submod under the UE4SS mod that shares its Nexus/Steam id
+  // (a mod page shipping a Lua + a pak + a PalSchema companion is tracked under one source id),
+  // with a name-match fallback for PalSchema data installed as a separate file. Merged with the
+  // operator's manual groups (data/mod-groups.json), which win on any conflict.
+  const autoGroups: Record<string, string[]> = {}
+  {
+    const bySource = new Map<string, GameModEntry[]>()
+    for (const m of allMods) {
+      const k = sourceKeyOf(m)
+      if (!k) continue
+      const arr = bySource.get(k) ?? []
+      arr.push(m)
+      bySource.set(k, arr)
+    }
+    for (const group of bySource.values()) {
+      if (group.length < 2) continue
+      // Prefer a UE4SS mod as the parent; else a pak (a pak + PalSchema companion with no Lua,
+      // sharing one Nexus/Steam id, still groups under the pak).
+      const parent = group.find((m) => m.kind === 'ue4ss') ?? group.find((m) => m.kind === 'pak')
+      if (!parent) continue
+      for (const child of group) {
+        if (child.id !== parent.id && (child.kind === 'pak' || child.kind === 'palschema'))
+          (autoGroups[parent.id] ??= []).push(child.id)
+      }
+    }
+    // Name-match fallback: a PalSchema submod with no shared source id attaches to a same-named
+    // UE4SS *or* pak mod. Normalisation strips a trailing "_P" and ".pak" plus non-alphanumerics
+    // so a pak filename (358_GuildChest_Slots_P.pak) matches its PalSchema display name (358 Guild
+    // Chest Slots). A UE4SS parent is preferred over a pak when both fuzzy-match.
+    const norm = (s: string) =>
+      s
+        .toLowerCase()
+        .replace(/\.pak$/, '')
+        .replace(/_p$/, '')
+        .replace(/[^a-z0-9]/g, '')
+    const alreadyChild = new Set(Object.values(autoGroups).flat())
+    const parentByNorm = new Map<string, string>()
+    for (const m of mods ?? []) {
+      if (m.kind !== 'ue4ss' && m.kind !== 'pak') continue
+      const k = norm(m.name)
+      const cur = parentByNorm.get(k)
+      // Prefer a UE4SS parent over a pak if both share the fuzzy name.
+      if (!cur || (modByKey[cur]?.kind === 'pak' && m.kind === 'ue4ss')) parentByNorm.set(k, m.id)
+    }
+    for (const ps of palschemaEntries) {
+      if (alreadyChild.has(ps.id)) continue
+      const parentId = parentByNorm.get(norm(ps.name))
+      if (parentId && parentId !== ps.id) (autoGroups[parentId] ??= []).push(ps.id)
+    }
+  }
+  const manualChildren = new Set(Object.values(modGroups).flat())
+  const mergedGroups: Record<string, string[]> = {}
+  for (const [p, kids] of Object.entries(autoGroups)) {
+    const filtered = kids.filter((c) => !manualChildren.has(c) && c !== p)
+    if (filtered.length) mergedGroups[p] = filtered
+  }
+  for (const [p, kids] of Object.entries(modGroups)) {
+    mergedGroups[p] = [...new Set([...(mergedGroups[p] ?? []), ...kids])]
+  }
+
+  const childKeys = new Set(Object.values(mergedGroups).flat())
+  const userMods = allMods.filter((m) => !isBuiltin(m) && !childKeys.has(m.id))
+  // Organization: filter by name + sort (name / install date / source). Only top-level user
+  // mods are reordered; a hybrid's bundled children stay nested under their parent.
+  const filterQ = modFilter.trim().toLowerCase()
+  const sortMods = (list: GameModEntry[]) =>
+    list.slice().sort((a, b) => {
+      switch (modSort) {
+        case 'category': // grouped after; order rows within each group by name
+        case 'name-asc':
+          return a.name.localeCompare(b.name)
+        case 'name-desc':
+          return b.name.localeCompare(a.name)
+        // Unknown install date sorts last regardless of direction.
+        case 'added-desc':
+          return (b.addedAt ?? -Infinity) - (a.addedAt ?? -Infinity)
+        case 'added-asc':
+          return (a.addedAt ?? Infinity) - (b.addedAt ?? Infinity)
+        case 'source':
+          return sourceLabelOf(a).localeCompare(sourceLabelOf(b)) || a.name.localeCompare(b.name)
+        case 'type': {
+          const rank: Record<GameModEntry['kind'], number> = { ue4ss: 0, pak: 1, palschema: 2, paldefender: 3 }
+          return rank[a.kind] - rank[b.kind] || a.name.localeCompare(b.name)
+        }
+      }
+    })
+  const visibleUserMods = sortMods(userMods.filter((m) => !filterQ || m.name.toLowerCase().includes(filterQ)))
+  // Split ENABLED (grouped by category) from DISABLED (a separate block, most-recently-disabled
+  // first), mirroring the client loadout's active/disabled split.
+  const enabledVisible = visibleUserMods.filter((m) => m.enabled)
+  const disabledVisible = visibleUserMods
+    .filter((m) => !m.enabled)
+    .sort((a, b) => (b.disabledAt ?? 0) - (a.disabledAt ?? 0) || a.name.localeCompare(b.name))
+
+  // #3: group the ENABLED top-level mods by genre category (Uncategorized sorts last).
+  const modsByCategory: [string, GameModEntry[]][] = (() => {
+    const map = new Map<string, GameModEntry[]>()
+    for (const m of enabledVisible) {
+      const c = categoryOf(m)
+      const arr = map.get(c) ?? []
+      arr.push(m)
+      map.set(c, arr)
+    }
+    return [...map.entries()].sort(([a], [b]) =>
+      a === 'Uncategorized' ? 1 : b === 'Uncategorized' ? -1 : a.localeCompare(b),
+    )
+  })()
+
   const renderUserMod = (mod: GameModEntry) => {
-    const children = (modGroups[mod.id] ?? []).map((k) => modByKey[k]).filter(Boolean)
+    const children = (mergedGroups[mod.id] ?? []).map((k) => modByKey[k]).filter(Boolean)
     const childrenNode = children.length ? (
       <details className="border-t border-border/40">
         <summary className="cursor-pointer select-none px-3 py-1 pl-8 text-[11px] text-muted-foreground">
@@ -925,6 +1225,42 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
   const updateCount =
     (nexusPremium ? Object.values(nexusMods).filter((v) => v.updateAvailable).length : 0) +
     (steamConnected ? Object.values(steamUpdates).filter((v) => v.updateAvailable).length : 0)
+
+  // Export: a plain list of every installed mod (excluding UE4SS framework built-ins) with
+  // its source URL where known — Steam Workshop link or Nexus link from the tracking files
+  // (both load regardless of a connected account). Manual uploads have no URL.
+  const modSourceUrl = (m: GameModEntry): string | null => {
+    const s = steamLinks[m.id]
+    if (s?.itemId) return `https://steamcommunity.com/sharedfiles/filedetails/?id=${s.itemId}`
+    const n = nexusMods[m.id]
+    if (n?.url) return n.url
+    return null
+  }
+  const exportMods = () => (mods ?? []).filter((m) => !isBuiltin(m)).sort((a, b) => a.name.localeCompare(b.name))
+  // One button, BOTH sides: server mods (URLs from the loaded Steam/Nexus associations) plus
+  // the client loadout mods (fetched; each carries its own `url`). Copied to the clipboard.
+  const copyAllMods = async () => {
+    const server = exportMods()
+    const serverLines = server.map((m) => `- ${m.name}${m.enabled ? '' : ' (disabled)'} — ${modSourceUrl(m) ?? 'no linked source'}`)
+    let client: { name: string; url: string | null; keep: boolean }[] = []
+    if (config) {
+      try {
+        const res = await fetch('/api/client-mods', { headers: buildPalworldProxyHeaders(config), cache: 'no-store' })
+        if (res.ok) client = ((await res.json()).mods ?? []) as typeof client
+      } catch {
+        /* server-only fallback */
+      }
+    }
+    client = client.slice().sort((a, b) => a.name.localeCompare(b.name))
+    const clientLines = client.map((m) => `- ${m.name}${m.keep ? '' : ' (not kept)'} — ${m.url ?? 'no linked source'}`)
+    const text =
+      `Palworld mods — server: ${server.length}, client: ${client.length}\n\n` +
+      `## Server mods (${server.length})\n${serverLines.join('\n') || '(none)'}\n\n` +
+      `## Client mods (${client.length})\n${clientLines.join('\n') || '(none)'}\n`
+    const ok = await copyToClipboard(text, { silent: true })
+    if (ok) toast.success(`Copied ${server.length + client.length} mods (server + client)`)
+    else toast.error('Copy failed — your browser blocked clipboard access')
+  }
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -943,6 +1279,16 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
             >
               {updatingAll ? <Spinner className="size-3.5" /> : <span aria-hidden>↑</span>}
               Update all ({updateCount})
+            </button>
+          )}
+          {mods && mods.length > 0 && (
+            <button
+              onClick={copyAllMods}
+              title="Copy a list of ALL mods — server and client loadout — with their source URLs to the clipboard"
+              className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm hover:bg-muted"
+            >
+              <ClipboardListIcon className="size-3.5" />
+              Copy mod list
             </button>
           )}
           <button
@@ -978,6 +1324,7 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
             ue4ssEnabled={ue4ssActive}
             reloadSignal={palschemaReload}
             embedded
+            hideSubmodList
           />
 
           {/* PATCH (not upstream): PalDefender is a separate install (its own DLL,
@@ -1031,16 +1378,127 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
           {mods && mods.length > 0 && (
             <div className="flex flex-col gap-2 border-t pt-3">
               {userMods.length > 0 ? (
-                <ul className="flex flex-col divide-y rounded-md border">{userMods.map(renderUserMod)}</ul>
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {filterQ ? `${visibleUserMods.length} / ${userMods.length}` : userMods.length} mod
+                      {userMods.length === 1 ? '' : 's'}
+                    </span>
+                    <div className="ml-auto flex items-center gap-2">
+                      <Input
+                        value={modFilter}
+                        onChange={(e) => setModFilter(e.target.value)}
+                        placeholder="Filter by name…"
+                        aria-label="Filter mods by name"
+                        className="h-8 w-40 text-sm sm:w-56"
+                      />
+                      <select
+                        value={modSort}
+                        onChange={(e) => setModSort(e.target.value as ModSort)}
+                        aria-label="Sort mods"
+                        className="h-8 rounded-md border bg-background px-2 text-sm"
+                      >
+                        <option value="category">Category (grouped)</option>
+                        <option value="name-asc">Name (A–Z)</option>
+                        <option value="name-desc">Name (Z–A)</option>
+                        <option value="added-desc">Recently added</option>
+                        <option value="added-asc">Oldest first</option>
+                        <option value="source">Source (Nexus/Steam)</option>
+                        <option value="type">Type (UE4SS/pak/…)</option>
+                      </select>
+                    </div>
+                  </div>
+                  {visibleUserMods.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No mods match “{modFilter}”.</p>
+                  ) : (
+                    <>
+                    {enabledVisible.length > 0 && (
+                    <details open className="rounded-md border">
+                      <summary className="cursor-pointer select-none border-b px-3 py-2 text-sm font-medium">
+                        Mods (Server){' '}
+                        <span className="tabular-nums text-muted-foreground">({enabledVisible.length})</span>
+                      </summary>
+                      {modSort === 'category' ? (
+                        <>
+                          {modsByCategory.length > 1 && (
+                            <div className="flex items-center gap-2 border-b bg-muted/10 px-3 py-1.5 text-xs">
+                              <button
+                                type="button"
+                                onClick={() => setExpandedCats(new Set(modsByCategory.map(([c]) => c)))}
+                                className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                              >
+                                Expand all
+                              </button>
+                              <span className="text-muted-foreground/50">·</span>
+                              <button
+                                type="button"
+                                onClick={() => setExpandedCats(new Set())}
+                                className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                              >
+                                Collapse all
+                              </button>
+                            </div>
+                          )}
+                          <div className="flex flex-col divide-y">
+                            {modsByCategory.map(([cat, list]) => (
+                              <details
+                                key={cat}
+                                open={expandedCats.has(cat)}
+                                onToggle={(e) => {
+                                  const open = e.currentTarget.open
+                                  setExpandedCats((prev) => {
+                                    if (open === prev.has(cat)) return prev
+                                    const n = new Set(prev)
+                                    if (open) n.add(cat)
+                                    else n.delete(cat)
+                                    return n
+                                  })
+                                }}
+                              >
+                                <summary className="cursor-pointer select-none bg-muted/30 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                                  {cat} <span className="tabular-nums">({list.length})</span>
+                                </summary>
+                                <ul className="flex flex-col divide-y">{list.map(renderUserMod)}</ul>
+                              </details>
+                            ))}
+                          </div>
+                        </>
+                      ) : (
+                        <ul className="flex flex-col divide-y">{enabledVisible.map(renderUserMod)}</ul>
+                      )}
+                    </details>
+                    )}
+                    {disabledVisible.length > 0 && (
+                      <div className="flex flex-col gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setShowDisabled((s) => !s)}
+                          className="flex items-center gap-1.5 self-start text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          <ChevronDownIcon
+                            className={showDisabled ? 'size-4 rotate-180 transition-transform' : 'size-4 transition-transform'}
+                          />
+                          Disabled <span className="tabular-nums">({disabledVisible.length})</span>
+                        </button>
+                        {showDisabled && (
+                          <ul className="flex flex-col divide-y rounded-md border">
+                            {disabledVisible.map((m) => renderUserMod(m))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                    </>
+                  )}
+                </>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  No installed mods yet — only UE4SS built-ins are present.
+                  No installed mods yet — only built-ins are present.
                 </p>
               )}
               {builtinMods.length > 0 && (
                 <details className="rounded-md border">
                   <summary className="cursor-pointer select-none px-3 py-2 text-xs text-muted-foreground">
-                    UE4SS built-in mods ({builtinMods.length}) — framework plumbing &amp; dev tools bundled with UE4SS
+                    Built-in mods ({builtinMods.length}) — UE4SS framework plumbing, dev tools &amp; PalDefender
                   </summary>
                   <ul className="flex flex-col divide-y border-t">{builtinMods.map((m) => renderModRow(m))}</ul>
                 </details>
@@ -1078,6 +1536,24 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
             >
               Disable Anyway
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* PalSchema submod removal (lifted from the old PalSchema section). */}
+      <AlertDialog open={psRemoveTarget !== null} onOpenChange={(o) => !o && setPsRemoveTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {psRemoveTarget}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This PalSchema mod&apos;s folder is backed up to the backups area first
+              (palschema-{psRemoveTarget}-…tar.gz), so you can restore it by hand. Takes effect on next
+              server restart.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => psRemoveTarget && removePalschema(psRemoveTarget)}>Remove</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

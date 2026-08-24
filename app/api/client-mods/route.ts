@@ -11,9 +11,12 @@ import {
   addClientModsBulk,
   addClientModUpload,
   backfillClientWarnings,
+  checkClientModUpdates,
+  clientModUpdateAvailable,
   listClientMods,
   removeClientMod,
   setClientModKeep,
+  updateClientMod,
   type ClientMod,
 } from '@/lib/client-mods'
 import { clearClientModConfig, listClientModConfigs, saveClientModConfig } from '@/lib/client-mod-config'
@@ -62,7 +65,10 @@ export async function GET(request: NextRequest) {
 async function _GET(request: NextRequest) {
   const denied = requireAdmin(request)
   if (denied) return denied
-  const [mods, catalog] = await Promise.all([listClientMods(), readCatalog()])
+  const [modsRaw, catalog] = await Promise.all([listClientMods(), readCatalog()])
+  // Derive updateAvailable per mod from the cached fields (no network here — a refresh is the
+  // explicit 'checkUpdates' action). Mirrors the server Nexus/Steam update chips.
+  const mods = modsRaw.map((m) => ({ ...m, updateAvailable: clientModUpdateAvailable(m) }))
   // Suggestions: client-relevant catalog mods not already staged. Newest surfaced first
   // isn't meaningful here (no add time), so sort by name.
   const suggestions = catalog
@@ -126,6 +132,7 @@ async function _POST(request: NextRequest) {
     cfg?: string
     content?: string
     fileId?: number // Nexus: stage a specific file/version (from the version picker)
+    force?: boolean // checkUpdates: re-check even fresh entries
   }
   try {
     body = (await request.json()) as typeof body
@@ -165,6 +172,19 @@ async function _POST(request: NextRequest) {
       case 'backfillWarnings': {
         const r = await backfillClientWarnings()
         return NextResponse.json(r)
+      }
+      // Refresh cached update info (nexus versions + steam timestamps), then return the mods with
+      // a derived updateAvailable flag — the client-mod parallel to the server's update chips.
+      case 'checkUpdates': {
+        const updates = await checkClientModUpdates(body.force === true)
+        const mods = (await listClientMods()).map((m) => ({ ...m, updateAvailable: clientModUpdateAvailable(m) }))
+        return NextResponse.json({ mods, updates })
+      }
+      // Update one staged mod in place to the newest upstream build (keep + config-override kept).
+      case 'update': {
+        if (typeof body.id !== 'string') return NextResponse.json({ error: 'id required' }, { status: 400 })
+        const mod = await updateClientMod(body.id)
+        return NextResponse.json({ mod, note: `Updated ${mod.name}${mod.version ? ` to ${mod.version}` : ''}.` })
       }
       // ── Per-mod config editing (shipped into the loadout) ──────────────────
       case 'configList': {

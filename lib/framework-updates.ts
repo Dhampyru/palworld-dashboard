@@ -1,5 +1,7 @@
+import { readFile, writeFile } from 'node:fs/promises'
 import { readUe4ssStatus } from '@/lib/game-mods'
 import { readPalSchemaStatus } from '@/lib/palschema'
+import { fetchWorkshopUpdateTimes } from '@/lib/steam'
 
 // PATCH (not upstream): framework update CHECKS for UE4SS + PalSchema (docs/specs/
 // framework-updates.md). Regular mods (Nexus/Steam) already have update detection; the
@@ -9,6 +11,27 @@ import { readPalSchemaStatus } from '@/lib/palschema'
 // unauthenticated API is 60/hr → results cached for an hour.
 const UA = { Accept: 'application/vnd.github+json', 'User-Agent': 'palworld-dashboard' } as const
 const TTL_MS = 60 * 60 * 1000
+
+// Okaetsu's experimental-palworld UE4SS is published on the Steam Workshop as this item; its
+// `time_updated` is the RELIABLE "is a newer build out?" signal (the GitHub tag is rolling and
+// its version/sha don't map to the installed banner). Verified 2026-08-19: the community dwmapi
+// build and this Workshop package are the SAME binary (SHA c838a8ac). A newer build here is the
+// thing that could let BPModLoaderMod / LogicMods load again on an updated game — see the
+// ue4ss-boot-crash note. Instance-agnostic baseline (default instance is the live one).
+const UE4SS_WORKSHOP_ITEM = '3625223587'
+const UE4SS_BASELINE_FILE = './data/ue4ss-update-baseline.json'
+
+async function readUe4ssBaseline(): Promise<number | null> {
+  try {
+    const j = JSON.parse(await readFile(UE4SS_BASELINE_FILE, 'utf8')) as { baselineAt?: number }
+    return typeof j.baselineAt === 'number' ? j.baselineAt : null
+  } catch {
+    return null
+  }
+}
+async function writeUe4ssBaseline(baselineAt: number): Promise<void> {
+  await writeFile(UE4SS_BASELINE_FILE, JSON.stringify({ baselineAt, setAt: new Date().toISOString() }, null, 2), 'utf8')
+}
 
 export type PalSchemaUpdate = {
   installed: string | null
@@ -21,7 +44,14 @@ export type PalSchemaUpdate = {
 export type Ue4ssUpdate = {
   installed: { version: string | null; sha: string | null; source: string | null }
   latest: { tag: string | null; publishedAt: string | null; url: string | null }
-  // null = "can't reliably tell" (rolling tag). Never a false positive.
+  // Reliable Workshop-time comparison (experimental-palworld only): is a newer build published?
+  workshop: {
+    itemId: string
+    baselineAt: number | null // time_updated (epoch s) of the build we consider installed
+    latestAt: number | null // live time_updated of the Workshop item
+    updateAvailable: boolean
+  } | null
+  // Workshop check drives this when present; else null = "can't reliably tell" (rolling tag).
   updateAvailable: boolean | null
   note: string
 }
@@ -74,6 +104,28 @@ async function checkUe4ss(): Promise<Ue4ssUpdate> {
         ? 'https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases/tags/experimental-latest'
         : 'https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases/latest'
   const rel = await ghJson(feed)
+
+  // Reliable signal for the experimental-palworld line: compare the Workshop item's live
+  // time_updated against a stored baseline (the build we consider installed). First run seeds
+  // the baseline to the current live time — right now the installed build IS the latest, so
+  // that reads "up to date"; a future Okaetsu build then flips updateAvailable to true.
+  let workshop: Ue4ssUpdate['workshop'] = null
+  if (st.source === 'experimental-palworld') {
+    const times = await fetchWorkshopUpdateTimes([UE4SS_WORKSHOP_ITEM])
+    const latestAt = times[UE4SS_WORKSHOP_ITEM]?.timeUpdated ?? null
+    let baselineAt = await readUe4ssBaseline()
+    if (baselineAt == null && latestAt != null) {
+      baselineAt = latestAt
+      await writeUe4ssBaseline(baselineAt)
+    }
+    workshop = {
+      itemId: UE4SS_WORKSHOP_ITEM,
+      baselineAt,
+      latestAt,
+      updateAvailable: Boolean(latestAt != null && baselineAt != null && latestAt > baselineAt),
+    }
+  }
+
   return {
     installed: { version: st.version, sha: st.sha, source: st.source },
     latest: {
@@ -81,9 +133,25 @@ async function checkUe4ss(): Promise<Ue4ssUpdate> {
       publishedAt: (rel?.published_at as string) ?? null,
       url: (rel?.html_url as string) ?? null,
     },
-    updateAvailable: null, // rolling tag — version/sha don't map to the banner; no false badge
-    note: 'UE4SS tracks a rolling tag; check the release notes to decide if an update is needed.',
+    workshop,
+    updateAvailable: workshop ? workshop.updateAvailable : null,
+    note: workshop
+      ? workshop.updateAvailable
+        ? 'A newer experimental-palworld UE4SS build is published — updating may let BPModLoaderMod (Blueprint/LogicMods) load again on the current game.'
+        : 'UE4SS matches the latest experimental-palworld build; nothing to do.'
+      : 'UE4SS tracks a rolling tag; check the release notes to decide if an update is needed.',
   }
+}
+
+// Re-baseline to the current live Workshop time — call after swapping UE4SS, or from the
+// "mark as up to date" button once the operator has updated. Clears the flag until the next
+// Okaetsu build. Best-effort: if the Steam call fails the baseline is left unchanged.
+export async function markUe4ssUpdateInstalled(): Promise<{ baselineAt: number | null }> {
+  const times = await fetchWorkshopUpdateTimes([UE4SS_WORKSHOP_ITEM])
+  const latestAt = times[UE4SS_WORKSHOP_ITEM]?.timeUpdated ?? null
+  if (latestAt != null) await writeUe4ssBaseline(latestAt)
+  cache = null // force a fresh check on the next read
+  return { baselineAt: latestAt }
 }
 
 let cache: { at: number; data: FrameworkUpdates } | null = null

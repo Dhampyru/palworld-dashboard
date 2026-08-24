@@ -9,6 +9,8 @@ import { ReshadeCard } from '@/components/reshade-card'
 import { UnifiedModUploader } from '@/components/unified-mod-uploader'
 import { Ue4ssLoaderCard } from '@/components/ue4ss-loader-card'
 import { FrameworkUpdatesCard } from '@/components/framework-updates-card'
+import { ModProfilesCard } from '@/components/mod-profiles-card'
+import { ModSyncCard } from '@/components/mod-sync-card'
 import { ServerIcon, MonitorIcon, SparklesIcon } from 'lucide-react'
 
 // PATCH (not upstream): the Mods page. ONE uploader (UnifiedModUploader) sits ABOVE the two
@@ -65,6 +67,8 @@ export function ModsWorkspace() {
         <Ue4ssLoaderCard onChanged={() => setReloadKey((k) => k + 1)} />
         <FrameworkUpdatesCard />
         <UnifiedModUploader onInstalled={() => setReloadKey((k) => k + 1)} />
+        <ModProfilesCard reloadKey={reloadKey} onChanged={() => setReloadKey((k) => k + 1)} />
+        <ModSyncCard reloadKey={reloadKey} onChanged={() => setReloadKey((k) => k + 1)} />
       </div>
 
       <div role="tablist" className="flex shrink-0 items-center gap-1 border-b border-border/60 px-3 py-2">

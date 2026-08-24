@@ -1,11 +1,11 @@
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, relative, sep } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { extractZipTolerant } from '@/lib/archive'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { currentGameDir, currentRestConfig } from '@/lib/instances'
-import { serializeModsTxt } from '@/lib/game-mods'
+import { readModsTxt, resolveUe4ssModsDir, serializeModsTxt } from '@/lib/game-mods'
 import { UE4SS_FRAMEWORK_DEFAULTS } from '@/lib/ue4ss-framework-defaults'
 import { clientModStorePath, listClientMods, type ClientMod } from '@/lib/client-mods'
 import { readClientModConfigOverrides } from '@/lib/client-mod-config'
@@ -14,6 +14,7 @@ import { overlayPalSchemaInto } from '@/lib/palschema-config'
 import { overlayClientModFilesInto } from '@/lib/client-mod-files'
 import { overlayReshadeInto } from '@/lib/reshade'
 import { resolveConnectString } from '@/lib/loadout-connect'
+import { scanPerModKeybinds } from '@/lib/keybind-scan'
 
 const execFileP = promisify(execFile)
 
@@ -29,9 +30,27 @@ const execFileP = promisify(execFile)
 // friend's game actually LOADS every mod can only be confirmed on a real client — we
 // can't run one here. Uncertain mods are recorded in the bundle manifest, not dropped.
 
-// Framework Mods to ENABLE in the generated mods.txt (load-bearing for other mods). Other
-// bundled framework defaults (dev/diagnostic tools) are included but left disabled.
+// Framework-mod enable state in the generated client mods.txt = the SERVER's own state (what
+// the operator toggles in the Mods tab, read from the live server's mods.txt) UNIONed with an
+// always-on FLOOR of client-load-bearing loaders (ENABLED_FRAMEWORK), then with dev/diagnostic
+// tools (CLIENT_UNSAFE_FRAMEWORK) forced off. So a server-side enable/disable now carries into
+// client bundles (2026-08-24 — it never did before; the bundle used a hardcoded allowlist), but
+// the client can never be handed a load-bearing loader OFF nor a profiler/dumper ON.
+// BPModLoaderMod (the LogicMods loader) was excluded 2026-08-19 because it access-violated
+// inside UE4SS.dll during boot on that game build (server crash-loop, clients crashing to the
+// main menu). It NO LONGER crashes on the current build (re-enabled on the live server
+// 2026-08-22), so it is RE-ENABLED here 2026-08-24. Disabling it was NOT free after all: with
+// it off, Blueprint/LogicMods paks never load, so any mod shipping a LogicMod (e.g. Pal
+// Insight's PalInsightX.pak) half-loaded — its Lua thrashed reaching for the missing Blueprint
+// every frame → severe client stutter. Confirmed by toggling BPModLoaderMod in a clean manual
+// install (on=smooth, off=stutter). If a future build regresses the boot crash, revert to `:0`.
 const ENABLED_FRAMEWORK = new Set(['BPModLoaderMod', 'BPML_GenericFunctions', 'Keybinds', 'ConsoleEnablerMod'])
+// Client-safety DENYLIST: dev/diagnostic framework mods that must NEVER ship ENABLED to a
+// client, even when the operator has them on server-side. The live server may run the Lua
+// profiler / actor dumper / line-trace tool while debugging; enabling them on clients tanks FPS
+// (a profiler's cost scales with a mod's Lua volume — it was a prime stutter suspect). These are
+// still COPIED into the bundle (harmless when off) but forced `: 0` regardless of server state.
+const CLIENT_UNSAFE_FRAMEWORK = new Set(['jsbLuaProfilerMod', 'ActorDumperMod', 'LineTraceMod'])
 
 export type LoadoutMod = { name: string; kind: string; source: string; placed: string[] }
 export type LoadoutSkip = { name: string; reason: string }
@@ -779,33 +798,43 @@ function perfTargetsTxt(t: { mods: string[]; paks: string[]; reshade: boolean })
   return lines.join('\r\n') + '\r\n'
 }
 
-function keybindsTxt(): string {
-  const s = [
-    'PALWORLD — CONTROLS (this server\u2019s mods)',
-    '=========================================',
+// Dashboard data volume (operator config; never in git).
+const DATA_DIR = resolve(process.env.DASHBOARD_DATA_DIR ?? './data')
+
+// The friend-facing controls cheat-sheet baked into the bundle, from two sources in order:
+//  1) an operator-supplied file `$DATA_DIR/loadout-keybinds.txt` — shipped VERBATIM if present, so
+//     an operator can hand-write a curated sheet (that file lives in the data volume, NOT git —
+//     keeping this code generic / free of any one deployment's mod list); else
+//  2) auto-generated from the kept mods' detected keybinds (scanPerModKeybinds) — no hardcoded mod
+//     list, always current, listing exactly the mods a given loadout ships (override-aware).
+async function keybindsTxt(): Promise<string> {
+  try {
+    const custom = await readFile(join(DATA_DIR, 'loadout-keybinds.txt'), 'utf8')
+    if (custom.trim()) return custom
+  } catch {
+    /* no operator file → auto-generate below */
+  }
+  const rows = await scanPerModKeybinds().catch(() => [])
+  const lines = [
+    'PALWORLD — MOD CONTROLS (this loadout)',
+    '=======================================',
     '',
-    '  E .................. throw a sphere / summon your active Pal',
-    '  F .................. partner skill (Full Sphere Summon)',
-    '  F2 ................. quick-stack loot + eggs into nearby chests',
-    '  F5 ................. reveal a Pal\u2019s hidden potential / IVs (look at it)',
-    '  F6 ................. guild overlay: members + territory (GuildSight)',
-    '  F7 ................. toggle accessories on/off',
-    '  F8 / F9 / F10 ...... Smart Condenser: pick best passives / open / clear',
-    '  Left-Alt (hold) .... inspect a Pal (Pal Insight)',
-    '  B .................. free-camera build mode',
-    '  G .................. Blueprint mode (save & stamp builds)',
-    '  Numpad 1-9 ......... swap saved Palbox party presets',
-    '  Numpad + / - ....... widen / narrow FOV + camera distance',
-    '',
-    'Ctrl combos (safe to type the plain letter):',
-    '  Ctrl+Y ............. confirm Evolve in a Pal\u2019s radial menu (Palvolve)',
-    '  Ctrl+O ............. Pal Insight settings',
-    '  Ctrl+C ............. copy a base layout (Base Automation)',
-    '  Ctrl+F9 ............ hide/show what you already own (OwnedIndicator)',
-    '  Ctrl+F7 ............ OwnedIndicator re-check',
+    'Keys detected in the mods this loadout installs. If two mods share a key,',
+    'the dashboard flags it as a conflict. Some mods also bind keys in Palworld’s',
+    'own Key Config (Options → Key Config) — those are set in-game, not here.',
     '',
   ]
-  return s.join('\r\n') + '\r\n'
+  if (rows.length) {
+    const width = Math.min(46, Math.max(...rows.map((r) => r.name.length)))
+    for (const r of rows) {
+      const gap = r.name.length >= width ? ' ' : ' ' + '.'.repeat(width - r.name.length) + ' '
+      lines.push(`  ${r.name}${gap}${r.combos.join(', ')}`)
+    }
+  } else {
+    lines.push('  (No mod keybinds detected in this loadout.)')
+  }
+  lines.push('')
+  return lines.join('\r\n') + '\r\n'
 }
 
 function readMeFirst(connect: string | null, serverName: string | null): string {
@@ -1286,9 +1315,18 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
       preConfigFiles += palSchemaEdits
     }
 
-    // Generate mods.txt: enabled framework defaults + every client Lua mod + PalSchema.
+    // Generate mods.txt: framework mods mirror the SERVER's enable state (floor = always-on
+    // loaders, denylist = dev tools forced off; see ENABLED_FRAMEWORK/CLIENT_UNSAFE_FRAMEWORK),
+    // then every client Lua mod + PalSchema.
     const active = new Map<string, boolean>()
-    if (includedUe4ss) for (const name of UE4SS_FRAMEWORK_DEFAULTS.keys()) active.set(name, ENABLED_FRAMEWORK.has(name))
+    if (includedUe4ss) {
+      const serverModsDir = await resolveUe4ssModsDir()
+      const serverActive = serverModsDir ? await readModsTxt(serverModsDir) : null
+      for (const name of UE4SS_FRAMEWORK_DEFAULTS.keys()) {
+        const on = ENABLED_FRAMEWORK.has(name) || (serverActive?.get(name) ?? false)
+        active.set(name, on && !CLIENT_UNSAFE_FRAMEWORK.has(name))
+      }
+    }
     for (const name of [...new Set(luaMods)]) active.set(name, true)
     // Enable PalSchema so it loads and applies its own submods.
     if (await isDir(join(modsDir, 'PalSchema'))) active.set('PalSchema', true)
@@ -1371,7 +1409,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
     if (engineIniTweaks.length)
       await writeFile(join(mgr, 'recommended-engine-ini.txt'), recommendedEngineIni(engineIniTweaks), 'utf8')
     await writeFile(join(mgr, 'performance-targets.txt'), perfTargetsTxt(await heavyPerfTargets(gameRoot)), 'utf8')
-    await writeFile(join(mgr, 'keybinds.txt'), keybindsTxt(), 'utf8')
+    await writeFile(join(mgr, 'keybinds.txt'), await keybindsTxt(), 'utf8')
     await writeFile(join(mgr, 'manager.ps1'), managerPs1(connect, serverName), 'utf8')
     await writeFile(join(bundle, 'Palworld Mod Manager.bat'), managerBat(), 'utf8')
     await writeFile(join(bundle, 'READ-ME-FIRST.txt'), readMeFirst(connect, serverName), 'utf8')

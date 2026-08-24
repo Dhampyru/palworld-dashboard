@@ -51,6 +51,7 @@ export function PalSchemaSection({
   ue4ssEnabled,
   reloadSignal,
   embedded,
+  hideSubmodList,
 }: {
   // PalSchema is genuinely running on the matching build RIGHT NOW (drives green).
   palschemaLoaded: boolean
@@ -65,6 +66,9 @@ export function PalSchemaSection({
   // When true, render without the outer card border/padding so it can sit inside a
   // shared "Installed Mods" card.
   embedded?: boolean
+  // When true, keep only the loader/install/status; the submod LIST is rendered by the
+  // parent inside the main mod list (nested under each mod), so hide it here.
+  hideSubmodList?: boolean
 }) {
   const { config } = useServer()
   const [status, setStatus] = useState<PalSchemaStatus | null>(null)
@@ -230,7 +234,9 @@ export function PalSchemaSection({
           </p>
 
           {/* Sub-mods — dimmed while UE4SS is off, since PalSchema (and thus its
-              mods) can't load until the loader is re-enabled. */}
+              mods) can't load until the loader is re-enabled. Hidden when the parent
+              renders the submod rows inside the main mod list (hideSubmodList). */}
+          {!hideSubmodList && (
           <div className={`flex flex-col gap-2${!ue4ssEnabled ? ' opacity-50' : ''}`}>
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium">PalSchema mods ({submods.length})</span>
@@ -294,6 +300,7 @@ export function PalSchemaSection({
             {/* Installing PalSchema mods is handled by the shared "Install a Mod"
                 section below (its PalSchema tab); this section only lists/removes. */}
           </div>
+          )}
         </div>
       )}
 

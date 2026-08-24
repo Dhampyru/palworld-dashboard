@@ -168,6 +168,11 @@ interface ServerContextType {
   // dashboard consumes it (setActiveTab) and clears it. Same pattern as consoleRequest.
   tabRequest: string | null
   requestTab: (tab: string | null) => void
+  // Bumped after a mod/framework update runs so the header's ModUpdatePill re-checks its count
+  // immediately instead of waiting for its 30-min poll (a stale "N updates" pill otherwise
+  // lingers after you've already applied them).
+  modUpdatesNonce: number
+  refreshModUpdates: () => void
   // Multi-instance (#7): the fleet drill-in. null = show the fleet landing; a
   // value = the server the dashboard is scoped to (carried to every API via the
   // x-palworld-instance header). enterInstance/exitToFleet switch between them.
@@ -200,6 +205,7 @@ export function ServerProvider({ children }: { children: ReactNode }) {
   const [consoleLogs, setConsoleLogs] = useState<ConsoleLog[]>([])
   const [consoleRequest, setConsoleRequest] = useState<{ command: string; userId: string } | null>(null)
   const [tabRequest, setTabRequest] = useState<string | null>(null)
+  const [modUpdatesNonce, setModUpdatesNonce] = useState(0)
   const [isLoading, setIsLoading] = useState<Record<string, boolean>>({})
   const [isHydrated, setIsHydrated] = useState(false)
 
@@ -664,6 +670,8 @@ export function ServerProvider({ children }: { children: ReactNode }) {
     clearConsoleRequest: () => setConsoleRequest(null),
     tabRequest,
     requestTab: setTabRequest,
+    modUpdatesNonce,
+    refreshModUpdates: () => setModUpdatesNonce((n) => n + 1),
     activeInstanceId,
     enterInstance,
     exitToFleet,
@@ -699,6 +707,7 @@ export function ServerProvider({ children }: { children: ReactNode }) {
     nextSnapshotFetchAt,
     consoleRequest,
     tabRequest,
+    modUpdatesNonce,
   ])
 
   if (!isHydrated) {

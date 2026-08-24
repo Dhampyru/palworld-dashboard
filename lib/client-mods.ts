@@ -1,8 +1,16 @@
 import { readFile, writeFile, rename, mkdir, rm, cp, readdir, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { detectModKind, cleanModName } from '@/lib/game-mods'
-import { downloadNexusFile, getModFiles, getModInfo, parseNexusModId, type NexusFile } from '@/lib/nexus'
-import { downloadWorkshopItem, parseWorkshopId } from '@/lib/steam'
+import {
+  compareVersions,
+  downloadNexusFile,
+  getModFiles,
+  getModInfo,
+  latestMainFileVersion,
+  parseNexusModId,
+  type NexusFile,
+} from '@/lib/nexus'
+import { downloadWorkshopItem, fetchWorkshopUpdateTimes, parseWorkshopId } from '@/lib/steam'
 import { normalizeArchiveToZip } from '@/lib/archive'
 import AdmZip from 'adm-zip'
 import { execFile } from 'node:child_process'
@@ -45,6 +53,19 @@ export type ClientMod = {
   warn?: string | null // set when the mod has NO client-installable files (server-side / not a mod)
   configMenu?: boolean // detected: ships an in-game Mod Config Menu → writes a client-side
   // LogicMods/<name>.modconfig.json the admin can capture + pre-configure (client-configs editor)
+  // ── update watching (nexus/steam) — cached by checkClientModUpdates ──
+  latestVersion?: string | null // nexus: newest MAIN file version last seen (null = none found)
+  latestUpdatedAt?: number // steam: live Workshop `timeupdated` (epoch SECONDS) last seen
+  updateCheckedAt?: number // when the two fields above were last refreshed
+}
+
+// Is a newer version available for a staged client mod? Derived (no network) from the cached
+// fields above: nexus compares versions; steam compares the live Workshop timestamp to when we
+// staged it. Uploads have no upstream, so never.
+export function clientModUpdateAvailable(m: ClientMod): boolean {
+  if (m.source === 'nexus') return !!(m.latestVersion && m.version && compareVersions(m.latestVersion, m.version) > 0)
+  if (m.source === 'steam') return !!(m.latestUpdatedAt && m.addedAt && m.latestUpdatedAt * 1000 > m.addedAt)
+  return false
 }
 
 type Index = Record<string, ClientMod>
@@ -449,6 +470,129 @@ export async function setClientModKeep(id: string, keep: boolean): Promise<Clien
     rec.keepChangedAt = Date.now()
     return rec
   })
+}
+
+// ── update watching for CLIENT mods (parity with the server-side nexus/steam update chips) ──
+const UPDATE_CACHE_MS = 30 * 24 * 60 * 60 * 1000 // 30d — matches the nexus '1m' sweep window
+
+// Refresh cached update info for every nexus/steam client mod, then persist. Network work runs
+// OUTSIDE the index mutex; only the write-back is inside it. `force` re-checks even fresh entries.
+// Returns the number of mods that now have an update available.
+export async function checkClientModUpdates(force = false): Promise<number> {
+  const idx = await readIndex()
+  const now = Date.now()
+
+  // Steam: one batched, keyless call for all workshop ids (public GetPublishedFileDetails).
+  const steamIds = [...new Set(Object.values(idx).filter((m) => m.source === 'steam' && m.sourceId).map((m) => m.sourceId as string))]
+  const steamTimes = steamIds.length
+    ? await fetchWorkshopUpdateTimes(steamIds).catch(() => ({} as Record<string, { timeUpdated: number; title: string }>))
+    : {}
+
+  const computed = new Map<string, { latestVersion?: string | null; latestUpdatedAt?: number }>()
+  for (const m of Object.values(idx)) {
+    if (m.source === 'nexus' && m.sourceId) {
+      const fresh = m.updateCheckedAt != null && now - m.updateCheckedAt < UPDATE_CACHE_MS && m.latestVersion !== undefined
+      if (!force && fresh) continue
+      try {
+        const files = await getModFiles(Number(m.sourceId))
+        computed.set(m.id, { latestVersion: latestMainFileVersion(files) })
+      } catch {
+        /* leave the cached value alone on a fetch failure */
+      }
+    } else if (m.source === 'steam' && m.sourceId) {
+      const live = steamTimes[m.sourceId]?.timeUpdated
+      if (live) computed.set(m.id, { latestUpdatedAt: live })
+    }
+  }
+
+  await mutateIndex((cur) => {
+    for (const [id, c] of computed) {
+      const m = cur[id]
+      if (!m) continue
+      if ('latestVersion' in c) m.latestVersion = c.latestVersion ?? null
+      if ('latestUpdatedAt' in c) m.latestUpdatedAt = c.latestUpdatedAt
+      m.updateCheckedAt = now
+    }
+  })
+
+  return Object.values(await readIndex()).filter(clientModUpdateAvailable).length
+}
+
+// Update a staged client mod IN PLACE to the newest upstream build — SAME id, keep flag, and
+// config-override are preserved (only the payload files are replaced). Nexus pulls the newest
+// MAIN file (Premium key); Steam re-pulls the Workshop item.
+export async function updateClientMod(id: string): Promise<ClientMod> {
+  const rec = (await readIndex())[id]
+  if (!rec) throw new Error('No such client mod')
+  const dir = join(STORE_DIR, id)
+
+  if (rec.source === 'nexus' && rec.sourceId) {
+    const modId = Number(rec.sourceId)
+    const files = await getModFiles(modId)
+    const file = pickFile(files)
+    if (!file) throw new Error('No downloadable file found on Nexus (Premium key required for auto-download)')
+    const raw = await downloadNexusFile(modId, file.fileId)
+    let buffer: Buffer
+    try {
+      buffer = await normalizeArchiveToZip(raw)
+    } catch {
+      throw new Error("Couldn't open this download as an archive (corrupt, encrypted, or unsupported)")
+    }
+    const kind: ClientModKind = detectModKind(buffer) || 'unknown'
+    const warn = warnFromZip(buffer, kind)
+    const configMenu = zipUsesModConfig(buffer)
+    const latest = latestMainFileVersion(files)
+    // Replace payload; clear any stale alternate payload shape. config-override/ is untouched.
+    await rm(join(dir, 'payload.pak'), { force: true }).catch(() => {})
+    await rm(join(dir, 'content'), { recursive: true, force: true }).catch(() => {})
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'payload.zip'), buffer)
+    return mutateIndex((idx) => {
+      const m = idx[id]
+      if (!m) throw new Error('No such client mod')
+      m.version = file.version ?? null
+      m.payload = 'payload.zip'
+      m.kind = kind
+      m.sizeBytes = buffer.length
+      m.warn = warn
+      m.configMenu = configMenu
+      m.latestVersion = latest
+      m.updateCheckedAt = Date.now()
+      return m
+    })
+  }
+
+  if (rec.source === 'steam' && rec.sourceId) {
+    const itemId = rec.sourceId
+    const { contentDir } = await downloadWorkshopItem(itemId)
+    const dest = join(dir, 'content')
+    await rm(join(dir, 'payload.zip'), { force: true }).catch(() => {})
+    await rm(join(dir, 'payload.pak'), { force: true }).catch(() => {})
+    await rm(dest, { recursive: true, force: true }).catch(() => {})
+    await mkdir(dir, { recursive: true })
+    await cp(contentDir, dest, { recursive: true })
+    const warn = await warnFromContent(dest)
+    const configMenu = await contentUsesModConfig(dest)
+    const size = await pathSize(dest)
+    const live = (
+      await fetchWorkshopUpdateTimes([itemId]).catch(() => ({} as Record<string, { timeUpdated: number; title: string }>))
+    )[itemId]?.timeUpdated
+    return mutateIndex((idx) => {
+      const m = idx[id]
+      if (!m) throw new Error('No such client mod')
+      m.payload = 'content'
+      m.kind = 'unknown'
+      m.sizeBytes = size
+      m.warn = warn
+      m.configMenu = configMenu
+      m.addedAt = Date.now() // re-stamp so the timestamp comparison clears the update flag
+      if (live) m.latestUpdatedAt = live
+      m.updateCheckedAt = Date.now()
+      return m
+    })
+  }
+
+  throw new Error('This mod has no upstream to update from (manual upload)')
 }
 
 export async function removeClientMod(id: string): Promise<void> {

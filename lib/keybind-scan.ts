@@ -18,6 +18,25 @@ const KEY_TOKEN =
 
 const NOT_KEYS = new Set(['FALSE', 'TRUE', 'NIL', 'NONE', 'NULL', 'DISABLED', ''])
 
+// "Strong" key tokens are unambiguous keybind values (function keys, numpad, named keys) — a
+// literal F6 / NUM_FIVE in a config is virtually always a keybind, so we accept it regardless of
+// the field name. Single letters and number-WORDS (A, ONE) are ambiguous (could be data), so those
+// still require a bind-ish field name to count. Keeps .ini/config parsing high-signal.
+const STRONG_KEY =
+  /^(F([1-9]|1[0-9]|2[0-4])|NUM(PAD)?_?[A-Z0-9]+|PAGE_UP|PAGE_DOWN|HOME|END|INSERT|DELETE|TAB|SPACE|ENTER|RETURN|TILDE|SEMICOLON|BACKSLASH|LEFT_BRACKET|RIGHT_BRACKET)$/
+
+// Field name that clearly denotes a keybind (so an ambiguous value like a single letter counts).
+const BINDISH_FIELD = (field: string) => /key|hotkey|bind/.test(field) || /^toggle/.test(field)
+
+// The config files whose scalar `Field = Value` assignments we parse for keybinds. Previously only
+// literal `config.lua`/`config.json`; broadened to the common config filenames so a mod that keeps
+// its binds in settings.lua / keybinds.lua / options.json is covered too (but NOT main.lua, which
+// holds Key.* NAME TABLES that would be false positives).
+const CONFIG_SCALAR_FILE = /(?:^|\/)(config|settings|keybinds?|hotkeys?|options|controls?)\.(lua|json)$/i
+
+// Files worth reading for keybinds: any Lua (RegisterKeyBind), the config/menu JSONs, and .ini.
+const SCANNABLE_FILE = /(\.lua|\.modconfig\.json|config\.json|\.ini)$/i
+
 function normKey(k: string): string {
   return k.trim().toUpperCase().replace(/^KEY\./, '')
 }
@@ -113,12 +132,54 @@ function extractFromText(name: string, text: string, out: Set<string>, disabled:
     return
   }
 
+  // .ini keybind assignments — `Overlay = F6`, `toggle = F3`, `ScanKey=F8`, `HealPal = F2`.
+  // .ini was the scanner's blind spot: Hotkey Consumables, the Aetherion scanners, Base
+  // Automation, and GuildSight keep their binds here, so their conflicts went unseen. Inline
+  // modifiers supported: `Shift+F6`, `Ctrl + F1`, `Alt+F1`. A value that's a strong key token
+  // (F-key / numpad / named) counts regardless of the field name; ambiguous values (a single
+  // letter) still need a bind-ish field, keeping data lines (colors, scales) out.
+  if (lower.endsWith('.ini')) {
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i]!
+      const cm = line.search(/[;#]/) // strip ini comment
+      if (cm >= 0) line = line.slice(0, cm)
+      const mm = /^\s*([A-Za-z0-9_]+)\s*[:=]\s*(.+?)\s*$/.exec(line)
+      if (!mm) continue
+      const field = mm[1]!.toLowerCase()
+      let val = mm[2]!.replace(/^["']|["']$/g, '').trim()
+      const mods: string[] = []
+      for (;;) {
+        const mx = /^(ctrl|control|shift|alt)\s*\+\s*(.+)$/i.exec(val)
+        if (!mx) break
+        mods.push(mx[1]!.toUpperCase() === 'CTRL' ? 'CONTROL' : mx[1]!.toUpperCase())
+        val = mx[2]!.trim()
+      }
+      const key = normKey(val)
+      if (!KEY_TOKEN.test(key) || NOT_KEYS.has(key)) continue
+      if (!STRONG_KEY.test(key) && !BINDISH_FIELD(field)) continue
+      out.add(combo(mods, key))
+    }
+    return
+  }
+
   // config.lua / config.json → keybind assignments. Catches:
   //   Field = "F8"  |  Field = F8  |  Field = Key.NUM_FIVE  (dotted UE4SS ref)
   //   Field = { Key.G, ModifierKey.SHIFT }  (config table, e.g. Multi Party SummonAll)
   // A value written as `Key.X` is treated as a keybind REGARDLESS of the field name (catches
   // fields like `SummonAdditionalPal = Key.G`); otherwise the field name must look like a bind.
-  if (/config\.(lua|json)$/i.test(lower)) {
+  if (CONFIG_SCALAR_FILE.test(lower)) {
+    // Some mods express modifiers as sibling booleans rather than inline: e.g. Pal Insight's
+    // `settingsKey = "F6"` + `settingsAlt = true` (= Alt+F6). Map each shared prefix → its
+    // enabled modifiers so `<prefix>Key` emits the combined chord, not the bare key.
+    const modFlags = new Map<string, string[]>()
+    for (const ln of lines) {
+      const mf = /\b([A-Za-z0-9_]*?)(Shift|Ctrl|Control|Alt)\s*[:=]\s*true\b/.exec(ln)
+      if (mf) {
+        const pre = mf[1]!.toLowerCase()
+        const mod = mf[2]!.toUpperCase() === 'CTRL' ? 'CONTROL' : mf[2]!.toUpperCase()
+        modFlags.set(pre, [...(modFlags.get(pre) ?? []), mod])
+      }
+    }
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i]!
       const c = line.indexOf('--') // strip trailing Lua comment
@@ -135,17 +196,30 @@ function extractFromText(name: string, text: string, out: Set<string>, disabled:
         }
         continue
       }
-      // Scalar form: Field = value  (value may carry a `Key.` prefix).
-      const mm = /([A-Za-z0-9_]+)\s*[:=]\s*"?((?:Key\.)?[A-Za-z0-9_]+)"?/.exec(line)
+      // Scalar form: Field = value. Value may carry a `Key.` prefix and/or an inline modifier
+      // prefix ("Shift+F8" / "Ctrl+F1"), so `+` is allowed in the captured value.
+      const mm = /([A-Za-z0-9_]+)\s*[:=]\s*"?((?:Key\.)?[A-Za-z0-9_+]+)"?/.exec(line)
       if (!mm) continue
       const field = mm[1]!.toLowerCase()
-      const val = mm[2]!
+      let val = mm[2]!
       const isKeyRef = /^Key\./i.test(val)
-      if (!isKeyRef && !/key|hotkey|bind/.test(field) && !/^toggle/.test(field)) continue
+      // Peel inline modifier prefixes off the value (Shift+ / Ctrl+ / Alt+).
+      const inlineMods: string[] = []
+      for (;;) {
+        const mx = /^(ctrl|control|shift|alt)\s*\+\s*(.+)$/i.exec(val)
+        if (!mx) break
+        inlineMods.push(mx[1]!.toUpperCase() === 'CTRL' ? 'CONTROL' : mx[1]!.toUpperCase())
+        val = mx[2]!.trim()
+      }
       const key = normKey(val)
       if (!KEY_TOKEN.test(key) || NOT_KEYS.has(key)) continue
+      // Value must be unambiguous (Key.X ref or a strong token) OR the field must denote a bind
+      // — so ambiguous single-letter/number-word data doesn't get miscounted.
+      if (!isKeyRef && !STRONG_KEY.test(key) && !BINDISH_FIELD(field)) continue
       if (gatedByDisabledFlag(lines, i, disabled)) continue
-      out.add(combo([], key))
+      // Combine sibling-boolean modifiers (settingsKey + settingsAlt) with inline-prefix ones.
+      const pre = field.endsWith('key') ? field.slice(0, -3) : field
+      out.add(combo([...(modFlags.get(pre) ?? []), ...inlineMods], key))
     }
   }
 }
@@ -163,7 +237,7 @@ async function filesFromPayloadZip(zipPath: string, skip: (p: string) => boolean
   for (const e of zip.getEntries()) {
     if (e.isDirectory) continue
     const n = e.entryName.replace(/\\/g, '/')
-    if (!/(\.lua|\.modconfig\.json|config\.json)$/i.test(n)) continue
+    if (!SCANNABLE_FILE.test(n)) continue
     if (skip(n)) continue // a config-override replaces this file — scan the override instead
     try {
       out.push({ name: n, text: e.getData().toString('utf8') })
@@ -185,7 +259,7 @@ async function filesFromContentDir(dir: string, base: string, skip: (p: string) 
   for (const e of entries) {
     const p = join(dir, e.name)
     if (e.isDirectory()) out.push(...(await filesFromContentDir(p, base, skip)))
-    else if (/(\.lua|\.modconfig\.json|config\.json)$/i.test(e.name)) {
+    else if (SCANNABLE_FILE.test(e.name)) {
       if (skip(p.slice(base.length + 1).replace(/\\/g, '/'))) continue
       try {
         out.push({ name: e.name, text: await readFile(p, 'utf8') })
@@ -214,7 +288,7 @@ async function combosForMod(m: ClientMod): Promise<Set<string>> {
   else if (m.payload === 'content') files.push(...(await filesFromContentDir(join(store, 'content'), join(store, 'content'), skip)))
   else return out
   for (const o of overrides) {
-    if (!/(\.lua|\.modconfig\.json|config\.json)$/i.test(o.relWithin)) continue
+    if (!SCANNABLE_FILE.test(o.relWithin)) continue
     try {
       files.push({ name: o.relWithin, text: await readFile(o.absPath, 'utf8') })
     } catch {
@@ -290,4 +364,22 @@ export async function scanClientKeybinds(): Promise<KeybindScan> {
   const scan: KeybindScan = { conflicts, perMod, scannedAt: Date.now() }
   cache = { sig, scan }
   return scan
+}
+
+// Per-mod keybind listing for the generated friend cheat-sheet (keybinds.txt). Unlike
+// scanClientKeybinds (which only reports keys bound by 2+ mods), this returns EVERY kept client
+// mod that binds at least one key, with its detected combos — so the cheat-sheet is accurate for
+// whatever mods an operator actually ships, with no hardcoded mod list. Override-aware (reflects
+// loadout config-overrides) and includes ReShade preset/overlay keys.
+export async function scanPerModKeybinds(): Promise<{ name: string; combos: string[] }[]> {
+  const kept = (await listClientMods()).filter((m) => m.keep)
+  const rows: { name: string; combos: string[] }[] = []
+  for (const m of kept) {
+    const combos = await combosForMod(m)
+    if (combos.size) rows.push({ name: m.name, combos: [...combos].sort() })
+  }
+  for (const s of await reshadeKeybindSources().catch(() => [])) {
+    if (s.combos.size) rows.push({ name: s.name, combos: [...s.combos].sort() })
+  }
+  return rows.sort((a, b) => a.name.localeCompare(b.name))
 }

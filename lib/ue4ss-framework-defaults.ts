@@ -24,7 +24,7 @@ const PALDEFENDER_BUILTIN_DESCRIPTION =
   "PalDefender's anti-cheat / admin protections (standalone d3d9 mod, not UE4SS). Toggle here; " +
   'configure it in the PalDefender tab. Disabling removes its protections after the next restart.'
 
-export type ModKind = 'ue4ss' | 'pak' | 'paldefender'
+export type ModKind = 'ue4ss' | 'pak' | 'paldefender' | 'palschema'
 
 export function isFrameworkDefault(kind: ModKind, name: string): boolean {
   if (kind === 'paldefender') return true

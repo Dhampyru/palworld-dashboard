@@ -166,7 +166,7 @@ function ParamField({
             id={`rcon-param-${param.key}`}
             value={value}
             onChange={(event) => onChange(event.target.value)}
-            className="h-9 rounded-md border border-input bg-transparent px-3 py-1 font-mono text-sm shadow-xs focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+            className="h-9 rounded-md border border-input bg-background px-3 py-1 font-mono text-sm text-foreground shadow-xs [&>option]:bg-background [&>option]:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
           >
             <option value="">Select…</option>
             {(param.options ?? []).map((option) => (

@@ -125,7 +125,7 @@ export function PalKitsCard() {
         <select
           value={target}
           onChange={(e) => setTarget(e.target.value)}
-          className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground [&>option]:bg-background [&>option]:text-foreground"
           aria-label="Target player"
         >
           {players.length === 0 && <option value="">No players online</option>}

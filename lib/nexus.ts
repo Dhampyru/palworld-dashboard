@@ -298,6 +298,14 @@ async function writeAssocs(a: Assocs): Promise<void> {
   await rename(tmp, MODS_FILE)
 }
 
+// Bulk map of modKey -> Nexus modId, for callers that need every association at once
+// (e.g. category enrichment). Empty on any error.
+export async function readNexusAssocIds(): Promise<Record<string, number>> {
+  const out: Record<string, number> = {}
+  for (const [k, v] of Object.entries(await readAssocs())) if (v?.modId) out[k] = v.modId
+  return out
+}
+
 // Drop a server mod's Nexus tracking row — called on delete so a removed mod leaves no
 // phantom "update available" entry (the leftover that motivated this).
 export async function removeNexusAssoc(modKey: string): Promise<void> {

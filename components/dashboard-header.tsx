@@ -18,6 +18,7 @@ import { copyToClipboard } from '@/lib/clipboard'
 import { PanelSettingsDialog } from '@/components/panel-settings-dialog'
 import { ServerActionCluster } from '@/components/server-action-cluster'
 import { GameUpdatePill } from '@/components/game-update-pill'
+import { ModUpdatePill } from '@/components/mod-update-pill'
 
 type DashboardTab = 'dashboard' | 'map' | 'mods' | 'world' | 'guilds' | 'engine' | 'paldefender' | 'saves' | 'invite'
 
@@ -103,6 +104,8 @@ export function DashboardHeader({ activeTab = 'dashboard', onTabChange, onPlayer
               {/* Dashboard-wide game-update alert (renders on every tab; shows only when an
                   update is available). */}
               <GameUpdatePill />
+              {/* Same, for server/client MOD updates — visible regardless of the selected tab. */}
+              <ModUpdatePill />
               </div>
 
               {/* Row 1 right: icon-only Docs / Theme / Settings, a separator, then

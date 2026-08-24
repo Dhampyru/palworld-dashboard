@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { readdir, readFile, writeFile, rename, rm } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { classifyPassword, tierForClass } from '@/lib/access-tier'
 import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
@@ -9,13 +9,13 @@ import { runWithInstance } from '@/lib/instances'
 import {
   pakModsDir,
   resolveUe4ssModsDir,
-  serializeModsTxt,
   readModsTxt,
   readPalDefenderState,
-  setPalDefenderEnabled,
   readModGroups,
   readSteamMods,
   removeServerMod,
+  readModDisableTimes,
+  setServerModEnabled,
 } from '@/lib/game-mods'
 import { modHasEditableConfig } from '@/lib/mod-config'
 import { removeClientModsBySource } from '@/lib/client-mods'
@@ -46,6 +46,19 @@ interface ModEntry {
   name: string
   enabled: boolean
   hasConfig?: boolean // ue4ss: has an editable config file (drives the Config button)
+  addedAt?: number // epoch ms — filesystem install date, for the Mods-list sort
+}
+
+// "Install date" for the mod list's sort/filter. birthtime is the true creation
+// time and survives the game entrypoint's restart chown (which resets ctime);
+// fall back to mtime if the filesystem doesn't report a birthtime.
+async function fsAddedAt(path: string): Promise<number | undefined> {
+  try {
+    const s = await stat(path)
+    return s.birthtimeMs && s.birthtimeMs > 0 ? Math.round(s.birthtimeMs) : Math.round(s.mtimeMs)
+  } catch {
+    return undefined
+  }
 }
 
 // PalDefender as a built-in mod row: only when it's actually installed. Toggled
@@ -85,6 +98,7 @@ async function listUe4ssMods(): Promise<ModEntry[]> {
       name,
       enabled: active.get(name) ?? true, // present on disk, no explicit "0" → UE4SS treats as enabled
       hasConfig: await modHasEditableConfig(name),
+      addedAt: await fsAddedAt(join(modsDir, name)),
     })),
   )
 }
@@ -97,18 +111,21 @@ async function listPakMods(): Promise<ModEntry[]> {
     return [] // ~mods folder doesn't exist — no pak mods installed via this convention
   }
 
-  return dirents
-    .filter((d) => d.isFile() && (d.name.endsWith('.pak') || d.name.endsWith('.pak.disabled')))
-    .map((d) => {
-      const disabled = d.name.endsWith('.pak.disabled')
-      const name = disabled ? d.name.slice(0, -'.disabled'.length) : d.name
-      return {
-        id: `pak:${name}`,
-        kind: 'pak' as const,
-        name,
-        enabled: !disabled,
-      }
-    })
+  return Promise.all(
+    dirents
+      .filter((d) => d.isFile() && (d.name.endsWith('.pak') || d.name.endsWith('.pak.disabled')))
+      .map(async (d) => {
+        const disabled = d.name.endsWith('.pak.disabled')
+        const name = disabled ? d.name.slice(0, -'.disabled'.length) : d.name
+        return {
+          id: `pak:${name}`,
+          kind: 'pak' as const,
+          name,
+          enabled: !disabled,
+          addedAt: await fsAddedAt(join(pakModsDir(), d.name)),
+        }
+      }),
+  )
 }
 
 function presentedPassword(request: NextRequest) {
@@ -141,13 +158,18 @@ async function _GET(request: NextRequest) {
   }
 
   try {
-    const [ue4ss, pak, paldefender] = await Promise.all([
+    const [ue4ss, pak, paldefender, disableTimes] = await Promise.all([
       listUe4ssMods(),
       listPakMods(),
       listPalDefender(),
+      readModDisableTimes(),
     ])
+    // Attach a disable timestamp to currently-disabled mods so the panel can group + age them.
+    const mods = [...paldefender, ...ue4ss, ...pak].map((m) =>
+      m.enabled ? m : { ...m, disabledAt: disableTimes[m.id] },
+    )
     return NextResponse.json({
-      mods: [...paldefender, ...ue4ss, ...pak],
+      mods,
       groups: await readModGroups(),
       steamLinks: await readSteamMods(),
     })
@@ -198,27 +220,11 @@ async function _POST(request: NextRequest) {
     return NextResponse.json({ success: true, id, enabled, dryRun: true })
   }
 
+  // Shared with the mod-profiles restore path (lib/game-mods.setServerModEnabled): it does the
+  // mods.txt / enabled.txt / pak-marker / PalDefender work AND timestamps the disable (or clears
+  // it on re-enable) for the panel's disabled-block grouping.
   try {
-    if (kind === 'ue4ss') {
-      const modsDir = await resolveUe4ssModsDir()
-      if (!modsDir) throw new Error('UE4SS Mods directory not found')
-      const modsTxtPath = join(modsDir, 'mods.txt')
-      const active = await readModsTxt(modsDir)
-      active.set(name, enabled)
-      const tmp = `${modsTxtPath}.tmp`
-      await writeFile(tmp, serializeModsTxt(active), 'utf8')
-      await rename(tmp, modsTxtPath) // atomic swap — never leaves mods.txt half-written
-    } else if (kind === 'paldefender') {
-      await setPalDefenderEnabled(enabled) // edits the d3d9 loader's load_dlls
-    } else {
-      const activePath = join(pakModsDir(), name)
-      const disabledPath = `${activePath}.disabled`
-      if (enabled) {
-        await rename(disabledPath, activePath)
-      } else {
-        await rename(activePath, disabledPath)
-      }
-    }
+    await setServerModEnabled(id, enabled)
   } catch (error) {
     return NextResponse.json(
       { error: `Failed to toggle mod: ${error instanceof Error ? error.message : 'unknown error'}` },

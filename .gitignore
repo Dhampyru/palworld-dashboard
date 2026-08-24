@@ -75,3 +75,4 @@ data/reshade/
 # Client UE4SS crash logs / dumps dropped in for diagnosis (never commit)
 UE4SS-Logs_Client/
 UECC-Windows-*/
+.gh-token

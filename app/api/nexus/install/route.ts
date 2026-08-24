@@ -139,7 +139,16 @@ async function installModFile(
   if (kind === 'palschema') {
     const r = await installPalSchemaSubmod(buffer, replace, nameHint)
     installedName = r.name
-    if (r.pakFiles.length) assocKey = `pak:${r.pakFiles[0]}` // the client-facing row
+    if (r.pakFiles.length) {
+      // Combined PalSchema + pak: the pak is the client-facing, update-watched row; the
+      // PalSchema submod links to the SAME modId and nests under it, so they group by source
+      // id (robust to name drift) — not just by the panel's fuzzy name-match.
+      assocKey = `pak:${r.pakFiles[0]}`
+      await linkNexusMod(`palschema:${r.name}`, modId, version, variant)
+      await setModGroup(assocKey, [`palschema:${r.name}`])
+    } else {
+      assocKey = `palschema:${r.name}` // pure PalSchema mod — it IS the row
+    }
   } else if (kind === 'pak') {
     const paks = await installPakArchive(buffer) // paks overwrite by filename already
     installedName = paks.join(', ')
@@ -148,10 +157,11 @@ async function installModFile(
     const r = await installUe4ssModArchive(buffer, nameHint, replace)
     installedName = r.name
     assocKey = `ue4ss:${r.name}` // the UE4SS mod row (its pak, if any, split to ~mods)
-    // Hybrid: nest the split-out pak(s) under the UE4SS mod in the list.
-    if (r.pakFiles.length) await setModGroup(assocKey, r.pakFiles.map((p) => `pak:${p}`))
-    // A combined Lua + PalSchema mod's PalSchema companion (real data OR a
-    // runtime-write placeholder) is now extracted by installUe4ssModArchive itself.
+    // Hybrid: nest the split-out pak(s) AND the PalSchema companion(s) under the UE4SS mod,
+    // and link those companions to the SAME modId so they group + categorise by source id.
+    const children = [...r.pakFiles.map((p) => `pak:${p}`), ...r.palschemaNames.map((n) => `palschema:${n}`)]
+    if (children.length) await setModGroup(assocKey, children)
+    for (const n of r.palschemaNames) await linkNexusMod(`palschema:${n}`, modId, version, variant)
   }
 
   // Link it for update-watching (baseline = the installed version; variant scopes updates).

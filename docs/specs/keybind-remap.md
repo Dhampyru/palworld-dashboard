@@ -5,6 +5,16 @@ Status: **BUILT + verified (2026-08-15).** Detector shipped 2026-08-14
 live on this box: **8 conflicts → 0**, verified in the generated loadout bundle
 (`configOverrides: 7`, `skipped: []`) and via the override-aware detector.
 
+**Update 2026-08-24 — F6 resolution (current).** Pal Insight's settings menu is on **Alt+F6**
+(`data/client-mods/pal-insight---inspect-pals-and-search-palbox/config-override/config.lua` with
+`settingsAlt = true`), leaving **Hotkey Consumables (Nexus 4508)** on F6 for its consumables
+hotbar. This override was dropped while isolating the Pal Insight client stutter — which turned
+out to be an unrelated loader bug (the bundle shipping `BPModLoaderMod : 0`, since fixed) — and
+was **re-applied**; verified in the shipped bundle (`settingsAlt = true`), scanner at 0 conflicts.
+This supersedes the older GuildSight/`O` mapping in the table below (GuildSight now lives on F11).
+One F6 overlap stays OUT of scope: **True First Person** binds F6 in Palworld's *native* Key Config
+— invisible to the scanner and unfixable via the loadout; rebind it in-game (Options → Key Config).
+
 ## Why
 
 Every client mod's keybinds fire on the **player's** machine — the dedicated

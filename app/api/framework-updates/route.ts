@@ -4,7 +4,7 @@ import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { DEMO_MODE } from '@/lib/demo-mode'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { runWithInstance } from '@/lib/instances'
-import { checkFrameworkUpdates } from '@/lib/framework-updates'
+import { checkFrameworkUpdates, markUe4ssUpdateInstalled } from '@/lib/framework-updates'
 import { listUe4ssBackups } from '@/lib/game-mods'
 import {
   listPalSchemaLoaderBackups,
@@ -71,6 +71,12 @@ export async function POST(request: NextRequest) {
           if (!body.file) return NextResponse.json({ error: 'file required' }, { status: 400 })
           const r = await rollbackPalSchemaLoader(body.file)
           return NextResponse.json({ ...r, note: `Rolled PalSchema back to ${r.version ?? 'the backup'} — restart the server.` })
+        }
+        // Re-baseline the UE4SS Workshop-update check to "now" — clears the update flag after
+        // the operator has updated the UE4SS build (or to dismiss a flagged update).
+        case 'markUe4ssInstalled': {
+          const r = await markUe4ssUpdateInstalled()
+          return NextResponse.json({ ...r, note: 'Marked the current UE4SS build as up to date.' })
         }
         default:
           return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

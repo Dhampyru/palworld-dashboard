@@ -884,7 +884,12 @@ export async function installPakArchive(buffer: Buffer): Promise<string[]> {
     name = name.replace(/[^A-Za-z0-9_.-]/g, '_')
     const dest = join(pakModsDir(), name)
     if (dest !== pakModsDir() && !dest.startsWith(pakModsDir() + sep)) continue
-    await writeFile(dest, e.getData())
+    // Preserve a disabled pak's state on (re)install: if a <name>.disabled marker exists this
+    // mod is currently OFF, so land the update as .disabled too — otherwise updating a disabled
+    // mod silently re-enables it (and leaves a stale duplicate).
+    const disabledDest = `${dest}.disabled`
+    const wasDisabled = await stat(disabledDest).then(() => true).catch(() => false)
+    await writeFile(wasDisabled ? disabledDest : dest, e.getData())
     out.push(name)
   }
   if (!out.length) throw new Error('No pak files found in the archive')
@@ -919,7 +924,7 @@ export async function installUe4ssModArchive(
   buffer: Buffer,
   nameHint?: string,
   replace = false, // update path: overwrite an existing mod folder in place instead of refusing
-): Promise<{ name: string; pakFiles: string[] }> {
+): Promise<{ name: string; pakFiles: string[]; palschemaNames: string[] }> {
   const modsDir = await resolveUe4ssModsDir()
   if (!modsDir) throw new Error('UE4SS Mods directory not found')
   const zip = new AdmZip(buffer)
@@ -938,7 +943,9 @@ export async function installUe4ssModArchive(
       if (!/^[A-Za-z0-9_.-]+\.(pak|utoc|ucas)$/i.test(nm)) continue
       const dest = join(pakModsDir(), nm)
       if (dest !== pakModsDir() && !dest.startsWith(pakModsDir() + sep)) continue
-      await writeFile(dest, e.getData())
+      // Preserve a disabled bundled pak's state on update (see installPakArchive).
+      const wasDisabled = await stat(`${dest}.disabled`).then(() => true).catch(() => false)
+      await writeFile(wasDisabled ? `${dest}.disabled` : dest, e.getData())
       pakFiles.push(nm)
     }
   }
@@ -955,6 +962,10 @@ export async function installUe4ssModArchive(
   const psEntries = nonPak
     .map((e) => ({ e, m: norm(e.entryName).match(psAnchor) }))
     .filter((x): x is { e: AdmZip.IZipEntry; m: RegExpMatchArray } => x.m !== null)
+  // Names of PalSchema submods installed as this mod's companion — returned so the caller can
+  // link them to the SAME source id (Nexus modId / Steam itemId) as the pak/Lua half, so a
+  // combined mod groups by id (robust to name drift), not just by the panel's name-match.
+  const psNames = new Set<string>()
   if (psEntries.length) {
     const psModsDir = join(modsDir, 'PalSchema', 'mods')
     const psPresent = await stat(join(modsDir, 'PalSchema')).then(() => true).catch(() => false)
@@ -967,6 +978,7 @@ export async function installUe4ssModArchive(
         if (dest !== modRoot && !dest.startsWith(modRoot + sep)) continue // path escape
         await mkdir(dirname(dest), { recursive: true })
         await writeFile(dest, e.getData())
+        psNames.add(name)
       }
     }
   }
@@ -1081,7 +1093,7 @@ export async function installUe4ssModArchive(
     } else if (nameHint) {
       mods.set(nameHint, nonPak.map((e) => ({ rel: eff(e), entry: e })).filter((x) => x.rel))
     } else if (pakFiles.length) {
-      return { name: pakFiles[0], pakFiles } // pak-only after all
+      return { name: pakFiles[0], pakFiles, palschemaNames: [...psNames] } // pak-only after all
     } else {
       throw new Error(
         'No UE4SS mod folder found in the archive. Expected a Mods/<name>/ or <name>/Scripts/ layout — if this is a bare mod (Scripts/main.lua at the root), install it via manual upload so it can be named.',
@@ -1132,13 +1144,15 @@ export async function installUe4ssModArchive(
     }
     const modsTxtPath = join(modsDir, 'mods.txt')
     const active = await readModsTxt(modsDir)
-    active.set(name, true)
+    // Preserve an existing enabled/disabled choice on re-install/update; only default a
+    // brand-new mod to enabled. (Updating a DISABLED mod must not silently re-enable it.)
+    if (!active.has(name)) active.set(name, true)
     const tmp = `${modsTxtPath}.tmp`
     await writeFile(tmp, serializeModsTxt(active), 'utf8')
     await rename(tmp, modsTxtPath)
     names.push(name)
   }
-  return { name: names.join(', '), pakFiles }
+  return { name: names.join(', '), pakFiles, palschemaNames: [...psNames] }
 }
 
 // ── Mod grouping (hybrid mods) ──────────────────────────────────────────────
@@ -1146,6 +1160,133 @@ export async function installUe4ssModArchive(
 // the UE4SS/Lua mod AND its pak. Record that relationship so the UI can nest the
 // pak(s) under the parent mod instead of showing them as separate top-level rows.
 // Keyed by the same modKey the list uses ("ue4ss:<name>" / "pak:<file>").
+// Per-mod disable timestamps (id -> epoch ms), so the panel can group disabled mods and show
+// "disabled N ago" like the client loadout. Only currently-disabled mods have an entry; it's
+// set when a mod is toggled off and cleared when it's toggled back on.
+const disableTimesFile = () => dataFile('mod-disable-times', process.env.MOD_DISABLE_TIMES_FILE)
+
+export async function readModDisableTimes(): Promise<Record<string, number>> {
+  try {
+    return JSON.parse(await readFile(disableTimesFile(), 'utf8')) as Record<string, number>
+  } catch {
+    return {}
+  }
+}
+
+export async function recordModDisableTime(id: string, enabled: boolean): Promise<void> {
+  const times = await readModDisableTimes()
+  if (enabled) {
+    if (!(id in times)) return // nothing to clear
+    delete times[id]
+  } else {
+    times[id] = Date.now()
+  }
+  await mkdir(dirname(disableTimesFile()), { recursive: true })
+  const tmp = `${disableTimesFile()}.tmp`
+  await writeFile(tmp, JSON.stringify(times, null, 2), 'utf8')
+  await rename(tmp, disableTimesFile())
+}
+
+// ── Shared server-mod on/off primitives ──────────────────────────────────────
+// Both the Mods-tab toggle (app/api/game-mods POST) and the mod-profiles restore
+// path (lib/mod-profiles.ts) drive a single mod's enabled state through these, so
+// the mods.txt / enabled.txt / pak-marker / PalDefender mechanics can't drift
+// between the two callers.
+
+export type ServerModState = { id: string; name: string; kind: 'ue4ss' | 'pak' | 'paldefender'; enabled: boolean }
+
+// Current on/off state of every server mod, keyed the same way the Mods list is
+// (`ue4ss:<folder>` / `pak:<file>` / `paldefender:PalDefender`). Lean: no config
+// discovery or install-date stat — just what a snapshot/restore needs.
+export async function readServerModStates(): Promise<ServerModState[]> {
+  const out: ServerModState[] = []
+
+  const modsDir = await resolveUe4ssModsDir()
+  if (modsDir) {
+    try {
+      const active = await readModsTxt(modsDir)
+      const dirents = await readdir(modsDir, { withFileTypes: true })
+      for (const d of dirents) {
+        if (!d.isDirectory()) continue
+        const name = d.name
+        if (name.toLowerCase() === 'shared' || name.toLowerCase() === 'palschema') continue
+        out.push({ id: `ue4ss:${name}`, name, kind: 'ue4ss', enabled: active.get(name) ?? true })
+      }
+    } catch {
+      /* no Mods dir — nothing to add */
+    }
+  }
+
+  try {
+    const dirents = await readdir(pakModsDir(), { withFileTypes: true })
+    for (const d of dirents) {
+      if (!d.isFile()) continue
+      if (!d.name.endsWith('.pak') && !d.name.endsWith('.pak.disabled')) continue
+      const disabled = d.name.endsWith('.pak.disabled')
+      const name = disabled ? d.name.slice(0, -'.disabled'.length) : d.name
+      out.push({ id: `pak:${name}`, name, kind: 'pak', enabled: !disabled })
+    }
+  } catch {
+    /* no ~mods dir — no pak mods */
+  }
+
+  const pd = await readPalDefenderState()
+  if (pd.installed) out.push({ id: 'paldefender:PalDefender', name: 'PalDefender', kind: 'paldefender', enabled: pd.enabled })
+
+  return out
+}
+
+// Apply a single server mod's enabled state. IDEMPOTENT (a no-op when already in
+// the target state) and tolerant of a missing mod, so restoring a whole profile —
+// where most mods are already correct — never throws on the ones that don't move.
+// Returns false when the mod isn't installed (so restore can report it), true otherwise.
+export async function setServerModEnabled(id: string, enabled: boolean): Promise<boolean> {
+  const [kind, ...rest] = id.split(':')
+  const name = rest.join(':')
+  if (!name) throw new Error('Invalid mod id')
+
+  if (kind === 'ue4ss') {
+    const modsDir = await resolveUe4ssModsDir()
+    if (!modsDir) throw new Error('UE4SS Mods directory not found')
+    // Missing mod folder → not installed; don't create a phantom mods.txt line.
+    if (!(await stat(join(modsDir, name)).then(() => true).catch(() => false))) return false
+    const modsTxtPath = join(modsDir, 'mods.txt')
+    const active = await readModsTxt(modsDir)
+    active.set(name, enabled)
+    const tmp = `${modsTxtPath}.tmp`
+    await writeFile(tmp, serializeModsTxt(active), 'utf8')
+    await rename(tmp, modsTxtPath) // atomic swap — never leaves mods.txt half-written
+    // UE4SS lets a mod's own enabled.txt OVERRIDE mods.txt, so park/restore it in step.
+    const enabledTxt = join(modsDir, name, 'enabled.txt')
+    const parkedTxt = `${enabledTxt}.disabled`
+    try {
+      if (enabled) {
+        if (await stat(parkedTxt).then(() => true).catch(() => false)) await rename(parkedTxt, enabledTxt)
+      } else {
+        if (await stat(enabledTxt).then(() => true).catch(() => false)) await rename(enabledTxt, parkedTxt)
+      }
+    } catch {
+      /* enabled.txt handling is best-effort */
+    }
+  } else if (kind === 'paldefender') {
+    await setPalDefenderEnabled(enabled) // edits the d3d9 loader's load_dlls (idempotent write)
+  } else if (kind === 'pak') {
+    const activePath = join(pakModsDir(), name)
+    const disabledPath = `${activePath}.disabled`
+    const activeExists = await stat(activePath).then(() => true).catch(() => false)
+    const disabledExists = await stat(disabledPath).then(() => true).catch(() => false)
+    if (!activeExists && !disabledExists) return false // pak not installed
+    if (enabled && !activeExists && disabledExists) await rename(disabledPath, activePath)
+    else if (!enabled && activeExists) await rename(activePath, disabledPath)
+    // else: already in the desired state — no-op
+  } else {
+    throw new Error('Invalid mod id')
+  }
+
+  await recordModDisableTime(id, enabled).catch(() => {})
+  return true
+}
+
 const modGroupsFile = () => dataFile('mod-groups', process.env.MOD_GROUPS_FILE)
 
 export async function readModGroups(): Promise<Record<string, string[]>> {
