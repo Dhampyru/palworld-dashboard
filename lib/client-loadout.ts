@@ -40,8 +40,8 @@ const execFileP = promisify(execFile)
 // inside UE4SS.dll during boot on that game build (server crash-loop, clients crashing to the
 // main menu). It NO LONGER crashes on the current build (re-enabled on the live server
 // 2026-08-22), so it is RE-ENABLED here 2026-08-24. Disabling it was NOT free after all: with
-// it off, Blueprint/LogicMods paks never load, so any mod shipping a LogicMod (e.g. Pal
-// Insight's PalInsightX.pak) half-loaded — its Lua thrashed reaching for the missing Blueprint
+// it off, Blueprint/LogicMods paks never load, so any mod that ships a LogicMod pak
+// half-loaded — its Lua thrashed reaching for the missing Blueprint
 // every frame → severe client stutter. Confirmed by toggling BPModLoaderMod in a clean manual
 // install (on=smooth, off=stutter). If a future build regresses the boot crash, revert to `:0`.
 const ENABLED_FRAMEWORK = new Set(['BPModLoaderMod', 'BPML_GenericFunctions', 'Keybinds', 'ConsoleEnablerMod'])
@@ -405,8 +405,8 @@ async function includePalSchemaFramework(modsDir: string): Promise<boolean> {
 }
 
 // A Steam Workshop client mod can carry PalSchema data as a `./PalSchema/` wrapper whose
-// CONTENTS are the submod (blueprints/, buildings/, resources/, …) — cf. Glider Restoration,
-// Palvolve. Flatten that wrapper into PalSchema/mods/<PackageName>/. Returns the folder name
+// CONTENTS are the submod (blueprints/, buildings/, resources/, …) — as some combined
+// Lua+data mods ship. Flatten that wrapper into PalSchema/mods/<PackageName>/. Returns the folder name
 // placed, or null if there's no PalSchema wrapper. Deduped by name via `seen`.
 async function collectSteamPalSchema(
   contentDir: string,
@@ -1154,7 +1154,7 @@ export async function buildClientLoadout(opts?: { includeUe4ss?: boolean }): Pro
           // Steam Workshop item — place by its Info.json InstallRule.
           const where = await placeWorkshop(join(store, 'content'), m.name, { modsDir, pakDir, logicDir }, luaMods, seenPaks, uniqueMod, producedForMod)
           placed.push(...where)
-          // …and its PalSchema data, if any (a ./PalSchema wrapper — e.g. Palvolve, Glider Restoration).
+          // …and its PalSchema data, if any (a ./PalSchema wrapper, as some combined mods ship).
           const psSteam = await collectSteamPalSchema(join(store, 'content'), m.name, palSchemaModsDir, seenPalSchema)
           if (psSteam) {
             placed.push('PalSchema/mods (1)')
