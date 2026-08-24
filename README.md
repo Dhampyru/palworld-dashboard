@@ -94,7 +94,7 @@ mock sample data.
 
 <table>
   <tr>
-    <td width="50%" valign="top"><a href="public/readme/mods-preview.jpg"><img src="public/readme/mods-preview.jpg" alt="Mods"></a><br><sub><b>Mods</b> — install/remove pak, UE4SS &amp; PalSchema mods</sub></td>
+    <td width="50%" valign="top"><a href="public/readme/mods-preview.jpg"><img src="public/readme/mods-preview.jpg" alt="Mods"></a><br><sub><b>Mods</b> — install pak, UE4SS &amp; PalSchema mods, with framework (UE4SS/PalSchema) update detection &amp; saved loadout profiles</sub></td>
     <td width="50%" valign="top"><a href="public/readme/world-settings-preview.jpg"><img src="public/readme/world-settings-preview.jpg" alt="World Settings"></a><br><sub><b>World Settings</b> — editor with performance presets</sub></td>
   </tr>
   <tr>
