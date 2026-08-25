@@ -14,16 +14,33 @@ import { reshadeKeybindSignature, reshadeKeybindSources } from '@/lib/reshade-ke
 // Mouse buttons are deliberately excluded — mods hook LMB/RMB contextually (their own UI),
 // which is not an actionable hotkey conflict and would just add noise.
 const KEY_TOKEN =
-  /^(F([1-9]|1[0-9]|2[0-4])|[A-Z]|ZERO|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|NUM(PAD)?_?[A-Z0-9]+|PAGE_UP|PAGE_DOWN|HOME|END|INSERT|DELETE|TAB|SPACE|ENTER|RETURN|TILDE|SEMICOLON|BACKSLASH|LEFT_BRACKET|RIGHT_BRACKET)$/
+  /^(F([1-9]|1[0-9]|2[0-4])|[A-Z]|ZERO|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|NUM(PAD)?_?(?:[0-9]+|ZERO|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|ADD|SUBTRACT|MULTIPLY|DIVIDE|DECIMAL|SEPARATOR|ENTER|LOCK|MINUS|PLUS|STAR|SLASH)|PAGE_UP|PAGE_DOWN|HOME|END|INSERT|DELETE|TAB|SPACE|ENTER|RETURN|TILDE|SEMICOLON|BACKSLASH|LEFT_BRACKET|RIGHT_BRACKET)$/
 
 const NOT_KEYS = new Set(['FALSE', 'TRUE', 'NIL', 'NONE', 'NULL', 'DISABLED', ''])
+
+// Top-row number keys reserved by Palworld's native action bar (1-8). A mod binding one collides
+// with the game's own slot selection — a "native" conflict the mod-vs-mod scan can't see on its own
+// (bit us via Toggle Mercy Ring's `HOTKEY = Key.FIVE`). Both the UE4SS word form (ONE..EIGHT) and
+// the digit form are covered; NUMPAD/NUM_* are intentionally NOT here (separate from the hotbar).
+const NATIVE_HOTBAR = new Set(['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', '1', '2', '3', '4', '5', '6', '7', '8'])
+
+// Mods that register a NATIVE Palworld Key-Config action rather than a UE4SS config the scanner can
+// read, so their key is invisible to config parsing. Surfaced separately (matched by name substring
+// — clean-room, no deployment mod-id list baked in) so the operator still knows they exist.
+const NATIVE_KEY_MODS: { match: RegExp; action: string; note: string }[] = [
+  {
+    match: /first[\s-]?person/i,
+    action: 'First Person',
+    note: 'native Key-Config action (default F6 unless the loadout unbinds it) — rebind in Palworld Options → Key Config',
+  },
+]
 
 // "Strong" key tokens are unambiguous keybind values (function keys, numpad, named keys) — a
 // literal F6 / NUM_FIVE in a config is virtually always a keybind, so we accept it regardless of
 // the field name. Single letters and number-WORDS (A, ONE) are ambiguous (could be data), so those
 // still require a bind-ish field name to count. Keeps .ini/config parsing high-signal.
 const STRONG_KEY =
-  /^(F([1-9]|1[0-9]|2[0-4])|NUM(PAD)?_?[A-Z0-9]+|PAGE_UP|PAGE_DOWN|HOME|END|INSERT|DELETE|TAB|SPACE|ENTER|RETURN|TILDE|SEMICOLON|BACKSLASH|LEFT_BRACKET|RIGHT_BRACKET)$/
+  /^(F([1-9]|1[0-9]|2[0-4])|NUM(PAD)?_?(?:[0-9]+|ZERO|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|ADD|SUBTRACT|MULTIPLY|DIVIDE|DECIMAL|SEPARATOR|ENTER|LOCK|MINUS|PLUS|STAR|SLASH)|PAGE_UP|PAGE_DOWN|HOME|END|INSERT|DELETE|TAB|SPACE|ENTER|RETURN|TILDE|SEMICOLON|BACKSLASH|LEFT_BRACKET|RIGHT_BRACKET)$/
 
 // Field name that clearly denotes a keybind (so an ambiguous value like a single letter counts).
 const BINDISH_FIELD = (field: string) => /key|hotkey|bind/.test(field) || /^toggle/.test(field)
@@ -31,8 +48,10 @@ const BINDISH_FIELD = (field: string) => /key|hotkey|bind/.test(field) || /^togg
 // The config files whose scalar `Field = Value` assignments we parse for keybinds. Previously only
 // literal `config.lua`/`config.json`; broadened to the common config filenames so a mod that keeps
 // its binds in settings.lua / keybinds.lua / options.json is covered too (but NOT main.lua, which
-// holds Key.* NAME TABLES that would be false positives).
-const CONFIG_SCALAR_FILE = /(?:^|\/)(config|settings|keybinds?|hotkeys?|options|controls?)\.(lua|json)$/i
+// holds Key.* NAME TABLES that would be false positives). The optional `[a-z0-9_]*` prefix also
+// matches prefixed names like `user_config.lua` (Toggle Mercy Ring kept `TC_HOTKEY = Key.G` there,
+// and the un-prefixed pattern silently missed it — a real 2026-08-25 conflict-detection gap).
+const CONFIG_SCALAR_FILE = /(?:^|\/)[a-z0-9_]*(config|settings|keybinds?|hotkeys?|options|controls?)\.(lua|json)$/i
 
 // Files worth reading for keybinds: any Lua (RegisterKeyBind), the config/menu JSONs, and .ini.
 const SCANNABLE_FILE = /(\.lua|\.modconfig\.json|config\.json|\.ini)$/i
@@ -45,6 +64,18 @@ function normKey(k: string): string {
 function combo(mods: string[], key: string): string {
   const m = [...new Set(mods.map((x) => x.toUpperCase()))].sort()
   return (m.length ? m.join('+') + '+' : '') + key
+}
+
+// Modifiers from a same-line `mods = { "SHIFT", "CONTROL" }` string-list table (distinct from the
+// `ModifierKey.X` form). For configs that pair the key with its modifiers in one table entry, e.g.
+// Medicine Hotkeys' `{ key = "G", mods = { "SHIFT" } }` — this makes it read Shift+G, not a phantom
+// plain G that false-conflicts with another mod's real G (a 2026-08-25 false positive).
+function extractModsTable(line: string): string[] {
+  const t = /\bmods?\s*=\s*\{([^}]*)\}/i.exec(line)
+  if (!t) return []
+  return [...t[1]!.matchAll(/["'](ctrl|control|shift|alt)["']/gi)].map((m) =>
+    m[1]!.toUpperCase() === 'CTRL' ? 'CONTROL' : m[1]!.toUpperCase(),
+  )
 }
 
 function walkModconfig(node: unknown, out: Set<string>): void {
@@ -184,6 +215,10 @@ function extractFromText(name: string, text: string, out: Set<string>, disabled:
       let line = lines[i]!
       const c = line.indexOf('--') // strip trailing Lua comment
       if (c >= 0) line = line.slice(0, c)
+      // Skip Lua CODE lines in a config.lua that's really a module, not pure data: a `local x = …`
+      // declaration or a string-concat (`..`) is code, not a keybind. Bit us via Pal Base Info's
+      // `local body = "return { … }"` → a phantom RETURN. Config data fields never start with `local`.
+      if (/^\s*local\b/.test(line) || /\.\./.test(line)) continue
       // Table form: … = { Key.X, ModifierKey.Y, … }
       const tbl = /[:=]\s*\{([^}]*\bKey\.[A-Za-z0-9_]+[^}]*)\}/.exec(line)
       if (tbl) {
@@ -217,9 +252,10 @@ function extractFromText(name: string, text: string, out: Set<string>, disabled:
       // — so ambiguous single-letter/number-word data doesn't get miscounted.
       if (!isKeyRef && !STRONG_KEY.test(key) && !BINDISH_FIELD(field)) continue
       if (gatedByDisabledFlag(lines, i, disabled)) continue
-      // Combine sibling-boolean modifiers (settingsKey + settingsAlt) with inline-prefix ones.
+      // Combine THREE modifier sources: sibling-boolean (settingsKey + settingsAlt), inline-prefix
+      // (Shift+F8), and a same-entry `mods = { "SHIFT" }` table (Medicine Hotkeys).
       const pre = field.endsWith('key') ? field.slice(0, -3) : field
-      out.add(combo([...(modFlags.get(pre) ?? []), ...inlineMods], key))
+      out.add(combo([...(modFlags.get(pre) ?? []), ...inlineMods, ...extractModsTable(line)], key))
     }
   }
 }
@@ -312,6 +348,9 @@ export type KeybindConflict = { combo: string; mods: string[] }
 export type KeybindScan = {
   conflicts: KeybindConflict[] // key combo → the (2+) kept mods that bind it
   perMod: Record<string, { combo: string; others: string[] }[]> // modId → its conflicting binds
+  perModAll: { name: string; combos: string[] }[] // full table: every kept mod that binds ≥1 key
+  hotbarCollisions: KeybindConflict[] // a mod binds a native action-bar number key (1-8)
+  nativeActions: { mod: string; action: string; note: string }[] // native Key-Config actions surfaced
   scannedAt: number
 }
 
@@ -361,7 +400,25 @@ export async function scanClientKeybinds(): Promise<KeybindScan> {
     }
   }
   conflicts.sort((a, b) => a.combo.localeCompare(b.combo))
-  const scan: KeybindScan = { conflicts, perMod, scannedAt: Date.now() }
+
+  // Full per-mod table (feeds the cheat-sheet / UI), native action-bar collisions, and the
+  // native-registered actions the config parser can't see.
+  const perModAll = modCombos
+    .filter((mc) => mc.combos.size)
+    .map((mc) => ({ name: mc.name, combos: [...mc.combos].sort() }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  const hotbarCollisions: KeybindConflict[] = []
+  for (const [c, ids] of byCombo) {
+    const bare = c.includes('+') ? c.slice(c.lastIndexOf('+') + 1) : c
+    if (NATIVE_HOTBAR.has(bare)) hotbarCollisions.push({ combo: c, mods: ids.map((i) => nameOf.get(i)!).sort() })
+  }
+  hotbarCollisions.sort((a, b) => a.combo.localeCompare(b.combo))
+  const nativeActions = kept.flatMap((m) => {
+    const hit = NATIVE_KEY_MODS.find((r) => r.match.test(m.name))
+    return hit ? [{ mod: m.name, action: hit.action, note: hit.note }] : []
+  })
+
+  const scan: KeybindScan = { conflicts, perMod, perModAll, hotbarCollisions, nativeActions, scannedAt: Date.now() }
   cache = { sig, scan }
   return scan
 }
