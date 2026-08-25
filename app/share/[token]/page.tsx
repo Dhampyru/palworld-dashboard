@@ -84,7 +84,9 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
             <li>Close Palworld.</li>
             <li>Download the bundle above and extract the whole .zip.</li>
             <li>
-              Double-click <span className="font-mono text-foreground">install.bat</span> and follow the prompt.
+              From the extracted folder, double-click{' '}
+              <span className="font-mono text-foreground">Palworld Mod Manager.bat</span> and choose{' '}
+              <span className="font-mono text-foreground">[1] Install / Update</span>.
               (Or copy the <span className="font-mono text-foreground">game</span>{' '}folder&apos;s contents into your
               Palworld install folder — see <span className="font-mono text-foreground">INSTALL.txt</span>.)
             </li>

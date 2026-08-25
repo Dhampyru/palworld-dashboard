@@ -155,7 +155,7 @@ export function ShareDownload({
           <p className="text-center text-[11px] text-muted-foreground">
             Chrome/Edge only, and <b>only works for custom installs outside protected system folders</b> — e.g. a
             Steam library at <code>D:\SteamLibrary</code> or <code>C:\Games</code>. It <b>won’t</b> work in the
-            default <code>C:\Program&nbsp;Files&nbsp;(x86)\Steam</code> location — use Download + install.bat there.
+            default <code>C:\Program&nbsp;Files&nbsp;(x86)\Steam</code> location — use Download + <b>Palworld Mod Manager.bat</b> there.
           </p>
         </div>
       )}

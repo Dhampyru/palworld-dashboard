@@ -1465,7 +1465,7 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
           </SheetHeader>
           <p className="text-xs text-muted-foreground">
             Add your own files into a folder inside this mod (e.g. a music track into <code>music/Caelid</code>). They
-            ship in the client loadout, so friends get them on their next install.bat. Max {formatBytes(filesMax)} per file.
+            ship in the client loadout, so friends get them on their next loadout install. Max {formatBytes(filesMax)} per file.
             Or use <b>Bulk archive</b> to upload one or more archives (<code>.zip .7z .rar .tar .gz</code>) mirroring the
             mod&apos;s folders (e.g. <code>music/Caelid/track.mp3</code>) — select all parts of a split archive at once and
             they upload one at a time (each under the ~100 MB cap); they extract into place and the archives aren&apos;t kept.
