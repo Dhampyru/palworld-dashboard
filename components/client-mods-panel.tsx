@@ -131,6 +131,14 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   const [remap, setRemap] = useState<RemapPlan | null>(null)
   const [remapBusy, setRemapBusy] = useState(false)
   const [remapOpen, setRemapOpen] = useState(false) // "what it changes" disclosure
+  // Phase-2 descriptor-driven auto-resolve: a dry-run plan (mandatory preview) then apply. Unlike
+  // the hand-authored remap above, this works for ANY mod set — it locates each bind and moves the
+  // more-flexible mod to a suggested free key. Shown only when conflicts remain.
+  type AutoMove = { modName: string; from: string; to: string; detail: string }
+  type AutoResolution = { combo: string; keep: string; moves: AutoMove[]; unresolved: string[] }
+  type AutoPlan = { resolutions: AutoResolution[]; moved: number; unresolved: { combo: string; reason: string }[] }
+  const [autoPlan, setAutoPlan] = useState<AutoPlan | null>(null)
+  const [autoBusy, setAutoBusy] = useState(false)
   const [url, setUrl] = useState('')
   const [bulk, setBulk] = useState('')
   const [bulkResults, setBulkResults] = useState<BulkResult[] | null>(null)
@@ -493,6 +501,37 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
         toast.error(e instanceof Error ? e.message : 'Remap failed')
       } finally {
         setRemapBusy(false)
+      }
+    },
+    [config, load],
+  )
+
+  // Phase-2 auto-resolve: preview (dry-run — never writes) then apply. Preview is mandatory so the
+  // operator sees which mod moves where before anything is written (docs/specs/keybind-manager.md §2).
+  const runAuto = useCallback(
+    async (action: 'autoResolvePlan' | 'autoResolveApply') => {
+      if (!config) return
+      setAutoBusy(true)
+      try {
+        const res = await fetch('/api/client-mods/keybinds', {
+          method: 'POST',
+          headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action }),
+        })
+        const json = (await res.json().catch(() => ({}))) as AutoPlan & { error?: string }
+        if (!res.ok) throw new Error(json.error ?? res.statusText)
+        if (action === 'autoResolvePlan') {
+          setAutoPlan(json)
+          if (!json.moved) toast.info('Nothing could be auto-resolved — see the notes')
+        } else {
+          setAutoPlan(null)
+          toast.success(json.moved ? `Auto-resolved ${json.moved} bind${json.moved === 1 ? '' : 's'} — regenerate the loadout to ship it` : 'Nothing to resolve')
+          await load()
+        }
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Auto-resolve failed')
+      } finally {
+        setAutoBusy(false)
       }
     },
     [config, load],
@@ -1063,6 +1102,77 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
                     </li>
                   ))}
                 </ul>
+              )}
+            </div>
+          )}
+
+          {/* Phase-2 smart auto-resolve — generic, works for any mod (not just the list above). Only
+              offered while conflicts remain; a dry-run preview is mandatory before applying. */}
+          {keybinds.conflicts.length > 0 && (
+            <div className="mt-3 border-t border-amber-500/25 pt-2.5">
+              {!autoPlan ? (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="min-w-0 text-muted-foreground">
+                    Smart auto-resolve reads every mod’s bind and moves the more-flexible one to a free key — covers
+                    conflicts the fixed list above can’t.
+                  </p>
+                  <button
+                    onClick={() => runAuto('autoResolvePlan')}
+                    disabled={autoBusy}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 font-medium hover:bg-muted disabled:opacity-50"
+                  >
+                    <WandSparklesIcon className={autoBusy ? 'size-3.5 animate-spin' : 'size-3.5'} />
+                    Preview auto-resolve
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <p className="mb-1.5 font-medium text-foreground">
+                    Auto-resolve plan — {autoPlan.moved} move{autoPlan.moved === 1 ? '' : 's'} (nothing written yet)
+                  </p>
+                  {autoPlan.resolutions.some((r) => r.moves.length) ? (
+                    <ul className="space-y-1 border-l-2 border-emerald-500/30 pl-3">
+                      {autoPlan.resolutions.flatMap((r) =>
+                        r.moves.map((m) => (
+                          <li key={`am-${r.combo}-${m.modName}-${m.to}`}>
+                            <span className="text-muted-foreground">{r.combo}:</span>{' '}
+                            <span className="font-medium text-foreground">{m.modName}</span>{' '}
+                            <span className="font-mono">{m.from} → {m.to}</span>{' '}
+                            <span className="text-muted-foreground">(keeps {r.keep})</span>
+                          </li>
+                        )),
+                      )}
+                    </ul>
+                  ) : (
+                    <p className="text-muted-foreground">No bind could be moved automatically.</p>
+                  )}
+                  {autoPlan.unresolved.length > 0 && (
+                    <ul className="mt-1.5 space-y-1 border-l-2 border-amber-500/40 pl-3 text-amber-600 dark:text-amber-400">
+                      {autoPlan.unresolved.map((u) => (
+                        <li key={`au-${u.combo}`}>
+                          <span className="font-mono">{u.combo}</span>: {u.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      onClick={() => runAuto('autoResolveApply')}
+                      disabled={autoBusy || !autoPlan.moved}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/50 bg-emerald-500/15 px-2 py-1 font-medium text-emerald-700 hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-300"
+                    >
+                      <WandSparklesIcon className={autoBusy ? 'size-3.5 animate-spin' : 'size-3.5'} />
+                      Apply {autoPlan.moved} move{autoPlan.moved === 1 ? '' : 's'}
+                    </button>
+                    <button
+                      onClick={() => setAutoPlan(null)}
+                      disabled={autoBusy}
+                      className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 hover:bg-muted disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           )}

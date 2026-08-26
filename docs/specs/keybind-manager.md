@@ -48,18 +48,58 @@ Fix the proven parser gaps and add awareness:
 - Output a **full per-mod keybind table** (combo → mods, with a confidence flag), not just the
   conflict list. New API `GET /api/client-mods/keybinds?full=1`.
 
-### 2. One-click remap, generalized (Phase 2)
-- A **keybind descriptor registry**: per mod (or per mod-family/format), where the key lives and how
-  to rewrite it — `{ file, field, format: scalar-lua | table-with-mods | register-keybind-payload |
-  native-default }`. Ships with descriptors for common mods; operator-extensible via a data file
-  (clean-room — no one deployment's list baked into code).
-- Reassign a key from the UI → the system writes the right **config-override / payload-edit** using
-  the descriptor (reusing today's override mechanism). **relWithin = path within the produced
-  `Mods/<folder>`**, not the payload path (a real 2026-08-25 mistake to bake into the writer).
-- **Free-key suggester** — propose a conflict-free key from the free pool, excluding native
-  hotbar/movement/action keys.
-- **Auto-resolve all** — plan overrides for every real conflict; show a dry-run diff before applying
-  (the earlier naive auto-planner produced wrong plans, so a hand-confirm dry-run is required).
+### 2. One-click remap, generalized (Phase 2) — **BUILT 2026-08-26**
+Descriptor-DRIVEN rather than a hand-authored per-mod table, so it works for ANY kept mod with no
+deployment-specific list in code (clean-room). Files:
+- `lib/keybind-descriptors.ts` — **the locator + rewrite engine.** `listModBindSlots(modId)` mirrors
+  the scanner's `extractFromText` branch-for-branch (reusing its exported primitives — `KEY_TOKEN`,
+  `combo()`, `normKey()`, `extractModsTable()`, `gatedByDisabledFlag`, `collectModScanFiles`, so a
+  slot's `combo` is byte-identical to the conflict combo the scanner reports) and records each bind's
+  SOURCE + FORMAT + a **capability matrix**:
+
+  | format | rebind key | change modifiers |
+  |---|---|---|
+  | `register-keybind-payload` | yes | yes (UE4SS parses `RegisterKeyBind(Key.X,{ModifierKey.Y},…)`) |
+  | `table-with-mods` | yes | yes (mod reads a `{Key.X,ModifierKey.Y}` / `mods={}` list) |
+  | `scalar-lua` sibling-bool | yes | yes (toggle the mod's own `…Alt=true` sibling flags) |
+  | `scalar-lua`/`ini` inline | yes | yes (value already carries `Shift+` → mod parses it) |
+  | `scalar-lua`/`ini` bare | yes | **no** (no evidence the mod parses a modifier here) |
+  | `modconfig-json` | no | no (surfaced only — rebind in the mod's in-game menu) |
+
+  `planSlotRewrite(slot,toKey,toMods)` reads the effective (override-aware) file and produces the
+  full edited content — **surgical**: it swaps ONLY the bare key token, preserving the existing
+  modifier-prefix TEXT and its casing (`ALT+` stays `ALT+`, not `Alt+` — a case-sensitive prefix
+  parser would break), quotes, `Key.` form, and inline comments; modifiers are rewritten only when
+  they actually change. `applyRewritePlan` writes it as a loadout config-override via
+  `lib/client-mod-config` (`.lua` saves are luaparse-validated → a syntax-breaking edit is refused).
+  **relWithin = the mod-root-relative path** (the produced `Mods/<folder>` path) — the content-dir
+  scanner now emits that, not just a basename. Template files (`*.example.ini`, `config.default.lua`)
+  are excluded from location (the mod never reads them).
+- `lib/keybind-autoremap.ts` — **suggester + auto-resolver.** `suggestFreeKey(used,slot)` proposes a
+  free binding best-first: if the slot can carry a modifier, first modify its OWN key (`Ctrl+F7` keeps
+  the mnemonic), else move to a free bare key from a pool that EXCLUDES the native hotbar
+  (1-8/ONE-EIGHT) and movement/action letters. `autoResolve(dryRun)` iterates the real conflicts,
+  keeps the hardest-to-move mod as anchor (a non-remappable or bare-only mod is kept; a modifiable mod
+  moves cheaply by gaining Ctrl/Alt), suggests a free target per moved mod, and reserves it so a later
+  conflict can't reuse it. Deterministic (re-derives the same plan at apply-time). `planSingleRemap`/
+  `applySingleRemap` back the per-key path.
+- Every applied move is tracked in the SHARED `keybind-remap.json` ledger (via the new
+  `recordOverridesInLedger` union writer), so the card's "Undo remap" (`clearRemap`) reverts
+  descriptor auto-resolves too.
+- API `app/api/client-mods/keybinds` POST actions: `binds` (full editable table), `suggest`,
+  `remapKeyPlan`/`remapKeyApply` (single), `autoResolvePlan`/`autoResolveApply`.
+- UI: a **Smart auto-resolve** block in the keybind-remap card (`components/client-mods-panel.tsx`),
+  shown while conflicts remain: **Preview auto-resolve** (mandatory dry-run — shows `combo: mod from →
+  to (keeps anchor)`) → **Apply N moves** / **Cancel**. Browser-verified 2026-08-26 (headless) against
+  a temporary induced conflict, fully reverted.
+- **Verified live** across all rewrite paths (payload modifier-add, ini bare-key change, scalar inline
+  key-only with casing preserved, scalar sibling-bool modifier-add + key-change, mods-table, bare-
+  scalar modifier correctly rejected) and the resolver on a real conflict — every test reverted with
+  the loadout + ledger byte-identical.
+
+**Still open (Phase 2 follow-up, not built):** a fully-manual per-key "Change to <key>" picker in the
+UI (backend `remapKeyPlan`/`remapKeyApply` + `suggest` already support it) — auto-resolve covers the
+common case; the manual picker is a nicety.
 
 ### 3. Keybind profiles + backup (Phase 3)
 - A named **keybind profile** = the current set of keybind overrides. Save / restore / rename /

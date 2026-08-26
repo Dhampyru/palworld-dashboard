@@ -13,16 +13,16 @@ import { reshadeKeybindSignature, reshadeKeybindSources } from '@/lib/reshade-ke
 // Recognized UE4SS Key.* tokens (function keys, letters, number-row words, numpad, named keys).
 // Mouse buttons are deliberately excluded — mods hook LMB/RMB contextually (their own UI),
 // which is not an actionable hotkey conflict and would just add noise.
-const KEY_TOKEN =
+export const KEY_TOKEN =
   /^(F([1-9]|1[0-9]|2[0-4])|[A-Z]|ZERO|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|NUM(PAD)?_?(?:[0-9]+|ZERO|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|ADD|SUBTRACT|MULTIPLY|DIVIDE|DECIMAL|SEPARATOR|ENTER|LOCK|MINUS|PLUS|STAR|SLASH)|PAGE_UP|PAGE_DOWN|HOME|END|INSERT|DELETE|TAB|SPACE|ENTER|RETURN|TILDE|SEMICOLON|BACKSLASH|LEFT_BRACKET|RIGHT_BRACKET)$/
 
-const NOT_KEYS = new Set(['FALSE', 'TRUE', 'NIL', 'NONE', 'NULL', 'DISABLED', ''])
+export const NOT_KEYS = new Set(['FALSE', 'TRUE', 'NIL', 'NONE', 'NULL', 'DISABLED', ''])
 
 // Top-row number keys reserved by Palworld's native action bar (1-8). A mod binding one collides
 // with the game's own slot selection — a "native" conflict the mod-vs-mod scan can't see on its own
 // (bit us via Toggle Mercy Ring's `HOTKEY = Key.FIVE`). Both the UE4SS word form (ONE..EIGHT) and
 // the digit form are covered; NUMPAD/NUM_* are intentionally NOT here (separate from the hotbar).
-const NATIVE_HOTBAR = new Set(['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', '1', '2', '3', '4', '5', '6', '7', '8'])
+export const NATIVE_HOTBAR = new Set(['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', '1', '2', '3', '4', '5', '6', '7', '8'])
 
 // Mods that register a NATIVE Palworld Key-Config action rather than a UE4SS config the scanner can
 // read, so their key is invisible to config parsing. Surfaced separately (matched by name substring
@@ -39,11 +39,11 @@ const NATIVE_KEY_MODS: { match: RegExp; action: string; note: string }[] = [
 // literal F6 / NUM_FIVE in a config is virtually always a keybind, so we accept it regardless of
 // the field name. Single letters and number-WORDS (A, ONE) are ambiguous (could be data), so those
 // still require a bind-ish field name to count. Keeps .ini/config parsing high-signal.
-const STRONG_KEY =
+export const STRONG_KEY =
   /^(F([1-9]|1[0-9]|2[0-4])|NUM(PAD)?_?(?:[0-9]+|ZERO|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|ADD|SUBTRACT|MULTIPLY|DIVIDE|DECIMAL|SEPARATOR|ENTER|LOCK|MINUS|PLUS|STAR|SLASH)|PAGE_UP|PAGE_DOWN|HOME|END|INSERT|DELETE|TAB|SPACE|ENTER|RETURN|TILDE|SEMICOLON|BACKSLASH|LEFT_BRACKET|RIGHT_BRACKET)$/
 
 // Field name that clearly denotes a keybind (so an ambiguous value like a single letter counts).
-const BINDISH_FIELD = (field: string) => /key|hotkey|bind/.test(field) || /^toggle/.test(field)
+export const BINDISH_FIELD = (field: string) => /key|hotkey|bind/.test(field) || /^toggle/.test(field)
 
 // The config files whose scalar `Field = Value` assignments we parse for keybinds. Previously only
 // literal `config.lua`/`config.json`; broadened to the common config filenames so a mod that keeps
@@ -51,17 +51,17 @@ const BINDISH_FIELD = (field: string) => /key|hotkey|bind/.test(field) || /^togg
 // holds Key.* NAME TABLES that would be false positives). The optional `[a-z0-9_]*` prefix also
 // matches prefixed names like `user_config.lua` (Toggle Mercy Ring kept `TC_HOTKEY = Key.G` there,
 // and the un-prefixed pattern silently missed it — a real 2026-08-25 conflict-detection gap).
-const CONFIG_SCALAR_FILE = /(?:^|\/)[a-z0-9_]*(config|settings|keybinds?|hotkeys?|options|controls?)\.(lua|json)$/i
+export const CONFIG_SCALAR_FILE = /(?:^|\/)[a-z0-9_]*(config|settings|keybinds?|hotkeys?|options|controls?)\.(lua|json)$/i
 
 // Files worth reading for keybinds: any Lua (RegisterKeyBind), the config/menu JSONs, and .ini.
-const SCANNABLE_FILE = /(\.lua|\.modconfig\.json|config\.json|\.ini)$/i
+export const SCANNABLE_FILE = /(\.lua|\.modconfig\.json|config\.json|\.ini)$/i
 
-function normKey(k: string): string {
+export function normKey(k: string): string {
   return k.trim().toUpperCase().replace(/^KEY\./, '')
 }
 
 // A modifier+key combo string, e.g. "F8" or "CONTROL+F5". Modifiers sorted so order-independent.
-function combo(mods: string[], key: string): string {
+export function combo(mods: string[], key: string): string {
   const m = [...new Set(mods.map((x) => x.toUpperCase()))].sort()
   return (m.length ? m.join('+') + '+' : '') + key
 }
@@ -70,7 +70,7 @@ function combo(mods: string[], key: string): string {
 // `ModifierKey.X` form). For configs that pair the key with its modifiers in one table entry, e.g.
 // Medicine Hotkeys' `{ key = "G", mods = { "SHIFT" } }` — this makes it read Shift+G, not a phantom
 // plain G that false-conflicts with another mod's real G (a 2026-08-25 false positive).
-function extractModsTable(line: string): string[] {
+export function extractModsTable(line: string): string[] {
   const t = /\bmods?\s*=\s*\{([^}]*)\}/i.exec(line)
   if (!t) return []
   return [...t[1]!.matchAll(/["'](ctrl|control|shift|alt)["']/gi)].map((m) =>
@@ -100,7 +100,7 @@ function indentOf(s: string): number {
 // Walk up through enclosing lines (strictly decreasing indentation); gate if any enclosing
 // if-condition references a disabled flag. Well-formatted Lua only — bad indentation just doesn't
 // gate (falls back to counting the bind, i.e. the pre-existing behavior).
-function gatedByDisabledFlag(lines: string[], idx: number, disabled: Set<string>): boolean {
+export function gatedByDisabledFlag(lines: string[], idx: number, disabled: Set<string>): boolean {
   if (!disabled.size) return false
   let curInd = indentOf(lines[idx]!)
   for (let j = idx - 1; j >= 0 && curInd > 0; j--) {
@@ -260,7 +260,7 @@ function extractFromText(name: string, text: string, out: Set<string>, disabled:
   }
 }
 
-type ScanFile = { name: string; text: string }
+export type ScanFile = { name: string; text: string }
 
 async function filesFromPayloadZip(zipPath: string, skip: (p: string) => boolean): Promise<ScanFile[]> {
   let zip: AdmZip
@@ -296,9 +296,13 @@ async function filesFromContentDir(dir: string, base: string, skip: (p: string) 
     const p = join(dir, e.name)
     if (e.isDirectory()) out.push(...(await filesFromContentDir(p, base, skip)))
     else if (SCANNABLE_FILE.test(e.name)) {
-      if (skip(p.slice(base.length + 1).replace(/\\/g, '/'))) continue
+      const rel = p.slice(base.length + 1).replace(/\\/g, '/')
+      if (skip(rel)) continue
       try {
-        out.push({ name: e.name, text: await readFile(p, 'utf8') })
+        // `name` is the mod-root-relative path (not just the basename): the scanner's filename
+        // regexes are path-agnostic, but the Phase-2 remap writer needs this to be a real
+        // relWithin within the produced Mods/<folder>.
+        out.push({ name: rel, text: await readFile(p, 'utf8') })
       } catch {
         /* skip */
       }
@@ -313,16 +317,21 @@ async function filesFromContentDir(dir: string, base: string, skip: (p: string) 
 // its mod-root-relative path as a path suffix), and the override content is scanned in its place.
 // Two-pass: gather all files, collect the flags the mod sets false (the gate may be in config.lua
 // while the bind is in another script), then scan each with those config gates applied.
-async function combosForMod(m: ClientMod): Promise<Set<string>> {
+// Gather a mod's EFFECTIVE scan files (payload files, with any config-override replacing the
+// payload file it targets) plus the mod-wide "disabled" config flags. Shared by the conflict
+// scanner (combosForMod) AND the Phase-2 descriptor locator (lib/keybind-descriptors) so both see
+// exactly the same file set — no drift between what the scan reports and what a remap rewrites.
+// `name` is the mod-root-relative path (a real path within the produced Mods/<folder>), which is
+// exactly the `relWithin` an override/remap must write to.
+export async function collectModScanFiles(m: ClientMod): Promise<{ files: ScanFile[]; disabled: Set<string> }> {
   const store = clientModStorePath(m.id)
-  const out = new Set<string>()
   const overrides = await readClientModConfigOverrides(m.id).catch(() => [])
   const skip = (p: string) => overrides.some((o) => p === o.relWithin || p.endsWith('/' + o.relWithin))
 
   const files: ScanFile[] = []
   if (m.payload === 'payload.zip') files.push(...(await filesFromPayloadZip(join(store, 'payload.zip'), skip)))
   else if (m.payload === 'content') files.push(...(await filesFromContentDir(join(store, 'content'), join(store, 'content'), skip)))
-  else return out
+  else return { files, disabled: new Set() }
   for (const o of overrides) {
     if (!SCANNABLE_FILE.test(o.relWithin)) continue
     try {
@@ -334,6 +343,12 @@ async function combosForMod(m: ClientMod): Promise<Set<string>> {
 
   const disabled = new Set<string>()
   for (const f of files) for (const flag of collectDisabledFlags(f.text)) disabled.add(flag)
+  return { files, disabled }
+}
+
+async function combosForMod(m: ClientMod): Promise<Set<string>> {
+  const out = new Set<string>()
+  const { files, disabled } = await collectModScanFiles(m)
   for (const f of files) {
     try {
       extractFromText(f.name, f.text, out, disabled)

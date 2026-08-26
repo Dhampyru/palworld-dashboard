@@ -219,9 +219,25 @@ export async function applyManualRemap(): Promise<RemapResult> {
   for (const modId of touched)
     for (const o of await readClientModConfigOverrides(modId).catch(() => [])) written.push({ modId, relWithin: o.relWithin })
 
-  await mkdir(dirname(stateFile()), { recursive: true }).catch(() => {})
-  await writeFile(stateFile(), JSON.stringify({ written }, null, 2)).catch(() => {})
+  await recordOverridesInLedger(written)
   return { applied, skipped }
+}
+
+// Shared ledger writer — UNIONS entries into keybind-remap.json so the Phase-2 descriptor remap
+// (lib/keybind-descriptors) and this hand-authored one write to the SAME undo ledger; clearRemap
+// then removes every keybind override the manager wrote, from either path.
+export async function recordOverridesInLedger(entries: { modId: string; relWithin: string }[]): Promise<void> {
+  await mkdir(dirname(stateFile()), { recursive: true }).catch(() => {})
+  let cur: { written?: { modId: string; relWithin: string }[] } = {}
+  try {
+    cur = JSON.parse(await readFile(stateFile(), 'utf8')) as typeof cur
+  } catch {
+    /* fresh ledger */
+  }
+  const key = (w: { modId: string; relWithin: string }) => `${w.modId}::${w.relWithin}`
+  const map = new Map((cur.written ?? []).map((w) => [key(w), w]))
+  for (const e of entries) map.set(key(e), e)
+  await writeFile(stateFile(), JSON.stringify({ written: [...map.values()] }, null, 2)).catch(() => {})
 }
 
 // Is a remap currently applied? (the ledger exists → overrides are in place).
