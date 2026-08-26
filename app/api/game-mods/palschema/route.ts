@@ -13,6 +13,7 @@ import {
   PALSCHEMA_PINNED_TAG,
   readPalSchemaStatus,
   removePalSchemaSubmod,
+  setPalSchemaSubmodEnabled,
 } from '@/lib/palschema'
 
 export const runtime = 'nodejs'
@@ -92,7 +93,7 @@ async function _POST(request: NextRequest) {
   try {
     // JSON: pinned download, or sub-mod removal.
     if (!contentType.includes('multipart/form-data')) {
-      const body = (await request.json().catch(() => ({}))) as { action?: string; name?: string }
+      const body = (await request.json().catch(() => ({}))) as { action?: string; name?: string; enabled?: boolean }
 
       if (body.action === 'downloadLoader') {
         const buffer = await downloadPalSchemaRelease()
@@ -115,6 +116,18 @@ async function _POST(request: NextRequest) {
           submods: await listPalSchemaSubmods(),
           cascadedClient,
           note: `Removed ${body.name}${cascadedClient.length ? ` (+ client: ${cascadedClient.join(', ')})` : ''} (backed up to ${backup}) — restart the server to apply.`,
+        })
+      }
+
+      if (body.action === 'setEnabled') {
+        if (!body.name) return NextResponse.json({ error: 'name required' }, { status: 400 })
+        if (typeof body.enabled !== 'boolean') return NextResponse.json({ error: 'enabled (boolean) required' }, { status: 400 })
+        const ok = await setPalSchemaSubmodEnabled(body.name, body.enabled)
+        if (!ok) return NextResponse.json({ error: `PalSchema submod not found: ${body.name}` }, { status: 404 })
+        return NextResponse.json({
+          status: await readPalSchemaStatus(),
+          submods: await listPalSchemaSubmods(),
+          note: `${body.enabled ? 'Enabled' : 'Disabled'} ${body.name} — restart the server to apply.`,
         })
       }
 

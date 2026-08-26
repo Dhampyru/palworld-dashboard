@@ -49,7 +49,12 @@ async function _GET(request: NextRequest) {
       const status = await getNexusStatus()
       if (!(status.configured && status.valid)) return 0
       const mods = await getNexusMods()
-      return Object.values(mods).filter((m) => m.updateAvailable).length
+      // Dedupe by Nexus modId: a COMBINED mod (e.g. RTR's `ue4ss:` + `palschema:` halves) has two
+      // associations pointing at the same modId, and both flip updateAvailable — count it ONCE so
+      // the pill matches reality (was over-counting combined mods).
+      const seen = new Set<number>()
+      for (const m of Object.values(mods)) if (m.updateAvailable) seen.add(m.modId)
+      return seen.size
     } catch {
       return 0
     }

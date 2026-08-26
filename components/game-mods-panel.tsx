@@ -160,7 +160,7 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
   const [showDisabled, setShowDisabled] = useState(false) // collapse the disabled-mods block
   // PalSchema submods, lifted into the main list (nested under their parent mod). The separate
   // PalSchema section keeps only the loader/install/status; this panel owns the submod rows.
-  type PsSubmod = { name: string; fileCount: number; sizeBytes: number; modifiedAt: string | null }
+  type PsSubmod = { name: string; fileCount: number; sizeBytes: number; modifiedAt: string | null; enabled: boolean }
   const [palschemaSubmods, setPalschemaSubmods] = useState<PsSubmod[]>([])
   const [psRemoveTarget, setPsRemoveTarget] = useState<string | null>(null)
   const [psEditing, setPsEditing] = useState<string | null>(null)
@@ -542,15 +542,34 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
     async (mod: GameModEntry, nextEnabled: boolean) => {
       if (!config) return
       setPendingId(mod.id)
+      const jsonHeaders = { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' }
+      // PalSchema submods aren't in `mods` (they're synthesised from palschemaSubmods) and toggle
+      // via their own endpoint — a folder move into/out of mods-disabled/, not a mods.txt line.
+      if (mod.kind === 'palschema') {
+        setPalschemaSubmods((prev) => prev.map((s) => (s.name === mod.name ? { ...s, enabled: nextEnabled } : s)))
+        try {
+          const res = await fetch('/api/game-mods/palschema', {
+            method: 'POST',
+            headers: jsonHeaders,
+            body: JSON.stringify({ action: 'setEnabled', name: mod.name, enabled: nextEnabled }),
+          })
+          const data = await res.json()
+          if (!res.ok) throw new Error(data.error ?? res.statusText)
+          if (data.submods) setPalschemaSubmods(data.submods as PsSubmod[])
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Failed to toggle mod')
+          setPalschemaSubmods((prev) => prev.map((s) => (s.name === mod.name ? { ...s, enabled: mod.enabled } : s)))
+        } finally {
+          setPendingId(null)
+        }
+        return
+      }
       // optimistic update — reverted on failure
       setMods((prev) => prev?.map((m) => (m.id === mod.id ? { ...m, enabled: nextEnabled } : m)) ?? prev)
       try {
         const response = await fetch('/api/game-mods', {
           method: 'POST',
-          headers: {
-            ...buildPalworldProxyHeaders(config),
-            'Content-Type': 'application/json',
-          },
+          headers: jsonHeaders,
           body: JSON.stringify({ id: mod.id, enabled: nextEnabled }),
         })
         const data = await response.json()
@@ -779,9 +798,10 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
     // data files / remove), NOT mods.txt — so it short-circuits the regular row entirely.
     if (mod.kind === 'palschema') {
       const editing = psEditing === mod.name
+      const nx = nexusMods[mod.id] // combined/PalSchema mods carry a `palschema:<name>` Nexus assoc
       return (
         <li key={mod.id} className="flex flex-col">
-          <div className={`flex items-center justify-between gap-3 px-3 py-2${nested ? ' pl-8' : ''}`}>
+          <div className={`flex items-center justify-between gap-3 px-3 py-2${nested ? ' pl-8' : ''}${mod.enabled ? '' : ' opacity-60'}`}>
             <div className="flex min-w-0 flex-col gap-0.5">
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className="gap-1 border-sky-500/50 text-sky-600 dark:text-sky-400">
@@ -789,11 +809,38 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
                 </Badge>
                 <span className="truncate text-sm font-medium">{mod.name}</span>
               </div>
-              <div className="text-xs text-muted-foreground">
-                {mod.psFileCount ?? 0} data file{mod.psFileCount === 1 ? '' : 's'} · always on (remove to disable)
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                <span>
+                  {mod.psFileCount ?? 0} data file{mod.psFileCount === 1 ? '' : 's'} · {mod.enabled ? 'loaded' : 'disabled (restart to apply)'}
+                </span>
+                {nx?.updateAvailable && (
+                  <span
+                    className="rounded bg-amber-500/20 px-1 font-medium text-amber-700 dark:text-amber-300"
+                    title={`You have v${nx.baselineVersion}; Nexus has v${nx.latestVersion}`}
+                  >
+                    ↑ update
+                  </span>
+                )}
+                {nx?.updateAvailable && nexusPremium && (
+                  <button
+                    onClick={() => updateNexusMod(mod.id)}
+                    disabled={nexusBusy === `update:${mod.id}`}
+                    title={`Download & install v${nx.latestVersion} from Nexus (restart to apply)`}
+                    className="rounded bg-primary/15 px-1 font-medium text-primary hover:bg-primary/25 disabled:opacity-40"
+                  >
+                    {nexusBusy === `update:${mod.id}` ? 'updating…' : '↑ update now'}
+                  </button>
+                )}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
+              <Switch
+                checked={mod.enabled}
+                onCheckedChange={(v) => toggle(mod, v)}
+                disabled={pendingId === mod.id}
+                aria-label={`${mod.enabled ? 'Disable' : 'Enable'} ${mod.name}`}
+                className="mr-1"
+              />
               <button
                 onClick={() => setPsEditing((e) => (e === mod.name ? null : mod.name))}
                 title="Edit data files"
@@ -1071,7 +1118,7 @@ export function GameModsPanel({ reloadKey }: { reloadKey?: number } = {}) {
     id: `palschema:${s.name}`,
     kind: 'palschema' as const,
     name: s.name,
-    enabled: true,
+    enabled: s.enabled,
     addedAt: s.modifiedAt ? Date.parse(s.modifiedAt) || undefined : undefined,
     psFileCount: s.fileCount,
     psSizeBytes: s.sizeBytes,

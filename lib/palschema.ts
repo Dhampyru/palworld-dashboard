@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, sep } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -112,6 +112,7 @@ export type PalSchemaSubmod = {
   fileCount: number
   sizeBytes: number
   modifiedAt: string | null
+  enabled: boolean // false = relocated to the sibling `mods-disabled/` (PalSchema won't load it)
 }
 
 // Recursively total file count + bytes + newest mtime for one sub-mod folder.
@@ -149,24 +150,65 @@ async function folderStats(dir: string): Promise<{ fileCount: number; sizeBytes:
 export async function listPalSchemaSubmods(): Promise<PalSchemaSubmod[]> {
   const modsDir = await resolvePalSchemaModsDir()
   if (!modsDir) return []
-  let dirents
-  try {
-    dirents = await readdir(modsDir, { withFileTypes: true })
-  } catch {
-    return [] // no PalSchema/Mods yet — none installed
-  }
   const out: PalSchemaSubmod[] = []
-  for (const ent of dirents) {
-    if (!ent.isDirectory()) continue
-    const { fileCount, sizeBytes, modifiedAt } = await folderStats(join(modsDir, ent.name))
-    out.push({
-      name: ent.name,
-      fileCount,
-      sizeBytes,
-      modifiedAt: modifiedAt ? new Date(modifiedAt).toISOString() : null,
-    })
+  const scan = async (dir: string, enabled: boolean) => {
+    let dirents
+    try {
+      dirents = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return // dir doesn't exist (no mods, or nothing disabled yet)
+    }
+    for (const ent of dirents) {
+      if (!ent.isDirectory()) continue
+      const { fileCount, sizeBytes, modifiedAt } = await folderStats(join(dir, ent.name))
+      out.push({
+        name: ent.name,
+        fileCount,
+        sizeBytes,
+        modifiedAt: modifiedAt ? new Date(modifiedAt).toISOString() : null,
+        enabled,
+      })
+    }
   }
+  await scan(modsDir, true) // loaded submods under mods/
+  await scan(palSchemaDisabledDir(modsDir), false) // relocated (disabled) submods
   return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+// Sibling `mods-disabled/` dir where a disabled PalSchema submod is parked (PalSchema loads EVERY
+// folder under `mods/`, with no per-mod toggle in its config, so relocating out of `mods/` is the
+// only reliable disable).
+function palSchemaDisabledDir(modsDir: string): string {
+  return join(dirname(modsDir), 'mods-disabled')
+}
+
+// Enable/disable a PalSchema submod by moving its folder into/out of `mods/`. Reversible; effective
+// on the next server restart (PalSchema loads at boot). Returns false if the submod isn't found in
+// either location.
+export async function setPalSchemaSubmodEnabled(name: string, enabled: boolean): Promise<boolean> {
+  if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) {
+    throw new Error(`Unsafe submod name: "${name}"`)
+  }
+  const modsDir = await resolvePalSchemaModsDir()
+  if (!modsDir) throw new Error('PalSchema mods directory not found')
+  const disabledDir = palSchemaDisabledDir(modsDir)
+  const activePath = join(modsDir, name)
+  const disabledPath = join(disabledDir, name)
+  const activeExists = await stat(activePath).then(() => true).catch(() => false)
+  const disabledExists = await stat(disabledPath).then(() => true).catch(() => false)
+  if (!activeExists && !disabledExists) return false // not installed
+  if (enabled && !activeExists && disabledExists) {
+    await rename(disabledPath, activePath)
+  } else if (!enabled && activeExists) {
+    await mkdir(disabledDir, { recursive: true })
+    // The game dirs are 0777 (the game's entrypoint chowns to `steam` on boot; the dashboard runs
+    // as uid 2001). Make mods-disabled/ world-writable too, or a later RE-enable (rename back out)
+    // would EACCES — the dashboard can't remove an entry from a dir it can't write.
+    await chmod(disabledDir, 0o777).catch(() => {})
+    await rename(activePath, disabledPath)
+  }
+  // else: already in the desired state — no-op
+  return true
 }
 
 // ── Zip content-root resolution (shared by loader + sub-mod installs) ─────────
