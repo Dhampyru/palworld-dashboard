@@ -101,10 +101,34 @@ deployment-specific list in code (clean-room). Files:
 UI (backend `remapKeyPlan`/`remapKeyApply` + `suggest` already support it) — auto-resolve covers the
 common case; the manual picker is a nicety.
 
-### 3. Keybind profiles + backup (Phase 3)
-- A named **keybind profile** = the current set of keybind overrides. Save / restore / rename /
-  delete (mirrors `lib/mod-profiles.ts`, but for keybinds). Stored `data/keybind-profiles.json`;
-  each save snapshots the override files. Reversible; auto-backed-up with the data volume.
+### 3. Keybind profiles + backup (Phase 3) — **BUILT 2026-08-26**
+A named **keybind profile** = a snapshot of the client-mod keybind-override LAYER (every
+config-override across the client mods, which is where the remap manager writes its reassignments).
+Save / restore / delete, mirroring `lib/mod-profiles.ts`. Files:
+- `lib/keybind-profiles.ts` — store in `data/keybind-profiles.json` (atomic temp+rename, serialized
+  mutate). **Snapshots the actual override files enumerated from disk (`readClientModConfigOverrides`
+  per mod), NOT the keybind-remap ledger** — the ledger drifts (a mod re-added under a new id, or a
+  case-different relWithin, leaves stale/duplicate entries that under-count the real set; a live test
+  caught the ledger "seeing" only 6 of 18 real overrides). Each override's **content** is stored
+  inline (not a reference) so the profile is self-contained: the raw override files live under
+  `data/client-mods/…/config-override/`, which the dashboard-data auto-backup EXCLUDES, so inlining
+  the content is what makes a profile survive in a data snapshot. `restoreProfile` makes the override
+  layer match the profile EXACTLY — clears every current override, writes the profile's back, then
+  re-points the ledger at the restored set via the new `setLedger` (an empty profile ⇒ stock
+  keybinds). Reports mods that vanished since the snapshot.
+- `app/api/keybind-profiles/route.ts` — GET list, POST save/restore/rename/delete, admin-only,
+  instance-scoped.
+- UI: a **Keybind profiles** card in the client-mods keybind area (shown once overrides exist or a
+  profile is saved): name field + Save current, then a list with Restore + Delete per profile.
+- **Verified live** — save captured all 18 overrides; after inducing edits (an existing-override
+  change + a brand-new override), restore reproduced the layer **byte-identical** (sha-compared),
+  0 conflicts; browser-verified the save→list→restore→delete flow.
+- **Gotcha found + fixed (2026-08-26):** one override (BaseShift's `scwd_terminal_mover_config.lua`)
+  was owned `root:root` from a prior session's direct volume write, so the dashboard (uid 2001) could
+  neither clear nor rewrite it — restore reported it "missing" (though it was preserved because
+  unwritable). `chown 2001:2001` on that override tree fixed it; this ALSO un-broke Phase-1/2 remaps
+  of BaseShift, which had been silently failing. Any override the manager must manage has to be
+  uid-2001-owned.
 
 ### 4. Propagation — one source of truth (Phase 4)
 - The effective keybind set (hardened scanner + overrides) is the single source that feeds:

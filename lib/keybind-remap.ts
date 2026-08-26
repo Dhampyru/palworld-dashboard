@@ -245,6 +245,29 @@ export async function isRemapApplied(): Promise<boolean> {
   return existsSync(stateFile())
 }
 
+// The override set the manager currently has written.
+export type LedgerEntry = { modId: string; relWithin: string }
+export async function readLedger(): Promise<LedgerEntry[]> {
+  try {
+    const st = JSON.parse(await readFile(stateFile(), 'utf8')) as { written?: LedgerEntry[] }
+    return Array.isArray(st.written) ? st.written : []
+  } catch {
+    return []
+  }
+}
+
+// Replace the ledger with EXACTLY these entries (no override-file side effects, unlike clearRemap).
+// Used by keybind PROFILES after a restore to re-point the ledger at the restored override set, so
+// the remap card's "active"/"Undo" state stays accurate. Empty → remove the ledger file entirely.
+export async function setLedger(entries: LedgerEntry[]): Promise<void> {
+  if (!entries.length) {
+    await rm(stateFile(), { force: true }).catch(() => {})
+    return
+  }
+  await mkdir(dirname(stateFile()), { recursive: true }).catch(() => {})
+  await writeFile(stateFile(), JSON.stringify({ written: entries }, null, 2)).catch(() => {})
+}
+
 // Undo: drop only the overrides this remap wrote (the loadout falls back to shipped files).
 export async function clearRemap(): Promise<number> {
   if (!existsSync(stateFile())) return 0

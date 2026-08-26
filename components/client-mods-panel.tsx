@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   AlertTriangleIcon,
+  BookmarkIcon,
   ChevronDownIcon,
   ExternalLinkIcon,
   FolderPlusIcon,
@@ -28,6 +29,7 @@ import {
   PlusIcon,
   RefreshCwIcon,
   RotateCcwIcon,
+  SaveIcon,
   SlidersHorizontalIcon,
   Trash2Icon,
   UploadIcon,
@@ -139,6 +141,11 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   type AutoPlan = { resolutions: AutoResolution[]; moved: number; unresolved: { combo: string; reason: string }[] }
   const [autoPlan, setAutoPlan] = useState<AutoPlan | null>(null)
   const [autoBusy, setAutoBusy] = useState(false)
+  // Phase-3 keybind profiles: named snapshots of the current keybind-override layer.
+  type KbProfile = { id: string; name: string; createdAt: number; note?: string; overrides: { modName: string; relWithin: string }[] }
+  const [kbProfiles, setKbProfiles] = useState<KbProfile[]>([])
+  const [kbProfName, setKbProfName] = useState('')
+  const [kbBusy, setKbBusy] = useState<string | null>(null) // 'save' | profile id
   const [url, setUrl] = useState('')
   const [bulk, setBulk] = useState('')
   const [bulkResults, setBulkResults] = useState<BulkResult[] | null>(null)
@@ -447,6 +454,13 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
           if (p && Array.isArray(p.remap)) setRemap(p as RemapPlan)
         })
         .catch(() => {})
+      // Keybind profiles (named override-set snapshots) — fire-and-forget.
+      fetch('/api/keybind-profiles', { headers: h, cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((p) => {
+          if (p && Array.isArray(p.profiles)) setKbProfiles(p.profiles as KbProfile[])
+        })
+        .catch(() => {})
       if (nxRes?.ok) {
         const n = await nxRes.json()
         setNexus({ premium: Boolean(n.valid && n.isPremium), name: n.name ?? null })
@@ -532,6 +546,45 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
         toast.error(e instanceof Error ? e.message : 'Auto-resolve failed')
       } finally {
         setAutoBusy(false)
+      }
+    },
+    [config, load],
+  )
+
+  // Phase-3 keybind profiles — save the current override layer / restore / rename / delete.
+  const kbProfileAction = useCallback(
+    async (body: { action: 'save' | 'restore' | 'rename' | 'delete'; id?: string; name?: string }, busyKey: string) => {
+      if (!config) return
+      setKbBusy(busyKey)
+      try {
+        const res = await fetch('/api/keybind-profiles', {
+          method: 'POST',
+          headers: { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(json.error ?? res.statusText)
+        if (body.action === 'save') {
+          setKbProfName('')
+          toast.success(`Saved keybind profile "${json.profile?.name}" (${json.profile?.overrides?.length ?? 0} overrides)`)
+        } else if (body.action === 'restore') {
+          const r = json.report ?? {}
+          toast.success(
+            `Restored ${r.applied ?? 0} keybind override${r.applied === 1 ? '' : 's'}${r.missing?.length ? ` (${r.missing.length} skipped — mod gone)` : ''} — regenerate the loadout to ship it`,
+          )
+        } else if (body.action === 'delete') {
+          toast.success('Deleted keybind profile')
+        }
+        // Refresh the profile list + the remap card's applied/conflict state.
+        const list = await fetch('/api/keybind-profiles', { headers: buildPalworldProxyHeaders(config), cache: 'no-store' })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)
+        if (list && Array.isArray(list.profiles)) setKbProfiles(list.profiles as KbProfile[])
+        if (body.action === 'restore') await load()
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Keybind profile action failed')
+      } finally {
+        setKbBusy(null)
       }
     },
     [config, load],
@@ -1175,6 +1228,74 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
                 </div>
               )}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Phase-3 keybind profiles — save the current remap set as a named snapshot, restore later.
+          Shown once there are overrides to save or profiles already exist. */}
+      {(remap?.applied || kbProfiles.length > 0) && (
+        <div className="rounded-md border bg-muted/30 p-3 text-xs">
+          <p className="flex items-center gap-1.5 font-medium text-foreground">
+            <BookmarkIcon className="size-4 text-muted-foreground" />
+            Keybind profiles
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            Save the current keybind remaps as a named set, then restore it in one click — a restore makes the loadout’s
+            keys match the profile exactly. Snapshots are self-contained (backed up with your dashboard data).
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Input
+              value={kbProfName}
+              onChange={(e) => setKbProfName(e.target.value)}
+              placeholder="Name this keybind set…"
+              className="h-8 max-w-xs text-xs"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && kbProfName.trim()) kbProfileAction({ action: 'save', name: kbProfName }, 'save')
+              }}
+            />
+            <button
+              onClick={() => kbProfileAction({ action: 'save', name: kbProfName }, 'save')}
+              disabled={!kbProfName.trim() || kbBusy !== null}
+              className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-medium hover:bg-muted disabled:opacity-50"
+            >
+              <SaveIcon className={kbBusy === 'save' ? 'size-3.5 animate-spin' : 'size-3.5'} />
+              Save current
+            </button>
+          </div>
+          {kbProfiles.length > 0 && (
+            <ul className="mt-2 space-y-1 border-l-2 border-border pl-3">
+              {kbProfiles.map((p) => (
+                <li key={p.id} className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="min-w-0">
+                    <span className="font-medium text-foreground">{p.name}</span>{' '}
+                    <span className="text-muted-foreground">
+                      · {p.overrides.length} override{p.overrides.length === 1 ? '' : 's'} ·{' '}
+                      {new Date(p.createdAt).toLocaleDateString()}
+                    </span>
+                    {p.note ? <span className="text-muted-foreground"> — {p.note}</span> : null}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      onClick={() => kbProfileAction({ action: 'restore', id: p.id }, p.id)}
+                      disabled={kbBusy !== null}
+                      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 hover:bg-muted disabled:opacity-50"
+                    >
+                      <RotateCcwIcon className={kbBusy === p.id ? 'size-3.5 animate-spin' : 'size-3.5'} />
+                      Restore
+                    </button>
+                    <button
+                      onClick={() => kbProfileAction({ action: 'delete', id: p.id }, p.id)}
+                      disabled={kbBusy !== null}
+                      title="Delete profile"
+                      className="inline-flex items-center rounded-md border px-2 py-1 text-muted-foreground hover:bg-muted hover:text-destructive disabled:opacity-50"
+                    >
+                      <Trash2Icon className="size-3.5" />
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}
