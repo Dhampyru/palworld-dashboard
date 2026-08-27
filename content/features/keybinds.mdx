@@ -1,0 +1,82 @@
+---
+title: Keybind Manager
+---
+
+# Keybind Manager
+
+Client mods — the cosmetic / quality-of-life / UI mods you bundle for friends — bind their
+hotkeys on **each player's own machine**. The dedicated server is headless, so two mods grabbing
+the same key never shows up server-side: one mod just silently loses on everyone's client.
+
+The **Keybind Manager** finds those collisions and fixes them for you, without editing the mods
+by hand. It lives in **Mods → Client mods** and is **admin-only**. Everything it does is a
+reversible overlay on your friend loadout — your staged mod files and the live server are never
+touched.
+
+## Where it applies
+
+It only looks at the **client** mods you keep for the friend loadout (the Client mods tab), not the
+mods installed on the server. Every change ships to friends the next time you build the loadout
+bundle or regenerate a share link — nothing reaches a player until then.
+
+## 1. Detecting conflicts
+
+The scanner reads each kept mod's config and scripts and reports every key bound by two or more
+mods. It is:
+
+- **Modifier-aware** — `Ctrl+F5` and plain `F5` are different bindings, not a conflict.
+- **Format-aware** — it reads Lua `RegisterKeyBind`, `.ini` files, and `config` / `settings` /
+  `keybinds` files, and it respects any overrides you've already applied, so the count reflects what
+  will actually ship.
+- **Aware of the game's own keys** — it flags a mod that binds a top-row number key (the native
+  action bar, 1–8), and surfaces mods that register a *native* rebindable action (e.g. First Person)
+  which you set in Palworld's own **Options → Key Config** rather than in a mod config.
+
+Conflicts are shown as amber badges on the affected mods, with a running count.
+
+## 2. Fixing conflicts
+
+### Auto-resolve (one click)
+
+**Preview auto-resolve** plans a fix for every real conflict and shows it first — nothing is written
+until you approve. For each clash it keeps the harder-to-move mod on the key and moves the more
+flexible one to a free key (usually by adding a `Ctrl`/`Alt` modifier so the mnemonic is preserved),
+reserving keys so two fixes never collide. Review the plan, then **Apply**.
+
+### Change a key manually
+
+Open **Change a key manually** to reassign any single binding yourself. Pick a mod's key, choose a
+new one from the list (function keys, numpad, navigation keys, letters — the native action bar is
+deliberately excluded so you can't create a hidden collision), and add `Ctrl` / `Alt` / `Shift`.
+A **Suggest free key** button proposes a conflict-free binding, and a live preview warns you if your
+choice is already used by another mod.
+
+> Some mods store their key as a plain value and can't accept a modifier — for those, the modifier
+> checkboxes are disabled and you can only move to another plain key. The picker knows this per mod.
+
+## 3. Keybind profiles
+
+A **keybind profile** is a named snapshot of your current keybind setup. Save the set you like, and
+**Restore** brings it back in one click — a restore makes the loadout's keys match the profile
+exactly. Profiles are self-contained and travel with your dashboard-data backup, so a working
+keybind layout is easy to keep and return to. Save / restore / delete from the **Keybind profiles**
+card.
+
+## 4. One source of truth
+
+Once you've settled your keybinds, the same set feeds everything downstream automatically:
+
+- **Friend cheat-sheet** — the controls sheet baked into the friend bundle is generated from your
+  loadout's detected keybinds, so it's always current after a remap. The **Friend cheat-sheet** card
+  shows whether it's auto-generated or a hand-written override, previews it, and lets you switch back
+  to auto with one click.
+- **Keybind tips broadcast** *(opt-in)* — turn the keybind set into rotating in-game tips (one per
+  mod). Enable **Include keybind tips in the rotation** in the Scheduled Broadcasts card and
+  **Regenerate from keybinds**; the tips rotate alongside your own messages, which are left untouched.
+
+## Reversibility
+
+Every fix — auto-resolve, a manual change, or a restored profile — is a reversible overlay. **Undo
+remap** drops the auto-remap's changes, and restoring a profile (including an empty one, for stock
+keybinds) puts things back. After any change, **build the loadout bundle or regenerate a share link**
+so friends receive it.
