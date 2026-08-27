@@ -98,9 +98,15 @@ deployment-specific list in code (clean-room). Files:
   scalar modifier correctly rejected) and the resolver on a real conflict — every test reverted with
   the loadout + ledger byte-identical.
 
-**Still open (Phase 2 follow-up, not built):** a fully-manual per-key "Change to <key>" picker in the
-UI (backend `remapKeyPlan`/`remapKeyApply` + `suggest` already support it) — auto-resolve covers the
-common case; the manual picker is a nicety.
+**Phase 2 follow-up — BUILT 2026-08-27:** a fully-manual per-key "Change" picker in the client-mods
+keybind area (a **Change a key manually** collapsible card). Lazy-loads the editable bind slots
+(`binds` action), grouped by mod; each bind gets an inline editor — a key `<select>` (F-keys / numpad
+/ nav / letters, native hotbar 1-8 deliberately excluded), Ctrl/Alt/Shift checkboxes GATED by the
+slot's `canModify`, a **Suggest free key** button (`suggest` action), a conflict-aware "New: <combo>"
+preview (amber ⚠ when the target is already used by another bind), and Apply (`remapKeyApply`) /
+Cancel. Reuses the same reversible override + ledger path as the auto-resolver (Undo remap / keybind
+profiles revert it). Browser-verified end-to-end (54 editable binds; suggest → CONTROL+X; apply wrote
++ ledgered the override; reverted byte-identical).
 
 ### 3. Keybind profiles + backup (Phase 3) — **BUILT 2026-08-26**
 A named **keybind profile** = a snapshot of the client-mod keybind-override LAYER (every

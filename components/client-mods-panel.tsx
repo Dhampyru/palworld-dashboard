@@ -36,6 +36,28 @@ import {
   WandSparklesIcon,
 } from 'lucide-react'
 
+// Key tokens the manual picker offers, grouped for the <select>. Mirrors the scanner's KEY_TOKEN
+// set but deliberately EXCLUDES the native action-bar row (1-8) and movement/action letters would
+// only be a footgun — F-keys, numpad, and the nav block are the safe, hotkey-appropriate targets.
+const PICKER_KEY_GROUPS: { label: string; keys: string[] }[] = [
+  { label: 'Function', keys: Array.from({ length: 12 }, (_, i) => `F${i + 1}`) },
+  {
+    label: 'Numpad',
+    keys: ['NUM_ZERO', 'NUM_ONE', 'NUM_TWO', 'NUM_THREE', 'NUM_FOUR', 'NUM_FIVE', 'NUM_SIX', 'NUM_SEVEN', 'NUM_EIGHT', 'NUM_NINE', 'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE', 'DECIMAL'],
+  },
+  { label: 'Navigation', keys: ['HOME', 'END', 'INSERT', 'DELETE', 'PAGE_UP', 'PAGE_DOWN'] },
+  { label: 'Letters', keys: Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)) },
+  { label: 'Other', keys: ['TAB', 'SPACE', 'TILDE', 'SEMICOLON', 'LEFT_BRACKET', 'RIGHT_BRACKET', 'BACKSLASH'] },
+]
+// The scanner's combo() format: modifiers de-duped, sorted, joined, key last.
+function pickerCombo(mods: string[], key: string): string {
+  const m = [...new Set(mods.map((x) => x.toUpperCase()))].sort()
+  return (m.length ? m.join('+') + '+' : '') + key
+}
+// Stable id for one editable bind row (a mod may bind several keys in several files).
+const pickerRowId = (s: { modId: string; combo: string; file: string; label: string }) => `${s.modId}|${s.combo}|${s.file}|${s.label}`
+const PICKER_MODS = ['CONTROL', 'ALT', 'SHIFT'] as const
+
 type ClientConfigFile = {
   id: string
   relWithin: string
@@ -151,6 +173,26 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   const [cheatsheet, setCheatsheet] = useState<CheatSheet | null>(null)
   const [cheatOpen, setCheatOpen] = useState(false)
   const [cheatBusy, setCheatBusy] = useState(false)
+  // Phase-2 follow-up: manual per-key change picker. Lazy-loaded editable bind slots.
+  type PickerSlot = {
+    modId: string
+    modName: string
+    file: string
+    format: string
+    field: string | null
+    key: string
+    mods: string[]
+    combo: string
+    canRebindKey: boolean
+    canModify: boolean
+    label: string
+  }
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerSlots, setPickerSlots] = useState<PickerSlot[] | null>(null)
+  const [editId, setEditId] = useState<string | null>(null) // slot row currently being edited
+  const [editKey, setEditKey] = useState('')
+  const [editMods, setEditMods] = useState({ CONTROL: false, ALT: false, SHIFT: false })
+  const [pickBusy, setPickBusy] = useState(false)
   const [url, setUrl] = useState('')
   const [bulk, setBulk] = useState('')
   const [bulkResults, setBulkResults] = useState<BulkResult[] | null>(null)
@@ -621,6 +663,80 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
       setCheatBusy(false)
     }
   }, [config])
+
+  // Manual picker: lazy-load the editable bind slots (loaded on first expand + after a change).
+  const loadPickerSlots = useCallback(async () => {
+    if (!config) return
+    try {
+      const h = { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' }
+      const res = await fetch('/api/client-mods/keybinds', { method: 'POST', headers: h, body: JSON.stringify({ action: 'binds' }) })
+      const d = await res.json().catch(() => ({}))
+      if (res.ok && Array.isArray(d.slots)) setPickerSlots(d.slots as PickerSlot[])
+    } catch {
+      /* leave null → the card shows a load hint */
+    }
+  }, [config])
+
+  useEffect(() => {
+    if (pickerOpen && pickerSlots === null) void loadPickerSlots()
+  }, [pickerOpen, pickerSlots, loadPickerSlots])
+
+  const startEdit = useCallback((s: PickerSlot) => {
+    setEditId(pickerRowId(s))
+    setEditKey(s.key)
+    setEditMods({ CONTROL: s.mods.includes('CONTROL'), ALT: s.mods.includes('ALT'), SHIFT: s.mods.includes('SHIFT') })
+  }, [])
+
+  const suggestForSlot = useCallback(
+    async (s: PickerSlot) => {
+      if (!config) return
+      setPickBusy(true)
+      try {
+        const h = { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' }
+        const res = await fetch('/api/client-mods/keybinds', { method: 'POST', headers: h, body: JSON.stringify({ action: 'suggest', modId: s.modId, combo: s.combo }) })
+        const d = await res.json().catch(() => ({}))
+        if (d?.suggestion) {
+          const m = (d.suggestion.mods ?? []) as string[]
+          setEditKey(d.suggestion.key)
+          setEditMods({ CONTROL: m.includes('CONTROL'), ALT: m.includes('ALT'), SHIFT: m.includes('SHIFT') })
+        } else {
+          toast.info('No free key available')
+        }
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Suggest failed')
+      } finally {
+        setPickBusy(false)
+      }
+    },
+    [config],
+  )
+
+  const applyManualChange = useCallback(
+    async (s: PickerSlot) => {
+      if (!config || !editKey) return
+      const toMods = (['CONTROL', 'ALT', 'SHIFT'] as const).filter((m) => editMods[m])
+      setPickBusy(true)
+      try {
+        const h = { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' }
+        const res = await fetch('/api/client-mods/keybinds', {
+          method: 'POST',
+          headers: h,
+          body: JSON.stringify({ action: 'remapKeyApply', modId: s.modId, combo: s.combo, toKey: editKey, toMods }),
+        })
+        const d = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(d.error ?? res.statusText)
+        toast.success(`${d.detail ?? `${s.combo} → ${pickerCombo(toMods, editKey)}`} — regenerate the loadout to ship it`)
+        setEditId(null)
+        await loadPickerSlots()
+        await load() // refresh conflicts / cheat-sheet / remap-applied state
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Change failed')
+      } finally {
+        setPickBusy(false)
+      }
+    },
+    [config, editKey, editMods, load, loadPickerSlots],
+  )
 
   const postJson = useCallback(
     async (body: Record<string, unknown>) => {
@@ -1377,6 +1493,125 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
             <pre className="mt-2 max-h-72 overflow-auto whitespace-pre rounded-md border bg-background/60 p-2 font-mono text-[11px] leading-relaxed text-foreground">
               {cheatsheet.text}
             </pre>
+          )}
+        </div>
+      )}
+
+      {/* Manual per-key change picker (Phase-2 follow-up) — reassign any editable bind to a key you
+          choose, with the same free-key suggester + capability rules the auto-resolver uses. */}
+      {keybinds && (
+        <div className="rounded-md border bg-muted/30 p-3 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-1.5 font-medium text-foreground">
+              <SlidersHorizontalIcon className="size-4 text-muted-foreground" />
+              Change a key manually
+            </p>
+            <button onClick={() => setPickerOpen((v) => !v)} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 hover:bg-muted">
+              <ChevronDownIcon className={pickerOpen ? 'size-3.5 rotate-180 transition' : 'size-3.5 transition'} />
+              {pickerOpen ? 'Hide' : 'Open'}
+            </button>
+          </div>
+          {pickerOpen && (
+            <div className="mt-2">
+              <p className="mb-2 text-muted-foreground">
+                Reassign any mod’s key to one you choose. Mods that store a plain key can only move to another plain key;
+                the rest can add Ctrl/Alt/Shift. Changes ship on the next loadout build and are reversible (Undo remap /
+                keybind profiles).
+              </p>
+              {pickerSlots === null ? (
+                <p className="text-muted-foreground">Loading…</p>
+              ) : (
+                (() => {
+                  const editable = pickerSlots.filter((s) => s.canRebindKey)
+                  if (!editable.length) return <p className="text-muted-foreground">No editable keybinds in this loadout.</p>
+                  const byMod: Record<string, PickerSlot[]> = {}
+                  for (const s of editable) (byMod[s.modName] ??= []).push(s)
+                  return (
+                    <div className="max-h-96 space-y-2 overflow-auto border-l-2 border-border pl-3">
+                      {Object.keys(byMod)
+                        .sort()
+                        .map((name) => (
+                          <div key={name}>
+                            <p className="font-medium text-foreground">{name}</p>
+                            <ul className="mt-0.5 space-y-1">
+                              {byMod[name]!.map((s) => {
+                                const id = pickerRowId(s)
+                                const editing = editId === id
+                                const toMods = PICKER_MODS.filter((m) => editMods[m])
+                                const target = pickerCombo([...toMods], editKey)
+                                const clash = editing && editKey && target !== s.combo ? pickerSlots.find((o) => o.combo === target && pickerRowId(o) !== id) : undefined
+                                return (
+                                  <li key={id} className="rounded border bg-background/40 p-1.5">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <span className="min-w-0">
+                                        <span className="text-muted-foreground">{s.label}</span>{' '}
+                                        <span className="font-mono font-medium text-foreground">{s.combo}</span>
+                                      </span>
+                                      {!editing && (
+                                        <button onClick={() => startEdit(s)} className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 hover:bg-muted">
+                                          <WandSparklesIcon className="size-3.5" /> Change
+                                        </button>
+                                      )}
+                                    </div>
+                                    {editing && (
+                                      <div className="mt-1.5 flex flex-col gap-1.5">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <select value={editKey} onChange={(e) => setEditKey(e.target.value)} className="h-7 rounded-md border bg-background px-1 text-xs">
+                                            {PICKER_KEY_GROUPS.map((g) => (
+                                              <optgroup key={g.label} label={g.label}>
+                                                {g.keys.map((k) => (
+                                                  <option key={k} value={k}>
+                                                    {k}
+                                                  </option>
+                                                ))}
+                                              </optgroup>
+                                            ))}
+                                          </select>
+                                          {PICKER_MODS.map((m) => (
+                                            <label key={m} className={`flex items-center gap-1 ${!s.canModify ? 'opacity-40' : ''}`}>
+                                              <input
+                                                type="checkbox"
+                                                disabled={!s.canModify}
+                                                checked={editMods[m]}
+                                                onChange={(e) => setEditMods((prev) => ({ ...prev, [m]: e.target.checked }))}
+                                              />
+                                              {m === 'CONTROL' ? 'Ctrl' : m[0] + m.slice(1).toLowerCase()}
+                                            </label>
+                                          ))}
+                                          <button onClick={() => suggestForSlot(s)} disabled={pickBusy} className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 hover:bg-muted disabled:opacity-50">
+                                            Suggest free key
+                                          </button>
+                                        </div>
+                                        {!s.canModify && <p className="text-muted-foreground">This mod stores its key as a plain value — it can’t take a modifier.</p>}
+                                        <p className={clash ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}>
+                                          New: <span className="font-mono font-medium">{target}</span>
+                                          {clash ? ` ⚠ already used by ${clash.modName}` : ''}
+                                        </p>
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            onClick={() => applyManualChange(s)}
+                                            disabled={pickBusy || !editKey}
+                                            className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/50 bg-emerald-500/15 px-2 py-0.5 font-medium text-emerald-700 hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-300"
+                                          >
+                                            {pickBusy ? 'Applying…' : 'Apply'}
+                                          </button>
+                                          <button onClick={() => setEditId(null)} disabled={pickBusy} className="inline-flex items-center rounded-md border px-2 py-0.5 hover:bg-muted disabled:opacity-50">
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </li>
+                                )
+                              })}
+                            </ul>
+                          </div>
+                        ))}
+                    </div>
+                  )
+                })()
+              )}
+            </div>
           )}
         </div>
       )}
