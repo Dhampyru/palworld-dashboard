@@ -126,6 +126,7 @@ mock sample data.
 - Start / stop / restart via a safe host-integration pattern (no sudo or Docker socket in the web tier)
 - RCON console; World settings with performance presets; `Engine.ini` tuning; PalDefender config
 - Mods: install / remove pak, UE4SS, and PalSchema mods; install from Steam Workshop and Nexus
+- Client mod loadouts for friends (shareable bundles) with a keybind manager — conflict detection, one-click remap, saved profiles, and an auto-generated controls cheat-sheet
 - Saves & backups: browse worlds, manual + scheduled auto-backups, restore, per-player saves, and a native save inspector/editor (Pals, items, stats)
 - Restart automation: scheduled / memory / crash triggers with an hourly cap
 
