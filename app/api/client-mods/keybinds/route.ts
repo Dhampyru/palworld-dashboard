@@ -7,6 +7,7 @@ import { scanClientKeybinds } from '@/lib/keybind-scan'
 import { applyManualRemap, clearRemap, CONFLICT_REMAP, isRemapApplied, PAYLOAD_EDITS } from '@/lib/keybind-remap'
 import { listAllBindSlots, listModBindSlots } from '@/lib/keybind-descriptors'
 import { applySingleRemap, autoResolve, planSingleRemap, suggestForCombo } from '@/lib/keybind-autoremap'
+import { clearOperatorSheet, getEffectiveKeybindSheet } from '@/lib/keybind-cheatsheet'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -84,6 +85,12 @@ export async function POST(request: NextRequest) {
       // Auto-resolve every real conflict — dry-run (plan) then apply.
       if (body.action === 'autoResolvePlan') return NextResponse.json(await autoResolve(true))
       if (body.action === 'autoResolveApply') return NextResponse.json(await autoResolve(false))
+
+      // ── Phase 4 propagation: the friend cheat-sheet ──
+      // Effective sheet (operator override if present, else always-live auto-generated).
+      if (body.action === 'cheatsheet') return NextResponse.json(await getEffectiveKeybindSheet())
+      // Drop the operator override so the sheet reverts to auto-generation.
+      if (body.action === 'clearCheatsheet') return NextResponse.json({ cleared: await clearOperatorSheet() })
 
       return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
     } catch (e) {

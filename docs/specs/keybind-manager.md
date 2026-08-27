@@ -1,7 +1,8 @@
-# Spec: Keybind Manager (proposed)
+# Spec: Keybind Manager
 
-Status: **PROPOSED** — not built. Roadmap-sized; needs an explicit "go" before implementation.
-Written 2026-08-25 after a manual keybind pass exposed the gaps below.
+Status: **ALL FOUR PHASES BUILT** (Phase 1 scanner 2026-08-25, Phase 2 remap + Phase 3 profiles
+2026-08-26, Phase 4 propagation 2026-08-27). Written 2026-08-25 after a manual keybind pass exposed
+the gaps below; each `### N` section records its as-built implementation.
 
 ## Why
 
@@ -130,15 +131,30 @@ Save / restore / delete, mirroring `lib/mod-profiles.ts`. Files:
   of BaseShift, which had been silently failing. Any override the manager must manage has to be
   uid-2001-owned.
 
-### 4. Propagation — one source of truth (Phase 4)
-- The effective keybind set (hardened scanner + overrides) is the single source that feeds:
-  - the **cheat-sheet** (`keybinds.txt`) — default to the **auto-generated** one so it's always
-    live; the operator file becomes an optional hand-curated override only;
-  - an optional **tips-broadcast generator** — turn the keybind set into rotating in-game tips
-    (the owner's "tips-only broadcast" idea), opt-in, dashboard-only;
-  - the UI table.
-- So a saved remap propagates to the cheat-sheet (and, if enabled, the broadcasts) automatically —
-  requirement (4).
+### 4. Propagation — one source of truth (Phase 4) — **BUILT 2026-08-27**
+The effective keybind set (override-aware scanner) is the single source that feeds three surfaces:
+- **Cheat-sheet** — `lib/keybind-cheatsheet.ts` is now the ONE place both the bundle and the UI
+  resolve the friend sheet: `getEffectiveKeybindSheet()` returns the operator-curated
+  `loadout-keybinds.txt` if present, else the always-live **auto-generated** sheet
+  (`generateKeybindSheet` from `scanPerModKeybinds`). `lib/client-loadout keybindsTxt()` now just
+  delegates to it (the inline generator moved here). `clearOperatorSheet()` drops the override so it
+  reverts to auto. Keybinds API actions `cheatsheet` (→ `{source,text,hasOperator}`) + `clearCheatsheet`.
+  UI: a **Friend cheat-sheet** card in the client-mods keybind area — source badge (auto / operator
+  override), a Preview (which doubles as the effective keybind table, satisfying the "UI table"
+  bullet), and a **Use auto-generated** button when an operator file exists.
+- **Tips-broadcast generator** — `lib/keybind-tips.ts generateKeybindTips()` turns the keybind set
+  into one tip per mod (`"Keybind - <Mod>: <combos>"`). `BroadcastSchedule` gained
+  `keybindTipsEnabled` + `keybindTips[]`; the shared `effectiveMessages(s)` folds the tips into the
+  rotation alongside the operator's own messages (one cursor over the combined list; `runBroadcast`/
+  `tick`/`saveScheduleSettings` all use it, and the cursor resets when the effective list changes).
+  Broadcast API action `generateKeybindTips` regenerates + persists them (operator messages
+  untouched). UI: a **keybind-tips** section in the Scheduled Broadcasts card — include-in-rotation
+  toggle, **Regenerate from keybinds**, and a preview.
+- **Verified live** — cheatsheet action resolved the operator override (1760 chars); generateKeybindTips
+  produced 15 tips; enabling folded them into a 33-line rotation with the cursor reset; browser-verified
+  both cards. Live broadcast config snapshotted + restored byte-identical after testing.
+- So a saved remap propagates to the cheat-sheet automatically, and (opt-in) to the rotating tips via
+  one Regenerate click — requirement (4).
 
 ## UI
 A **Keybinds** panel (or a section in the Mods area): grouped keybind table, conflicts highlighted

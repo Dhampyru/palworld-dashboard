@@ -3,6 +3,7 @@ import { classifyPassword, tierForClass } from '@/lib/access-tier'
 import { clientIp, isLockedOut, recordFailure } from '@/lib/rate-limit'
 import { PALWORLD_PROXY_HEADERS } from '@/lib/palworld'
 import { readSchedule, runBroadcast, saveScheduleSettings, type BroadcastSchedule } from '@/lib/broadcast-schedule'
+import { regenerateKeybindTips } from '@/lib/keybind-tips'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -49,6 +50,12 @@ export async function POST(request: NextRequest) {
   }
   if (body.action === 'test') {
     return NextResponse.json({ schedule: await runBroadcast(id, { force: true }) })
+  }
+  // Phase-4 propagation: regenerate the keybind tips from the current keybind set and persist them
+  // into the schedule (the operator's own messages are untouched).
+  if (body.action === 'generateKeybindTips') {
+    const { schedule, tips } = await regenerateKeybindTips(id)
+    return NextResponse.json({ schedule, tips })
   }
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
 }

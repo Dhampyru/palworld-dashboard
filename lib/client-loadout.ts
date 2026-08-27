@@ -14,7 +14,7 @@ import { overlayPalSchemaInto } from '@/lib/palschema-config'
 import { overlayClientModFilesInto } from '@/lib/client-mod-files'
 import { overlayReshadeInto } from '@/lib/reshade'
 import { resolveConnectString } from '@/lib/loadout-connect'
-import { scanPerModKeybinds } from '@/lib/keybind-scan'
+import { getEffectiveKeybindSheet } from '@/lib/keybind-cheatsheet'
 
 const execFileP = promisify(execFile)
 
@@ -799,42 +799,12 @@ function perfTargetsTxt(t: { mods: string[]; paks: string[]; reshade: boolean })
 }
 
 // Dashboard data volume (operator config; never in git).
-const DATA_DIR = resolve(process.env.DASHBOARD_DATA_DIR ?? './data')
-
-// The friend-facing controls cheat-sheet baked into the bundle, from two sources in order:
-//  1) an operator-supplied file `$DATA_DIR/loadout-keybinds.txt` — shipped VERBATIM if present, so
-//     an operator can hand-write a curated sheet (that file lives in the data volume, NOT git —
-//     keeping this code generic / free of any one deployment's mod list); else
-//  2) auto-generated from the kept mods' detected keybinds (scanPerModKeybinds) — no hardcoded mod
-//     list, always current, listing exactly the mods a given loadout ships (override-aware).
+// The friend-facing controls cheat-sheet baked into the bundle. Resolved via the shared single-
+// source module (Phase 4, lib/keybind-cheatsheet): the operator-curated `loadout-keybinds.txt` if
+// present, else the always-live auto-generated sheet from the kept mods' detected keybinds — so a
+// saved remap propagates to what friends receive with no hardcoded mod list.
 async function keybindsTxt(): Promise<string> {
-  try {
-    const custom = await readFile(join(DATA_DIR, 'loadout-keybinds.txt'), 'utf8')
-    if (custom.trim()) return custom
-  } catch {
-    /* no operator file → auto-generate below */
-  }
-  const rows = await scanPerModKeybinds().catch(() => [])
-  const lines = [
-    'PALWORLD — MOD CONTROLS (this loadout)',
-    '=======================================',
-    '',
-    'Keys detected in the mods this loadout installs. If two mods share a key,',
-    'the dashboard flags it as a conflict. Some mods also bind keys in Palworld’s',
-    'own Key Config (Options → Key Config) — those are set in-game, not here.',
-    '',
-  ]
-  if (rows.length) {
-    const width = Math.min(46, Math.max(...rows.map((r) => r.name.length)))
-    for (const r of rows) {
-      const gap = r.name.length >= width ? ' ' : ' ' + '.'.repeat(width - r.name.length) + ' '
-      lines.push(`  ${r.name}${gap}${r.combos.join(', ')}`)
-    }
-  } else {
-    lines.push('  (No mod keybinds detected in this loadout.)')
-  }
-  lines.push('')
-  return lines.join('\r\n') + '\r\n'
+  return (await getEffectiveKeybindSheet()).text
 }
 
 function readMeFirst(connect: string | null, serverName: string | null): string {

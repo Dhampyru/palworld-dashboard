@@ -146,6 +146,11 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
   const [kbProfiles, setKbProfiles] = useState<KbProfile[]>([])
   const [kbProfName, setKbProfName] = useState('')
   const [kbBusy, setKbBusy] = useState<string | null>(null) // 'save' | profile id
+  // Phase-4 propagation: the friend cheat-sheet (single source of truth), previewed here.
+  type CheatSheet = { source: 'operator' | 'auto'; text: string; hasOperator: boolean }
+  const [cheatsheet, setCheatsheet] = useState<CheatSheet | null>(null)
+  const [cheatOpen, setCheatOpen] = useState(false)
+  const [cheatBusy, setCheatBusy] = useState(false)
   const [url, setUrl] = useState('')
   const [bulk, setBulk] = useState('')
   const [bulkResults, setBulkResults] = useState<BulkResult[] | null>(null)
@@ -461,6 +466,13 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
           if (p && Array.isArray(p.profiles)) setKbProfiles(p.profiles as KbProfile[])
         })
         .catch(() => {})
+      // Friend cheat-sheet (effective source) — fire-and-forget.
+      fetch('/api/client-mods/keybinds', { method: 'POST', headers: h, body: JSON.stringify({ action: 'cheatsheet' }) })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((c) => {
+          if (c && typeof c.text === 'string') setCheatsheet(c as CheatSheet)
+        })
+        .catch(() => {})
       if (nxRes?.ok) {
         const n = await nxRes.json()
         setNexus({ premium: Boolean(n.valid && n.isPremium), name: n.name ?? null })
@@ -589,6 +601,26 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
     },
     [config, load],
   )
+
+  // Phase-4: drop the operator cheat-sheet override → revert to always-live auto-generation.
+  const clearCheatsheet = useCallback(async () => {
+    if (!config) return
+    setCheatBusy(true)
+    try {
+      const h = { ...buildPalworldProxyHeaders(config), 'Content-Type': 'application/json' }
+      const res = await fetch('/api/client-mods/keybinds', { method: 'POST', headers: h, body: JSON.stringify({ action: 'clearCheatsheet' }) })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? res.statusText)
+      const c = await fetch('/api/client-mods/keybinds', { method: 'POST', headers: h, body: JSON.stringify({ action: 'cheatsheet' }) })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)
+      if (c && typeof c.text === 'string') setCheatsheet(c as CheatSheet)
+      toast.success('Cheat-sheet now auto-generated from the current keybinds')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to clear cheat-sheet')
+    } finally {
+      setCheatBusy(false)
+    }
+  }, [config])
 
   const postJson = useCallback(
     async (body: Record<string, unknown>) => {
@@ -1296,6 +1328,55 @@ export function ClientModsPanel({ hideUploader = false, reloadKey }: { hideUploa
                 </li>
               ))}
             </ul>
+          )}
+        </div>
+      )}
+
+      {/* Phase-4 propagation: the friend controls cheat-sheet — single source of truth. The preview
+          is the effective keybind list this loadout ships. */}
+      {cheatsheet && (
+        <div className="rounded-md border bg-muted/30 p-3 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-1.5 font-medium text-foreground">
+              <BookmarkIcon className="size-4 text-muted-foreground" />
+              Friend cheat-sheet
+              <span
+                className={`rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${
+                  cheatsheet.source === 'auto'
+                    ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                    : 'border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                }`}
+              >
+                {cheatsheet.source === 'auto' ? 'auto-generated' : 'operator override'}
+              </span>
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <button onClick={() => setCheatOpen((v) => !v)} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 hover:bg-muted">
+                <ChevronDownIcon className={cheatOpen ? 'size-3.5 rotate-180 transition' : 'size-3.5 transition'} />
+                {cheatOpen ? 'Hide' : 'Preview'}
+              </button>
+              {cheatsheet.hasOperator && (
+                <button
+                  onClick={clearCheatsheet}
+                  disabled={cheatBusy}
+                  title="Delete the hand-written override so the sheet auto-generates from your keybinds"
+                  className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 hover:bg-muted disabled:opacity-50"
+                >
+                  <RotateCcwIcon className={cheatBusy ? 'size-3.5 animate-spin' : 'size-3.5'} />
+                  Use auto-generated
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="mt-1 text-muted-foreground">
+            {cheatsheet.source === 'auto'
+              ? 'Built automatically from this loadout’s detected keybinds and shipped in the friend bundle — always current after a remap.'
+              : 'A hand-written loadout-keybinds.txt is shipping verbatim instead of the auto-generated sheet. Switch to auto to keep it always current.'}
+          </p>
+          {cheatOpen && (
+            <pre className="mt-2 max-h-72 overflow-auto whitespace-pre rounded-md border bg-background/60 p-2 font-mono text-[11px] leading-relaxed text-foreground">
+              {cheatsheet.text}
+            </pre>
           )}
         </div>
       )}

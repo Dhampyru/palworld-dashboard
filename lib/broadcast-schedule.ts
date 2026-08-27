@@ -33,7 +33,12 @@ export type BroadcastSchedule = {
   messages: string[]
   prefix: string
   skipWhenEmpty: boolean
-  nextIndex: number // sequential rotation cursor
+  nextIndex: number // sequential rotation cursor (over the EFFECTIVE list — messages + keybind tips)
+  // Keybind-tips generator (Phase 4 propagation): opt-in auto-generated tips from the current
+  // client-mod keybind set, rotated ALONGSIDE the operator's own messages. `keybindTips` is
+  // regenerated from the keybinds (not hand-edited); enabling it makes the rotation include them.
+  keybindTipsEnabled: boolean
+  keybindTips: string[]
   lastRunAt: string | null // last SUCCESSFUL send
   lastCheckAt: string | null // last scheduler attempt (any outcome)
   lastStatus: BroadcastStatus | null
@@ -63,6 +68,8 @@ const DEFAULTS: BroadcastSchedule = {
   prefix: '',
   skipWhenEmpty: true,
   nextIndex: 0,
+  keybindTipsEnabled: false,
+  keybindTips: [],
   lastRunAt: null,
   lastCheckAt: null,
   lastStatus: null,
@@ -90,15 +97,26 @@ function cleanMessages(v: unknown): string[] {
     .map((m) => m.slice(0, MAX_MSG_LEN))
 }
 
+// The list the scheduler actually rotates through: the operator's messages, plus the generated
+// keybind tips when that option is on. One cursor (nextIndex) walks the whole thing.
+export function effectiveMessages(s: Pick<BroadcastSchedule, 'messages' | 'keybindTipsEnabled' | 'keybindTips'>): string[] {
+  return s.keybindTipsEnabled ? [...s.messages, ...s.keybindTips] : s.messages
+}
+
 function normalize(s: Partial<BroadcastSchedule>): BroadcastSchedule {
   const messages = cleanMessages(s.messages)
+  const keybindTips = cleanMessages(s.keybindTips)
+  const keybindTipsEnabled = Boolean(s.keybindTipsEnabled)
+  const effLen = messages.length + (keybindTipsEnabled ? keybindTips.length : 0)
   return {
     enabled: Boolean(s.enabled),
     intervalMinutes: clampNumber(s.intervalMinutes, 1, 1440, 15),
     messages,
     prefix: typeof s.prefix === 'string' ? s.prefix.trim().slice(0, 40) : '',
     skipWhenEmpty: s.skipWhenEmpty ?? true,
-    nextIndex: messages.length ? clampNumber(s.nextIndex, 0, messages.length - 1, 0) : 0,
+    nextIndex: effLen ? clampNumber(s.nextIndex, 0, effLen - 1, 0) : 0,
+    keybindTipsEnabled,
+    keybindTips,
     lastRunAt: s.lastRunAt ?? null,
     lastCheckAt: s.lastCheckAt ?? null,
     lastStatus: s.lastStatus ?? null,
@@ -137,7 +155,14 @@ function writeSchedule(id: string, s: BroadcastSchedule): void {
 export function saveScheduleSettings(id: string, input: Partial<BroadcastSchedule>): BroadcastSchedule {
   const cur = readSchedule(id)
   const nextMessages = input.messages !== undefined ? cleanMessages(input.messages) : cur.messages
-  const messagesChanged = JSON.stringify(nextMessages) !== JSON.stringify(cur.messages)
+  const nextKbTips = input.keybindTips !== undefined ? cleanMessages(input.keybindTips) : cur.keybindTips
+  const nextKbEnabled = input.keybindTipsEnabled ?? cur.keybindTipsEnabled
+  // Reset the rotation cursor if the EFFECTIVE list changed (operator messages, the keybind-tips
+  // toggle, or the generated tips while enabled) so the cursor can't dangle past the new length.
+  const effChanged =
+    JSON.stringify(nextMessages) !== JSON.stringify(cur.messages) ||
+    nextKbEnabled !== cur.keybindTipsEnabled ||
+    (nextKbEnabled && JSON.stringify(nextKbTips) !== JSON.stringify(cur.keybindTips))
   const next = normalize({
     ...cur,
     enabled: input.enabled ?? cur.enabled,
@@ -145,7 +170,9 @@ export function saveScheduleSettings(id: string, input: Partial<BroadcastSchedul
     messages: nextMessages,
     prefix: input.prefix ?? cur.prefix,
     skipWhenEmpty: input.skipWhenEmpty ?? cur.skipWhenEmpty,
-    nextIndex: messagesChanged ? 0 : cur.nextIndex,
+    keybindTipsEnabled: nextKbEnabled,
+    keybindTips: nextKbTips,
+    nextIndex: effChanged ? 0 : cur.nextIndex,
     welcomeEnabled: input.welcomeEnabled ?? cur.welcomeEnabled,
     welcomeMessages: input.welcomeMessages !== undefined ? cleanMessages(input.welcomeMessages) : cur.welcomeMessages,
     // welcomeBaselined/welcomeSeen are scheduler-owned; preserve them so toggling welcome off/on
@@ -182,7 +209,7 @@ export async function runBroadcast(id: string = DEFAULT_INSTANCE_ID, opts: { for
   try {
     await runWithInstance(id, async () => {
       const s = readSchedule(id)
-      if (!s.messages.length) {
+      if (!effectiveMessages(s).length) {
         record(id, 'error', 'No messages configured')
         return
       }
@@ -199,18 +226,19 @@ export async function runBroadcast(id: string = DEFAULT_INSTANCE_ID, opts: { for
         record(id, 'error', 'RCON not configured')
         return
       }
-      const idx = s.nextIndex % s.messages.length
-      const raw = s.prefix ? `${s.prefix} ${s.messages[idx]}` : s.messages[idx]
+      const eff = effectiveMessages(s)
+      const idx = s.nextIndex % eff.length
+      const raw = s.prefix ? `${s.prefix} ${eff[idx]}` : eff[idx]!
       const ascii = toAscii(raw)
       if (!ascii) {
-        record(id, 'error', 'Message empty after sanitizing', (idx + 1) % s.messages.length)
+        record(id, 'error', 'Message empty after sanitizing', (idx + 1) % eff.length)
         return
       }
       // pgbroadcast (PalDefender) keeps spaces; vanilla Broadcast truncates at the first space.
       const pd = await readPalDefenderState().catch(() => ({ enabled: false }))
       const cmd = pd.enabled ? `pgbroadcast ${ascii}` : `Broadcast ${ascii.replace(/ /g, '_')}`
       await runRcon(rcon, cmd)
-      record(id, 'ok', `Sent: ${s.messages[idx]}`, (idx + 1) % s.messages.length)
+      record(id, 'ok', `Sent: ${eff[idx]}`, (idx + 1) % eff.length)
     })
   } catch (err) {
     record(id, 'error', err instanceof Error ? err.message : 'Broadcast failed')
@@ -315,7 +343,7 @@ let started = false
 async function tick(): Promise<void> {
   for (const inst of listInstances()) {
     const s = readSchedule(inst.id)
-    if (s.enabled && s.messages.length) {
+    if (s.enabled && effectiveMessages(s).length) {
       const due = !s.lastRunAt || Date.now() - Date.parse(s.lastRunAt) >= s.intervalMinutes * 60_000
       if (due) await runBroadcast(inst.id)
     }
