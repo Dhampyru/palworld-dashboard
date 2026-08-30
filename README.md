@@ -111,7 +111,7 @@ mock sample data.
   </tr>
   <tr>
     <td width="50%" valign="top"><a href="public/readme/fleet-preview.jpg"><img src="public/readme/fleet-preview.jpg" alt="Fleet view"></a><br><sub><b>Fleet</b> — manage multiple servers</sub></td>
-    <td width="50%" valign="top"></td>
+    <td width="50%" valign="top"><a href="public/readme/docs-preview.jpg"><img src="public/readme/docs-preview.jpg" alt="Built-in documentation"></a><br><sub><b>Docs</b> — built-in documentation site served at <code>/docs</code></sub></td>
   </tr>
 </table>
 
