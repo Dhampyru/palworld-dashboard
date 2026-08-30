@@ -17,6 +17,8 @@ import {
   type Ue4ssSource,
 } from '@/lib/game-mods'
 import { isGameServerUp } from '@/lib/saves'
+import { markUe4ssRolledBack, markUe4ssUpdateInstalled } from '@/lib/framework-updates'
+import { readPalSchemaStatus } from '@/lib/palschema'
 
 // Map a download source to the normalized Ue4ssSource + a friendly staged label,
 // so the loader can show which build was just installed BEFORE the next boot.
@@ -87,6 +89,9 @@ async function _POST(request: NextRequest) {
         // The restored build isn't classified, so forget the staged marker and
         // let status fall back to the live banner after the next boot.
         await clearStagedUe4ss()
+        // Rolling back means we're now on an OLDER build than the latest — re-flag the update check
+        // so the card reflects that (instead of a stale "up to date" from a prior update).
+        await markUe4ssRolledBack().catch(() => {})
         return NextResponse.json({
           status: await readUe4ssStatus(),
           note: 'Rolled back — restart the server to load it.',
@@ -100,21 +105,39 @@ async function _POST(request: NextRequest) {
         if (await isGameServerUp()) {
           return NextResponse.json({ error: 'Stop the server before swapping UE4SS.' }, { status: 409 })
         }
+        // Capture what's installed BEFORE the swap: updating the same line (already on
+        // experimental-palworld) must read as an update, not a first-time "step 1 of 2" switch.
+        const preStatus = await readUe4ssStatus()
+        // PalSchema is an ABI-locked C++ mod — the swap sets it aside (it isn't carried across), so
+        // warn if it was installed: it must be reinstalled MATCHING the new UE4SS or the server
+        // crash-loops (restoring the OLD PalSchema onto a new build is exactly what breaks).
+        const palPre = await readPalSchemaStatus()
         // Coming from the Workshop layout: restore the proxy install first so the
         // community-build swap has a proxy baseline to back up + wipe.
-        if ((await readUe4ssStatus()).regime === 'workshop') await swapToProxy()
+        if (preStatus.regime === 'workshop') await swapToProxy()
         const buffer = await downloadUe4ssRelease(body.source)
         const result = await installUe4ssZip(buffer)
         const staged = STAGED[body.source]
         await recordStagedUe4ss(staged.source, staged.version)
+        // Just installed the latest for this line → re-baseline the update check so the
+        // "update available" badge clears instead of lingering after the update.
+        await markUe4ssUpdateInstalled().catch(() => {})
         const preserved = result.preservedSettings ? ', settings preserved' : ''
-        // For the PalSchema build, be explicit that this is only the UE4SS build
-        // (step 1) — PalSchema itself is a separate install, so the message can't
-        // read as if PalSchema is now ready.
-        const note =
+        const alreadyPalschema = preStatus.source === 'experimental-palworld' || preStatus.stagedSource === 'experimental-palworld'
+        // UPDATE (already on the experimental-palworld line) vs first-time SWITCH to it. Only the
+        // first-time switch needs the "PalSchema itself isn't installed yet" step-2 nudge; an update
+        // must NOT read as a PalSchema action (a real 2026-08-30 confusion).
+        const baseNote =
           body.source === 'palschema'
-            ? `Installed the PalSchema UE4SS build — step 1 of 2 (previous UE4SS backed up${preserved}). PalSchema itself is not installed yet; add it in the PalSchema section.`
+            ? alreadyPalschema
+              ? `Updated UE4SS to the latest experimental-palworld build (previous backed up${preserved}) — restart to load it.`
+              : `Installed the PalSchema UE4SS build — step 1 of 2 (previous UE4SS backed up${preserved}). PalSchema itself is not installed yet; add it in the PalSchema section.`
             : `Installed the ${body.source} UE4SS build (previous UE4SS backed up${preserved}) — restart to load it.`
+        // If PalSchema was installed, it was set aside by the swap (ABI-locked) — the operator MUST
+        // reinstall a matching build before starting, or roll back, to avoid a crash-loop.
+        const note = palPre.installed
+          ? `${baseNote} NOTE: PalSchema was set aside (in the pre-swap backup) — it is version-locked to UE4SS, so reinstall a PalSchema matching THIS build before starting, or the server will crash-loop (roll back if unsure).`
+          : baseNote
         return NextResponse.json({
           status: await readUe4ssStatus(),
           backup: result.backup,
@@ -138,6 +161,7 @@ async function _POST(request: NextRequest) {
         const { packages } = await swapToWorkshop()
         // Cue a restart in the UI; the underlying UE4SS is the experimental-palworld build.
         await recordStagedUe4ss('experimental-palworld', 'Workshop layout')
+        await markUe4ssUpdateInstalled().catch(() => {})
         return NextResponse.json({
           status: await readUe4ssStatus(),
           note: `Migrated to the official Workshop layout (${packages.join(' + ')}) — restart the server to load it. The previous proxy install was backed up.`,
@@ -163,6 +187,7 @@ async function _POST(request: NextRequest) {
     const result = await installUe4ssZip(buffer)
     // Operator-supplied build — unknown which release, so mark it 'unknown'.
     await recordStagedUe4ss('unknown', 'uploaded build')
+    await markUe4ssUpdateInstalled().catch(() => {})
     return NextResponse.json({
       status: await readUe4ssStatus(),
       backup: result.backup,

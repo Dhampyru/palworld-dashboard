@@ -43,7 +43,9 @@ export type PalSchemaUpdate = {
 }
 export type Ue4ssUpdate = {
   installed: { version: string | null; sha: string | null; source: string | null }
-  latest: { tag: string | null; publishedAt: string | null; url: string | null }
+  // `basedOn` = the Palworld engine version the build targets, best-effort scraped from the release
+  // notes ("engine edits in 0.4.1.5"); null when the notes don't state one.
+  latest: { tag: string | null; publishedAt: string | null; url: string | null; basedOn: string | null }
   // Reliable Workshop-time comparison (experimental-palworld only): is a newer build published?
   workshop: {
     itemId: string
@@ -67,6 +69,14 @@ function cmpSemver(a: string, b: string): number {
     if (x !== y) return x < y ? -1 : 1
   }
   return 0
+}
+
+// Best-effort: pull the Palworld engine version a UE4SS build targets out of its release notes,
+// e.g. "engine edits in 0.4.1.5" → "0.4.1.5". Okaetsu-specific phrasing; null when not found.
+function parseBasedOn(body: string | null | undefined): string | null {
+  if (!body) return null
+  const m = /engine edits in\s+v?(\d+(?:\.\d+)+)/i.exec(body)
+  return m ? m[1]! : null
 }
 
 async function ghJson(url: string): Promise<Record<string, unknown> | null> {
@@ -132,6 +142,7 @@ async function checkUe4ss(): Promise<Ue4ssUpdate> {
       tag: (rel?.tag_name as string) ?? (rel?.name as string) ?? null,
       publishedAt: (rel?.published_at as string) ?? null,
       url: (rel?.html_url as string) ?? null,
+      basedOn: parseBasedOn(rel?.body as string | undefined),
     },
     workshop,
     updateAvailable: workshop ? workshop.updateAvailable : null,
@@ -154,11 +165,28 @@ export async function markUe4ssUpdateInstalled(): Promise<{ baselineAt: number |
   return { baselineAt: latestAt }
 }
 
+// After a UE4SS ROLLBACK to an older build, force the update check to report that a newer build
+// exists (baseline 0 = "older than any Workshop update") so the card stops falsely reading "up to
+// date" while on the rolled-back build. Cleared by the next successful update (which re-baselines).
+export async function markUe4ssRolledBack(): Promise<void> {
+  await writeUe4ssBaseline(0)
+  cache = null
+}
+
 let cache: { at: number; data: FrameworkUpdates } | null = null
 
 export async function checkFrameworkUpdates(force = false): Promise<FrameworkUpdates> {
   if (!force && cache && Date.now() - cache.at < TTL_MS) return cache.data
   const [ue4ss, palschema] = await Promise.all([checkUe4ss(), checkPalSchema()])
+  // Lockstep guard: UE4SS + PalSchema are version-locked. If a newer UE4SS build exists AND
+  // PalSchema is installed, warn — a UE4SS swap sets PalSchema aside (it's an ABI-locked C++ mod)
+  // and needs a MATCHING PalSchema for the new build, or the server crash-loops. Don't update alone.
+  if (ue4ss.workshop?.updateAvailable && palschema.installedFlag) {
+    ue4ss.note =
+      'A newer UE4SS build exists — but PalSchema is installed and version-locked to UE4SS. Updating ' +
+      'UE4SS alone sets PalSchema aside (ABI-locked) and can crash-loop until a MATCHING PalSchema is ' +
+      'installed. Only update when a compatible PalSchema exists, and update the pair together.'
+  }
   const data: FrameworkUpdates = { ue4ss, palschema, checkedAt: new Date().toISOString() }
   cache = { at: Date.now(), data }
   return data

@@ -19,7 +19,7 @@ type Data = {
   updates: {
     ue4ss: {
       installed: { version: string | null; sha: string | null; source: string | null }
-      latest: { tag: string | null; publishedAt: string | null; url: string | null }
+      latest: { tag: string | null; publishedAt: string | null; url: string | null; basedOn: string | null }
       workshop: {
         itemId: string
         baselineAt: number | null
@@ -200,8 +200,21 @@ export function FrameworkUpdatesCard() {
               )}
             </div>
             <div className="text-xs text-muted-foreground">
-              installed <span className="font-mono text-foreground">{u.ue4ss.installed.version ?? '—'}</span>
-              {u.ue4ss.installed.sha ? <span className="font-mono"> ({u.ue4ss.installed.sha})</span> : ''}
+              {/* Lead with the branch/line + commit — the meaningful identity. The engine version
+                  (v3.0.1 Beta #0) is identical across builds, so it's a trailing detail. */}
+              installed{' '}
+              <span className="font-mono text-foreground">
+                {u.ue4ss.installed.source && u.ue4ss.installed.source !== 'unknown'
+                  ? u.ue4ss.installed.source
+                  : (u.ue4ss.installed.version ?? '—')}
+              </span>
+              {u.ue4ss.installed.sha ? <span className="font-mono text-foreground"> · {u.ue4ss.installed.sha}</span> : ''}
+              {u.ue4ss.installed.source && u.ue4ss.installed.source !== 'unknown' && u.ue4ss.installed.version ? (
+                <span> (UE4SS {u.ue4ss.installed.version})</span>
+              ) : (
+                ''
+              )}
+              {u.ue4ss.latest.basedOn ? <span> · based on Palworld {u.ue4ss.latest.basedOn}</span> : ''}
               {' · '}latest{' '}
               {u.ue4ss.latest.url ? (
                 <a href={u.ue4ss.latest.url} target="_blank" rel="noreferrer" className="font-mono text-foreground underline decoration-dotted">
@@ -221,10 +234,15 @@ export function FrameworkUpdatesCard() {
                 variant="outline"
                 onClick={() => post('/api/game-mods/ue4ss/install', { action: 'download', source: ue4ssSource(u.ue4ss.installed.source) }, 'ue-update')}
                 disabled={!!busy}
-                className="h-7 gap-1.5 px-2.5"
+                title="Downloads + installs the latest build for the installed line, backs up the current one, and clears the update flag. The server must be stopped first."
+                className={
+                  u.ue4ss.workshop?.updateAvailable
+                    ? 'h-7 gap-1.5 px-2.5 border-amber-500/50 bg-amber-500/15 text-amber-700 hover:bg-amber-500/25 dark:text-amber-300'
+                    : 'h-7 gap-1.5 px-2.5'
+                }
               >
                 {busy === 'ue-update' ? <Spinner className="size-3.5" /> : <ArrowUpCircleIcon className="size-3.5" />}
-                Reinstall latest (backup taken)
+                {u.ue4ss.workshop?.updateAvailable ? 'Update to latest (backup taken)' : 'Reinstall latest (backup taken)'}
               </Button>
               {(data?.ue4ssBackups.length ?? 0) > 0 && (
                 <div className="flex items-center gap-1.5">

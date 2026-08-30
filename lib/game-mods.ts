@@ -206,6 +206,7 @@ export async function resolvePakModsDir(r?: ModRegime): Promise<string> {
 const UE4SS_KNOWN_SHAS: Record<string, Ue4ssSource> = {
   c2ac246: 'official', // RE-UE4SS v3.0.1 stable (what shipped here)
   c838a8a: 'experimental-palworld', // Okaetsu build PalSchema 0.6.1 pairs with
+  ba2efd5: 'experimental-palworld', // Okaetsu experimental-palworld (fork ba2efd5, game 0.4.1.5 engine edits)
 }
 
 export type Ue4ssSource = 'official' | 'experimental-palworld' | 'beta' | 'unknown'
@@ -395,7 +396,12 @@ export async function readUe4ssStatus(): Promise<Ue4ssStatus> {
     )
     return hit ? hit[1] : 'unknown'
   }
-  const source = classify(sha)
+  // The experimental-palworld tag is ROLLING — its SHA changes every release, so a freshly-updated
+  // build will have an unknown SHA. When we ourselves recorded which line was installed (the staged
+  // marker), trust that over 'unknown' so the update check keeps tracking the line after an update.
+  const classifiedSource = classify(sha)
+  const stagedRecord = await readStagedUe4ss()
+  const source = classifiedSource === 'unknown' && stagedRecord?.source ? stagedRecord.source : classifiedSource
 
   // loaded-truth: a banner alone is not proof UE4SS is running NOW — it may be
   // from a previous boot (a silent injection failure leaves the old banner). So
@@ -411,7 +417,7 @@ export async function readUe4ssStatus(): Promise<Ue4ssStatus> {
 
   // Staged build (what a swap wrote). Falls back to the loaded build for installs
   // that predate the marker, so the UI is never blank.
-  const staged = await readStagedUe4ss()
+  const staged = stagedRecord
   const stagedSource = staged?.source ?? source
   const stagedVersion = staged?.version ?? version
   const pendingRestart =
