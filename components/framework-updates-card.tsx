@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Spinner } from '@/components/ui/spinner'
 import { RefreshCwIcon, ArrowUpCircleIcon, RotateCcwIcon, ExternalLinkIcon, PackageIcon } from 'lucide-react'
 
-type Backup = { file: string; sizeBytes: number; modifiedAt: string | null }
+type Backup = { file: string; sizeBytes: number; modifiedAt: string | null; sha?: string | null; version?: string | null }
 type Data = {
   updates: {
     ue4ss: {
@@ -46,7 +46,7 @@ type Data = {
 const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString() : '—')
 
 export function FrameworkUpdatesCard() {
-  const { config, refreshModUpdates } = useServer()
+  const { config, connectionStatus, refreshModUpdates } = useServer()
   const [data, setData] = useState<Data | null>(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
@@ -76,6 +76,12 @@ export function FrameworkUpdatesCard() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // Re-check (fresh, bypassing the server-side TTL) when the server reconnects after a restart —
+  // e.g. a UE4SS swap loads on the next boot — so the framework details aren't stale until refresh.
+  useEffect(() => {
+    if (connectionStatus === 'connected') void load(true)
+  }, [connectionStatus, load])
 
   const post = useCallback(
     async (url: string, body: unknown, label: string) => {
@@ -253,9 +259,13 @@ export function FrameworkUpdatesCard() {
                     aria-label="UE4SS backup to restore"
                   >
                     <option value="">Rollback to…</option>
-                    {data!.ue4ssBackups.map((b) => (
-                      <option key={b.file} value={b.file}>{b.file.replace(/^ue4ss-/, '').replace(/\.tar\.gz$/, '')}</option>
-                    ))}
+                    {data!.ue4ssBackups.map((b) => {
+                      const when = b.modifiedAt ? new Date(b.modifiedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
+                      const build = b.sha ? `#${b.sha}` : 'build unknown'
+                      return (
+                        <option key={b.file} value={b.file}>{build}{when ? ` · ${when}` : ''}</option>
+                      )
+                    })}
                   </select>
                   <Button
                     size="sm"

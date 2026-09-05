@@ -482,7 +482,49 @@ function ue4ssStamp(): string {
   return new Date().toISOString().replace(/[:.]/g, '-').replace('Z', '')
 }
 
-export type Ue4ssBackup = { file: string; sizeBytes: number; modifiedAt: string | null }
+// sha/version identify WHICH build a restore point is — the picker shows them so
+// the operator isn't rolling back to an opaque timestamp. (The UE4SS version
+// string is constant across builds, so the SHA is the real identifier.)
+export type Ue4ssBackup = {
+  file: string
+  sizeBytes: number
+  modifiedAt: string | null
+  sha: string | null
+  version: string | null
+}
+
+// A backup's build identity is cached in a sidecar next to the tarball. It ends
+// in .json (not .tar.gz) so it never shows up as a backup itself.
+const backupMetaPath = (file: string) => join(ue4ssBackupDir(), `${file}.sha.json`)
+
+// Pull the build banner (version + Git SHA) out of a UE4SS.log body.
+function parseUe4ssBanner(log: string): { version: string | null; sha: string | null } {
+  const banners = [...log.matchAll(/UE4SS - (v[\d.]+[^-\n]*?) - Git SHA #(\w+)/g)]
+  if (!banners.length) return { version: null, sha: null }
+  const last = banners[banners.length - 1]
+  return { version: last[1].trim(), sha: last[2] }
+}
+
+// Derive a backup's build from the UE4SS.log INSIDE the tarball (for older
+// backups made before we recorded a sidecar). Modern layout ships the log at
+// ue4ss/UE4SS.log, flat at UE4SS.log — match either.
+async function deriveBackupBuild(file: string): Promise<{ sha: string | null; version: string | null }> {
+  try {
+    const full = join(ue4ssBackupDir(), file)
+    const { stdout: listing } = await execFileP('tar', ['-tzf', full])
+    const member = listing
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => /(^|\/)UE4SS\.log$/.test(l))
+    if (!member) return { sha: null, version: null }
+    const { stdout: log } = await execFileP('tar', ['-xzOf', full, member], {
+      maxBuffer: 256 * 1024 * 1024,
+    })
+    return parseUe4ssBanner(log)
+  } catch {
+    return { sha: null, version: null }
+  }
+}
 
 export async function listUe4ssBackups(): Promise<Ue4ssBackup[]> {
   try {
@@ -491,7 +533,25 @@ export async function listUe4ssBackups(): Promise<Ue4ssBackup[]> {
     for (const name of names) {
       if (!/^ue4ss-.*\.tar\.gz$/.test(name)) continue
       const s = await stat(join(ue4ssBackupDir(), name))
-      out.push({ file: name, sizeBytes: s.size, modifiedAt: s.mtime.toISOString() })
+      let sha: string | null = null
+      let version: string | null = null
+      try {
+        const meta = JSON.parse(await readFile(backupMetaPath(name), 'utf8')) as {
+          sha?: string | null
+          version?: string | null
+        }
+        sha = meta.sha ?? null
+        version = meta.version ?? null
+      } catch {
+        // No sidecar (older backup) — derive from the tarball once, then cache it
+        // so subsequent lists are cheap. Best-effort: a failed cache write just
+        // re-derives next time.
+        const derived = await deriveBackupBuild(name)
+        sha = derived.sha
+        version = derived.version
+        await writeFile(backupMetaPath(name), JSON.stringify(derived), 'utf8').catch(() => {})
+      }
+      out.push({ file: name, sizeBytes: s.size, modifiedAt: s.mtime.toISOString(), sha, version })
     }
     return out.sort((a, b) => (b.modifiedAt ?? '').localeCompare(a.modifiedAt ?? ''))
   } catch {
@@ -571,11 +631,45 @@ export async function backupUe4ss(): Promise<string> {
   }
   if (!items.length) throw new Error('Nothing to back up (no ue4ss/ or dwmapi.dll present)')
   await execFileP('tar', ['-czf', join(ue4ssBackupDir(), file), '-C', win64Dir(), ...items])
+  // Record which build this restore point is, so the rollback picker can name it
+  // (the live status we just read IS the build being tarred). Best-effort.
+  await writeFile(
+    backupMetaPath(file),
+    JSON.stringify({ sha: status.sha, version: status.version }),
+    'utf8',
+  ).catch(() => {})
   return file
 }
 
 // Validate + extract a UE4SS build zip into Win64/. Backs up first. Returns the
 // backup name so the caller can offer a rollback.
+// PATCH (not upstream): keep the UE4SS loader files writable by the dashboard
+// WITHOUT making them world-writable. The dashboard runs as uid 2001 while the
+// game container's entrypoint chowns the whole game tree to steam:steam on EVERY
+// boot (chown preserves the mode but resets owner AND group to the game's gid).
+// So the durable, least-privilege hook is: the dashboard is added to the game's
+// group (compose `group_add`), and we set GROUP-write on what we write. The
+// group-write bit survives the game's chown (which keeps the group = the game
+// gid, of which the dashboard is now a member), so the NEXT install/rollback can
+// write — no world bits, no host/entrypoint change, no game rebuild. Without
+// this the next UE4SS update fails with EACCES (the "permission denied updating
+// UE4SS" bug). Best-effort — a chmod failure (read-only / FUSE FS, or a layout
+// that lacks a given path) must never fail the install.
+async function keepUe4ssDashboardWritable(): Promise<void> {
+  const targets = [
+    ue4ssDir(), // modern tree
+    join(win64Dir(), 'Mods'), // flat tree
+    dwmapiDll(),
+    DWMAPI_DISABLED,
+    join(win64Dir(), 'ue4ss.dll'),
+    join(win64Dir(), 'UE4SS-settings.ini'),
+  ]
+  // -R handles the ue4ss/ + Mods/ trees; harmless on the single-file targets.
+  // g+rwX adds execute only to dirs / already-executable files, so DLLs stay
+  // runnable and data files don't gain a spurious exec bit.
+  for (const p of targets) await execFileP('chmod', ['-R', 'g+rwX', p]).catch(() => {})
+}
+
 export async function installUe4ssZip(buffer: Buffer): Promise<{ backup: string; preservedSettings: boolean }> {
   let zip: AdmZip
   try {
@@ -740,6 +834,7 @@ export async function installUe4ssZip(buffer: Buffer): Promise<{ backup: string;
     await writeFile(dest, data)
   }
 
+  await keepUe4ssDashboardWritable()
   return { backup, preservedSettings: savedSettings != null }
 }
 
@@ -774,6 +869,7 @@ export async function rollbackUe4ss(backupFile: string): Promise<void> {
   await stat(full)
   await wipeUe4ssLayouts()
   await execFileP('tar', ['-xzf', full, '-C', win64Dir()])
+  await keepUe4ssDashboardWritable()
 }
 
 // PalDefender is NOT a UE4SS mod: it's the standalone d3d9 injection. Wine loads

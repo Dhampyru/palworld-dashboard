@@ -13,6 +13,15 @@ services:
         NEXT_PUBLIC_GAME_SERVER_IP: ${NEXT_PUBLIC_GAME_SERVER_IP:?set NEXT_PUBLIC_GAME_SERVER_IP in .env to your server's real public IP}
     container_name: palworld-server-dashboard
     restart: unless-stopped
+    # PATCH (not upstream): join the game's group so the dashboard can manage the
+    # UE4SS loader (install / swap / rollback) via GROUP-write on the game's
+    # ue4ss tree, instead of making those files world-writable. The game
+    # entrypoint chowns the tree to steam:steam on every boot, so its group stays
+    # the game gid; the group-write bit the dashboard sets on what it writes then
+    # survives that chown. Default 1000 = the game image's `steam` user; override
+    # PALWORLD_GAME_GID in .env if the game container runs as a different gid.
+    group_add:
+      - "${PALWORLD_GAME_GID:-1000}"
     ports:
       - "${PALWORLD_SERVER_DASHBOARD_PORT:-3000}:3000"
     environment:

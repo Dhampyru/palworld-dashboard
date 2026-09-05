@@ -85,6 +85,10 @@ async function _POST(request: NextRequest) {
           return NextResponse.json({ error: 'Stop the server before rolling back UE4SS.' }, { status: 409 })
         }
         if (!body.backupFile) return NextResponse.json({ error: 'backupFile required' }, { status: 400 })
+        // Capture the build we're leaving so the note can say what changed. The
+        // SHA is the real identifier — the UE4SS version string is constant across
+        // builds, so "rolled back to v3.0.1 Beta" alone tells the operator nothing.
+        const preSha = (await readUe4ssStatus()).sha
         await rollbackUe4ss(body.backupFile)
         // The restored build isn't classified, so forget the staged marker and
         // let status fall back to the live banner after the next boot.
@@ -92,9 +96,14 @@ async function _POST(request: NextRequest) {
         // Rolling back means we're now on an OLDER build than the latest — re-flag the update check
         // so the card reflects that (instead of a stale "up to date" from a prior update).
         await markUe4ssRolledBack().catch(() => {})
+        const rbStatus = await readUe4ssStatus()
+        const restored = rbStatus.sha
+          ? `UE4SS #${rbStatus.sha}${rbStatus.version ? ` (${rbStatus.version})` : ''}`
+          : 'the backed-up UE4SS build'
+        const fromClause = preSha && preSha !== rbStatus.sha ? ` — was on #${preSha}` : ''
         return NextResponse.json({
-          status: await readUe4ssStatus(),
-          note: 'Rolled back — restart the server to load it.',
+          status: rbStatus,
+          note: `Rolled back to ${restored}${fromClause}. Restart the server to load it.`,
         })
       }
 

@@ -41,11 +41,11 @@ const SOURCE_LABEL: Record<Ue4ssSource, string> = {
 }
 
 export function Ue4ssLoaderCard({ onChanged }: { onChanged?: () => void }) {
-  const { config } = useServer()
+  const { config, connectionStatus } = useServer()
   const [ue4ss, setUe4ss] = useState<Ue4ssStatus | null>(null)
   const [toggling, setToggling] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
-  const [backups, setBackups] = useState<{ file: string; sizeBytes: number; modifiedAt: string | null }[]>([])
+  const [backups, setBackups] = useState<{ file: string; sizeBytes: number; modifiedAt: string | null; sha: string | null; version: string | null }[]>([])
   const [rollbackTarget, setRollbackTarget] = useState('')
   const [offerPalSchema, setOfferPalSchema] = useState(false)
   const swapFileRef = useRef<HTMLInputElement>(null)
@@ -76,6 +76,13 @@ export function Ue4ssLoaderCard({ onChanged }: { onChanged?: () => void }) {
     void loadUe4ss()
     void loadBackups()
   }, [loadUe4ss, loadBackups])
+
+  // Re-fetch when the server (re)connects — e.g. after a restart that loads a swapped/updated UE4SS
+  // build. Without this the card kept showing the pre-restart (pending) state until a manual page
+  // refresh, because it otherwise only polls on mount and after its own actions.
+  useEffect(() => {
+    if (connectionStatus === 'connected') void loadUe4ss()
+  }, [connectionStatus, loadUe4ss])
 
   const toggle = useCallback(
     async (enabled: boolean) => {
@@ -238,7 +245,14 @@ export function Ue4ssLoaderCard({ onChanged }: { onChanged?: () => void }) {
                 {ue4ss.stagedSource ? SOURCE_LABEL[ue4ss.stagedSource] : 'unknown'}
               </Badge>
             )}
-            {ue4ss.stagedVersion && <span className="font-mono text-muted-foreground">{ue4ss.stagedVersion}</span>}
+            {/* Lead with the Git SHA — that's the part that actually changes between builds. UE4SS
+                reports the same "v3.0.1 Beta #0" string for every experimental-palworld build, so it
+                looks frozen; the SHA is the real identity. Staged build's SHA is unknown until it loads. */}
+            {ue4ss.stagedVersion && (
+              <span className="font-mono text-muted-foreground">
+                {ue4ss.sha && !ue4ss.pendingRestart ? `#${ue4ss.sha} · ` : ''}UE4SS {ue4ss.stagedVersion}
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
             <span>Regime:</span>
@@ -274,7 +288,7 @@ export function Ue4ssLoaderCard({ onChanged }: { onChanged?: () => void }) {
             </Button>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            All three report the same version (<span className="font-mono">v3.0.1 Beta #0</span>) — they differ by Git SHA / branch. All run classic UE4SS Lua/Blueprint mods; only <span className="text-amber-600 dark:text-amber-400">UE4SS (PalSchema)</span> supports PalSchema.
+            All three report the same UE4SS version string (<span className="font-mono">{ue4ss.version ?? 'v3.0.1 Beta #0'}</span>) — it does <b>not</b> change between builds, so the <span className="font-mono">#SHA</span> / branch above is the real identity of what&apos;s installed. All run classic UE4SS Lua/Blueprint mods; only <span className="text-amber-600 dark:text-amber-400">UE4SS (PalSchema)</span> supports PalSchema.
           </p>
 
           {offerPalSchema && (
@@ -299,10 +313,14 @@ export function Ue4ssLoaderCard({ onChanged }: { onChanged?: () => void }) {
           {backups.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="text-muted-foreground">Rollback to:</span>
-              <select value={rollbackTarget || backups[0].file} onChange={(e) => setRollbackTarget(e.target.value)} className="max-w-[16rem] truncate rounded-md border bg-background px-2 py-1 text-xs">
-                {backups.map((b) => (
-                  <option key={b.file} value={b.file}>{b.file}</option>
-                ))}
+              <select value={rollbackTarget || backups[0].file} onChange={(e) => setRollbackTarget(e.target.value)} className="max-w-[20rem] truncate rounded-md border bg-background px-2 py-1 text-xs">
+                {backups.map((b) => {
+                  const when = b.modifiedAt ? new Date(b.modifiedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
+                  const build = b.sha ? `#${b.sha}` : 'build unknown'
+                  return (
+                    <option key={b.file} value={b.file}>{build}{when ? ` · ${when}` : ''}</option>
+                  )
+                })}
               </select>
               <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" disabled={!!busy} onClick={() => doRollback(rollbackTarget || backups[0].file)}>
                 {busy === 'rb' && <Spinner className="size-3.5" />} Rollback
